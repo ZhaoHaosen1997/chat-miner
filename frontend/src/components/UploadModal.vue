@@ -1,14 +1,16 @@
 <script setup>
 import { ref } from 'vue'
-import { uploadGroup } from '../api/index.js'
 import { Upload, FileJson, X, CheckCircle, Loader2 } from 'lucide-vue-next'
 
+const props = defineProps({ group: Object })
 const emit = defineEmits(['close', 'uploaded'])
 
 const file = ref(null)
 const uploading = ref(false)
 const error = ref('')
 const preview = ref(null)
+
+const isGroupImport = !!props.group
 
 function onFileChange(e) {
   const f = e.target.files?.[0]
@@ -27,14 +29,22 @@ async function handleUpload() {
   uploading.value = true
   error.value = ''
   try {
-    const data = await uploadGroup(file.value)
-    emit('uploaded', {
-      id: data.group_id,
-      name: data.group_name,
-      display_name: data.group_name,
-      message_count: data.message_count,
-      sender_count: data.sender_count,
-    })
+    const form = new FormData()
+    form.append('file', file.value)
+
+    let url, method
+    if (isGroupImport) {
+      url = `/api/groups/${props.group.id}/import`
+      method = 'POST'
+    } else {
+      url = '/api/groups/upload'
+      method = 'POST'
+    }
+
+    const res = await fetch(url, { method, body: form })
+    const data = await res.json()
+    if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '上传失败')
+    emit('uploaded', data.data)
   } catch (e) {
     error.value = e.message || '上传失败'
   } finally {
@@ -50,7 +60,8 @@ async function handleUpload() {
       <!-- Header -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
         <h3 class="text-lg font-semibold text-slate-800 flex items-center gap-2">
-          <Upload class="w-5 h-5 text-indigo-500" /> 导入群聊数据
+          <Upload class="w-5 h-5 text-indigo-500" />
+          {{ isGroupImport ? `导入数据到「${props.group.display_name || props.group.name}」` : '导入群聊数据' }}
         </h3>
         <button @click="emit('close')" class="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
           <X class="w-5 h-5" />
@@ -59,6 +70,11 @@ async function handleUpload() {
 
       <!-- Body -->
       <div class="px-6 py-5">
+        <!-- 提示文字 -->
+        <p v-if="isGroupImport" class="text-xs text-slate-400 mb-3">
+          💡 追加导入会自动去重，已有消息不会重复。群名如果变了也不影响。
+        </p>
+
         <!-- 文件拖拽区 -->
         <label
           :class="[
@@ -106,7 +122,7 @@ async function handleUpload() {
           ]"
         >
           <Loader2 v-if="uploading" class="w-4 h-4 animate-spin" />
-          {{ uploading ? '解析中...' : '确认导入' }}
+          {{ uploading ? '导入中...' : isGroupImport ? '追加导入' : '确认导入' }}
         </button>
       </div>
     </div>

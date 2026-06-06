@@ -1,5 +1,5 @@
 """
-消息解析模块：JSON 文件解析 + 按天分块
+消息解析模块：JSON 文件解析 + 按天分块 + 数据合并
 处理微信聊天记录导出的 JSON 格式
 """
 import json
@@ -144,6 +144,63 @@ class ParsedChat:
 def load_and_parse(file_path: Path) -> ParsedChat:
     """便捷函数：加载并解析文件"""
     return ParsedChat(file_path).load()
+
+
+def merge_chat_data(existing_messages: list[dict],
+                     new_messages: list[dict]) -> dict:
+    """合并新导入的消息到已有数据中
+
+    按 platformMessageId 去重，只保留新增的消息。
+    如果消息没有 platformMessageId（老格式），则按 (createTime, senderID, content) 去重。
+
+    Args:
+        existing_messages: 已有的消息列表
+        new_messages: 新导入的消息列表
+
+    Returns:
+        {
+            "added": [新消息列表],
+            "skipped": 跳过的重复消息数,
+            "total_new": 新 JSON 中的消息总数
+        }
+    """
+    # 构建已有消息的去重索引
+    seen_ids = set()
+    seen_fingerprints = set()
+    for m in existing_messages:
+        pid = m.get("platformMessageId", "")
+        if pid:
+            seen_ids.add(pid)
+        else:
+            # 老格式：用 (createTime, senderID, content[:50]) 作为指纹
+            fp = (m.get("createTime", 0), m.get("senderID", 0),
+                  (m.get("content") or "")[:50])
+            seen_fingerprints.add(fp)
+
+    added = []
+    skipped = 0
+    for m in new_messages:
+        pid = m.get("platformMessageId", "")
+        if pid and pid in seen_ids:
+            skipped += 1
+            continue
+        if not pid:
+            fp = (m.get("createTime", 0), m.get("senderID", 0),
+                  (m.get("content") or "")[:50])
+            if fp in seen_fingerprints:
+                skipped += 1
+                continue
+            seen_fingerprints.add(fp)
+        else:
+            seen_ids.add(pid)
+        added.append(m)
+
+    logger.info(f"合并结果: {len(new_messages)} 条新消息中, 新增 {len(added)} 条, 跳过 {skipped} 条重复")
+    return {
+        "added": added,
+        "skipped": skipped,
+        "total_new": len(new_messages),
+    }
 
 
 def format_messages_for_prompt(messages: list[dict],

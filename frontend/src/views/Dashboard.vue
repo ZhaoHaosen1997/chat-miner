@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDate, getPortraits,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2 } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload } from 'lucide-vue-next'
+import UploadModal from '../components/UploadModal.vue'
 
 const router = useRouter()
 const currentGroup = inject('currentGroup')
@@ -16,6 +17,7 @@ const recentReports = ref([])
 const loading = ref(false)
 const analyzing = ref(false)
 const portraits = ref([])
+const showUpload = ref(false)
 
 async function loadAll() {
   if (!currentGroup.value) return
@@ -208,30 +210,40 @@ const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐�
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- 左列：日历 + 分析按钮 -->
         <div class="lg:col-span-2 space-y-6">
-          <!-- 分析按钮 -->
-          <div class="card p-4 flex items-center justify-between">
-            <div>
+          <!-- 操作按钮行 -->
+          <div class="card p-4 flex items-center justify-between gap-4">
+            <div class="flex-1 min-w-0">
               <div class="font-semibold text-slate-700">每日分析</div>
-              <div class="text-sm text-slate-400 mt-0.5">
+              <div class="text-sm text-slate-400 mt-0.5 truncate">
                 最新未分析：
                 <span class="font-medium text-slate-600">{{ latestUnanalyzed?.date || '全部已分析' }}</span>
                 <span v-if="latestUnanalyzed" class="ml-2">({{ latestUnanalyzed.text_messages }} 条文本)</span>
               </div>
             </div>
-            <button
-              @click="analyzeLatest"
-              :disabled="!latestUnanalyzed || analyzing"
-              :class="[
-                'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all',
-                latestUnanalyzed && !analyzing
-                  ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
-                  : 'bg-slate-100 text-slate-400',
-              ]"
-            >
-              <Loader2 v-if="analyzing" class="w-4 h-4 animate-spin" />
-              <Sparkles v-else class="w-4 h-4" />
-              {{ analyzing ? 'AI 分析中...' : '分析最新一天' }}
-            </button>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button
+                @click="showUpload = true"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-slate-200 hover:border-indigo-200"
+                title="追加导入数据"
+              >
+                <Upload class="w-4 h-4" />
+                <span class="hidden sm:inline">导入数据</span>
+              </button>
+              <button
+                @click="analyzeLatest"
+                :disabled="!latestUnanalyzed || analyzing"
+                :class="[
+                  'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all',
+                  latestUnanalyzed && !analyzing
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
+                    : 'bg-slate-100 text-slate-400',
+                ]"
+              >
+                <Loader2 v-if="analyzing" class="w-4 h-4 animate-spin" />
+                <Sparkles v-else class="w-4 h-4" />
+                {{ analyzing ? 'AI 分析中...' : '分析最新一天' }}
+              </button>
+            </div>
           </div>
 
           <!-- 月视图日历 -->
@@ -365,5 +377,13 @@ const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐�
         </div>
       </div>
     </template>
+
+    <!-- 导入数据弹窗（群内导入） -->
+    <UploadModal
+      v-if="showUpload"
+      :group="currentGroup"
+      @close="showUpload = false"
+      @uploaded="showUpload = false; loadAll(); triggerRefresh?.()"
+    />
   </div>
 </template>
