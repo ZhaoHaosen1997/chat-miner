@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, computed } from 'vue'
+import { ref, inject, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
@@ -13,6 +13,17 @@ const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
 const activeTaskId = inject('activeTaskId')
 
+// 批量任务运行时定时刷新（逐个标绿）
+let _refreshTimer = null
+watch(activeTaskId, (newVal) => {
+  if (newVal) {
+    _refreshTimer = setInterval(() => loadAll(true), 3000)  // 静默刷新，不显示loading
+  } else {
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
+  }
+})
+onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
+
 const stats = ref(null)
 const dates = ref([])
 const recentReports = ref([])
@@ -23,9 +34,9 @@ const taskHistory = ref([])
 const showUpload = ref(false)
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
-async function loadAll() {
+async function loadAll(silent = false) {
   if (!currentGroup.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   const gid = currentGroup.value.id
   try {
     const [s, d, r, p, h] = await Promise.all([

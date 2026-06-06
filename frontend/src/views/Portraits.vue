@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject, watch } from 'vue'
+import { ref, computed, inject, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers } from '../api/index.js'
 import { Loader2, Sparkles, RefreshCw, User, Zap, Clock } from 'lucide-vue-next'
@@ -15,9 +15,9 @@ const refreshing = ref(null)      // 单个刷新的 memberId
 const batchAnalyzing = ref(false) // 批量分析中
 const error = ref('')
 
-async function load() {
+async function load(silent = false) {
   if (!currentGroup.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   const gid = currentGroup.value.id
   try {
     const [p, m] = await Promise.all([getPortraits(gid), getMembers(gid)])
@@ -79,15 +79,21 @@ async function analyzeAll() {
   }
 }
 
-// 监听全局任务完成
+// 批量任务运行时定时刷新（逐个展示已完成的画像）
+let _refreshTimer = null
 watch(activeTaskId, (newVal, oldVal) => {
   if (oldVal && !newVal) {
     refreshing.value = null
     batchAnalyzing.value = false
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
     load()
     triggerRefresh?.()
   }
+  if (newVal && !oldVal) {
+    _refreshTimer = setInterval(() => load(true), 3000)  // 静默刷新，不显示loading
+  }
 })
+onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
 
 function openDetail(portrait) {
   router.push(`/portrait/${portrait.member_id}`)
