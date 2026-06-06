@@ -590,6 +590,126 @@ async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
     task.finish(success=True)
 
 
+@router.get("/portrait/{member_id}/archaeology")
+async def api_member_archaeology(group_id: int, member_id: int):
+    """群友考古：第一条发言、最长发言、历史今日"""
+    chat = get_chat_cache(group_id)
+    member = get_member(group_id, member_id)
+    if not chat or not member:
+        raise HTTPException(404, detail="数据未找到")
+
+    wxid = member["wxid"]
+    name = member["display_name"] or member["nickname"]
+
+    # 筛选该成员的文本消息
+    msgs = [m for m in chat.messages
+            if m.get("wxid") == wxid
+            and m.get("type") == "文本消息"
+            and (m.get("content") or "").strip()]
+
+    if not msgs:
+        return {"code": 200, "message": "暂无数据", "data": None}
+
+    msgs.sort(key=lambda m: m.get("createTime", 0))
+
+    first = msgs[0]
+    longest = max(msgs, key=lambda m: len((m.get("content") or "").strip()))
+    last = msgs[-1]
+
+    # 历史上的今天：找去年同月同日的消息
+    today = datetime.now().strftime("%m-%d")
+    on_this_day = []
+    for m in msgs:
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 10 and ft[5:] == today:
+            yr = ft[:4]
+            if yr != datetime.now().strftime("%Y"):
+                on_this_day.append(m)
+    on_this_day = on_this_day[-3:]  # 最近3条
+
+    # 按年统计发言量
+    year_counts = {}
+    for m in msgs:
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 4:
+            yr = ft[:4]
+            year_counts[yr] = year_counts.get(yr, 0) + 1
+
+    data = {
+        "name": name,
+        "total_msgs": len(msgs),
+        "first_msg": {
+            "date": first.get("formattedTime", "")[:10],
+            "content": (first.get("content") or "").strip()[:200],
+        },
+        "longest_msg": {
+            "date": longest.get("formattedTime", "")[:10],
+            "content": (longest.get("content") or "").strip()[:200],
+            "length": len((longest.get("content") or "").strip()),
+        },
+        "latest_msg": {
+            "date": last.get("formattedTime", "")[:10],
+            "content": (last.get("content") or "").strip()[:200],
+        },
+        "on_this_day": [{"date": m.get("formattedTime", "")[:10],
+                          "content": (m.get("content") or "").strip()[:200]}
+                         for m in on_this_day],
+        "yearly_counts": year_counts,
+        "date_range": [msgs[0].get("formattedTime", "")[:10],
+                       msgs[-1].get("formattedTime", "")[:10]],
+    }
+
+    return {"code": 200, "message": "获取成功", "data": data}
+
+
+@router.get("/relations")
+async def api_group_relations(group_id: int):
+    """获取群内成员互动关系图数据（所有配对）"""
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    members = get_members(group_id)
+    if len(members) < 2:
+        return {"code": 200, "message": "成员不足", "data": {"nodes": [], "links": []}}
+
+    from services.stats_engine import compute_social_relations
+
+    nodes = []
+    all_links = []
+
+    for m in members:
+        wxid = m["wxid"]
+        name = m["display_name"] or m["nickname"]
+        nodes.append({"wxid": wxid, "name": name, "msg_count": m["message_count"]})
+
+        relations = compute_social_relations(
+            chat.messages, wxid, chat.get_sender_name, chat.get_name_by_wxid
+        )
+        for r in relations:
+            if r.get("total_interactions", 0) > 0:
+                all_links.append({
+                    "source": wxid,
+                    "target": r["wxid"],
+                    "weight": r["total_interactions"],
+                })
+
+    # 去重：只保留 source < target 的链接（无向图）
+    seen = set()
+    links = []
+    for link in all_links:
+        key = tuple(sorted([link["source"], link["target"]]))
+        if key not in seen:
+            seen.add(key)
+            links.append(link)
+
+    # 只保留 Top 50 链接
+    links.sort(key=lambda x: x["weight"], reverse=True)
+    links = links[:50]
+
+    return {"code": 200, "message": "获取成功", "data": {"nodes": nodes, "links": links}}
+
+
 @router.post("/portraits/analyze-all")
 async def api_analyze_all_portraits(group_id: int):
     """一键分析全群画像"""

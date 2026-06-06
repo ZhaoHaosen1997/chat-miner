@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 不得删除、修改、清空 `data/` 下的任何文件，除非用户**明确说**"可以清数据""导入流程会重建""开发阶段数据可以舍弃"。
 - 部署更新时只替换代码文件，不动 `data/` 和 `.env`。
 - 测试新功能时用 `test-group` 或创建新群，不要动已有群的数据。
+- **本地开发端口**：8857（避免与 WSL 生产 8856 冲突）。启动命令：`python -m uvicorn main:app --host 0.0.0.0 --port 8857`
 
 ## Project overview
 

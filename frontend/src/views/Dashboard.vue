@@ -3,7 +3,7 @@ import { ref, inject, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
-  getTaskHistory,
+  getTaskHistory, getTrending,
 } from '../api/index.js'
 import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
@@ -31,6 +31,7 @@ const loading = ref(false)
 const analyzing = ref(false)
 const portraits = ref([])
 const taskHistory = ref([])
+const trending = ref(null)
 const showUpload = ref(false)
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
@@ -39,18 +40,20 @@ async function loadAll(silent = false) {
   if (!silent) loading.value = true
   const gid = currentGroup.value.id
   try {
-    const [s, d, r, p, h] = await Promise.all([
+    const [s, d, r, p, h, t] = await Promise.all([
       getGroupStats(gid),
       getDates(gid),
       getRecentReports(gid, 14),
       getPortraits(gid),
       getTaskHistory(gid, 8),
+      getTrending(gid, 7),
     ])
     stats.value = s
     dates.value = d
     recentReports.value = r
     portraits.value = p
     taskHistory.value = h
+    trending.value = t
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -425,6 +428,33 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
 
         <!-- 右列：统计 -->
         <div class="space-y-6">
+          <!-- 群聊热搜榜 -->
+          <div v-if="trending?.topics?.length" class="card p-4 bg-gradient-to-b from-red-50 to-white">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+              <span class="text-lg">🔥</span> 群聊热搜 <span class="text-xs text-slate-400 font-normal ml-auto">{{ trending.period }}</span>
+            </h3>
+            <div class="space-y-1">
+              <div
+                v-for="(t, i) in trending.topics.slice(0, 8)"
+                :key="i"
+                class="flex items-center gap-2 text-sm py-1.5 px-2 rounded-lg hover:bg-red-50/50 transition-colors"
+              >
+                <span :class="[
+                  'w-5 h-5 rounded text-[11px] font-bold flex items-center justify-center flex-shrink-0',
+                  i === 0 ? 'bg-red-500 text-white' :
+                  i === 1 ? 'bg-orange-400 text-white' :
+                  i === 2 ? 'bg-amber-400 text-white' :
+                  'bg-slate-200 text-slate-500',
+                ]">{{ i + 1 }}</span>
+                <span class="flex-1 text-slate-700 truncate">{{ t.text }}</span>
+                <span class="text-xs text-slate-400 flex-shrink-0">{{ t.heat }}℃</span>
+                <span v-if="t.trend === 'new'" class="text-[10px] bg-green-100 text-green-600 px-1 rounded">新</span>
+                <span v-else-if="t.trend === 'hot'" class="text-[10px] bg-red-100 text-red-500 px-1 rounded">沸</span>
+                <span v-else-if="t.trend === 'up'" class="text-[10px] bg-orange-100 text-orange-500 px-1 rounded">↑</span>
+              </div>
+            </div>
+          </div>
+
           <!-- 情绪分布 -->
           <div v-if="stats?.mood_distribution" class="card p-4">
             <h3 class="font-semibold text-slate-700 mb-3">情绪分布</h3>

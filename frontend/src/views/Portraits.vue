@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, inject, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers } from '../api/index.js'
-import { Loader2, Sparkles, RefreshCw, User, Zap, Clock } from 'lucide-vue-next'
+import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations } from '../api/index.js'
+import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2 } from 'lucide-vue-next'
 const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
@@ -12,6 +12,7 @@ const portraits = ref([])
 const members = ref([])
 const loading = ref(false)
 const refreshing = ref(null)      // 单个刷新的 memberId
+const viewMode = ref('cards')     // 'cards' | 'network'
 const batchAnalyzing = ref(false) // 批量分析中
 const error = ref('')
 
@@ -108,6 +109,38 @@ watch([portraits, members], ([p, m]) => {
   })
 })
 
+// ---- 关系网络图 ----
+const relationsData = ref(null)
+async function loadRelations() {
+  if (!currentGroup.value) return
+  try {
+    relationsData.value = await getRelations(currentGroup.value.id)
+  } catch (e) { console.error(e) }
+}
+watch(viewMode, (v) => { if (v === 'network') loadRelations() })
+
+// 基于圆心布局计算节点坐标
+const networkLayout = computed(() => {
+  const data = relationsData.value
+  if (!data?.nodes?.length) return { nodes: [], links: [], svgSize: 400 }
+  const nodes = data.nodes
+  const n = nodes.length
+  const cx = 220, cy = 220, r = 160
+  const positioned = nodes.map((nd, i) => {
+    const angle = (2 * Math.PI * i) / n - Math.PI / 2
+    return { ...nd, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), angle }
+  })
+  // 把 links 映射到坐标
+  const nodeMap = {}
+  positioned.forEach(nd => { nodeMap[nd.wxid] = nd })
+  const links = (data.links || []).map(l => ({
+    ...l,
+    x1: nodeMap[l.source]?.x || 0, y1: nodeMap[l.source]?.y || 0,
+    x2: nodeMap[l.target]?.x || 0, y2: nodeMap[l.target]?.y || 0,
+  })).filter(l => l.x1 && l.x2)
+  return { nodes: positioned, links, svgSize: 440 }
+})
+
 // 计算最后刷新距今几天
 function daysSince(dateStr) {
   if (!dateStr) return 999
@@ -135,6 +168,11 @@ const unanalyzedCount = computed(() =>
         <p class="text-sm text-slate-400 mt-1">基于 AI 分析的成员性格、风格和角色</p>
       </div>
       <div class="flex items-center gap-3">
+        <!-- 视图切换 -->
+        <div class="flex bg-slate-100 rounded-lg p-0.5">
+          <button @click="viewMode='cards'" :class="['px-2.5 py-1 text-xs rounded-md transition-colors', viewMode==='cards' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400']">卡片</button>
+          <button @click="viewMode='network'" :class="['px-2.5 py-1 text-xs rounded-md transition-colors flex items-center gap-1', viewMode==='network' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400']"><Share2 class="w-3 h-3" />关系</button>
+        </div>
         <div class="text-xs text-slate-400">
           {{ portraits.length }} / {{ members.length }} 人
         </div>
@@ -153,6 +191,25 @@ const unanalyzedCount = computed(() =>
     <!-- 加载 -->
     <div v-if="loading" class="flex items-center justify-center py-20">
       <Loader2 class="w-8 h-8 animate-spin text-indigo-400" />
+    </div>
+
+    <!-- 关系网络视图 -->
+    <div v-if="viewMode === 'network'" class="card p-4">
+      <div v-if="!relationsData?.nodes?.length" class="text-center py-10 text-sm text-slate-400">暂无关系数据</div>
+      <svg v-else :viewBox="'0 0 ' + networkLayout.svgSize + ' ' + networkLayout.svgSize" class="w-full max-w-lg mx-auto">
+        <!-- 连线 -->
+        <line
+          v-for="(l, i) in networkLayout.links" :key="'l'+i"
+          :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2"
+          :stroke-width="Math.max(1, Math.min(6, l.weight / 50))"
+          stroke="#c7d2fe" stroke-linecap="round" opacity="0.6"
+        />
+        <!-- 节点 -->
+        <g v-for="(nd, i) in networkLayout.nodes" :key="nd.wxid">
+          <circle :cx="nd.x" :cy="nd.y" r="20" fill="#e0e7ff" stroke="#818cf8" stroke-width="2" />
+          <text :x="nd.x" :y="nd.y + 4" text-anchor="middle" font-size="10" fill="#4338ca" font-weight="600">{{ nd.name.slice(0, 4) }}</text>
+        </g>
+      </svg>
     </div>
 
     <!-- 画像卡片网格 -->

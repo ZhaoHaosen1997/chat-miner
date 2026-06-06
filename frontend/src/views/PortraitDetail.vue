@@ -3,12 +3,13 @@ import { ref, inject, watch, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getPortrait, getPortraitStats, getPortraitHistory,
-  analyzePortrait,
+  analyzePortrait, getArchaeology,
 } from '../api/index.js'
 import {
   ArrowLeft, Loader2, Sparkles, RefreshCw, User,
   MessageSquare, Clock, Tag, TrendingUp,
   ChevronRight, Hash, Smile, BarChart3, Users2,
+  Search, MessageCircle,
 } from 'lucide-vue-next'
 
 const props = defineProps({ memberId: String })
@@ -20,6 +21,7 @@ const triggerRefresh = inject('triggerRefresh')
 const portrait = ref(null)
 const stats = ref(null)
 const history = ref(null)
+const archaeology = ref(null)
 const loading = ref(true)
 const error = ref('')
 const activeTab = ref('overview')  // overview | activity | language | social | history
@@ -31,6 +33,7 @@ const tabs = [
   { key: 'language', label: '语言风格', icon: Hash },
   { key: 'social', label: '社交关系', icon: Users2 },
   { key: 'history', label: '版本历史', icon: Clock },
+  { key: 'archaeology', label: '考古', icon: Search },
 ]
 
 async function load() {
@@ -38,14 +41,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [p, s, h] = await Promise.all([
+    const [p, s, h, a] = await Promise.all([
       getPortrait(currentGroup.value.id, props.memberId),
       getPortraitStats(currentGroup.value.id, props.memberId).catch(() => null),
       getPortraitHistory(currentGroup.value.id, props.memberId).catch(() => null),
+      getArchaeology(currentGroup.value.id, props.memberId).catch(() => null),
     ])
     portrait.value = p
     stats.value = s
     history.value = h
+    archaeology.value = a
   } catch (e) {
     error.value = e.message
   } finally {
@@ -529,6 +534,82 @@ const currentVersion = computed(() => {
           <Clock class="w-10 h-10 text-slate-300 mx-auto mb-2" />
           <p class="text-sm text-slate-400">暂无历史版本。刷新画像后旧版本会自动存档。</p>
         </div>
+      </div>
+
+      <!-- Tab: 考古 -->
+      <div v-if="activeTab === 'archaeology'" class="space-y-4">
+        <div v-if="!archaeology" class="card p-8 text-center">
+          <Loader2 class="w-8 h-8 animate-spin text-indigo-400 mx-auto mb-2" />
+          <p class="text-sm text-slate-400">加载中...</p>
+        </div>
+        <template v-else>
+          <!-- 数据概览 -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="card p-3 text-center">
+              <div class="text-2xl font-bold text-indigo-600">{{ archaeology.total_msgs }}</div>
+              <div class="text-xs text-slate-400">条消息</div>
+            </div>
+            <div class="card p-3 text-center">
+              <div class="text-lg font-bold text-emerald-600">{{ archaeology.date_range?.[0] || '-' }}</div>
+              <div class="text-xs text-slate-400">首次发言</div>
+            </div>
+            <div class="card p-3 text-center">
+              <div class="text-lg font-bold text-amber-600">{{ archaeology.date_range?.[1] || '-' }}</div>
+              <div class="text-xs text-slate-400">最近发言</div>
+            </div>
+          </div>
+
+          <!-- 第一条消息 -->
+          <div v-if="archaeology.first_msg" class="card p-4 bg-amber-50 border-amber-100">
+            <div class="flex items-center gap-1.5 mb-2">
+              <MessageCircle class="w-4 h-4 text-amber-500" />
+              <span class="text-sm font-medium text-amber-700">入群第一条消息</span>
+              <span class="text-xs text-amber-400 ml-auto">{{ archaeology.first_msg.date }}</span>
+            </div>
+            <p class="text-sm text-slate-600 italic">"{{ archaeology.first_msg.content }}"</p>
+          </div>
+
+          <!-- 最长消息 -->
+          <div v-if="archaeology.longest_msg" class="card p-4 bg-purple-50 border-purple-100">
+            <div class="flex items-center gap-1.5 mb-2">
+              <MessageSquare class="w-4 h-4 text-purple-500" />
+              <span class="text-sm font-medium text-purple-700">最长发言</span>
+              <span class="text-xs text-purple-400 ml-auto">{{ archaeology.longest_msg.length }}字 · {{ archaeology.longest_msg.date }}</span>
+            </div>
+            <p class="text-sm text-slate-600">"{{ archaeology.longest_msg.content.slice(0, 200) }}{{ archaeology.longest_msg.content.length > 200 ? '...' : '' }}"</p>
+          </div>
+
+          <!-- 历史上的今天 -->
+          <div v-if="archaeology.on_this_day?.length" class="card p-4">
+            <div class="flex items-center gap-1.5 mb-2">
+              <Clock class="w-4 h-4 text-indigo-500" />
+              <span class="text-sm font-medium text-slate-700">历史上的今天</span>
+            </div>
+            <div class="space-y-2">
+              <div v-for="(m, i) in archaeology.on_this_day" :key="i" class="text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                <span class="text-xs text-slate-400">{{ m.date }}</span>
+                <p class="mt-0.5">"{{ m.content.slice(0, 100) }}{{ m.content.length > 100 ? '...' : '' }}"</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 年度统计 -->
+          <div v-if="archaeology.yearly_counts && Object.keys(archaeology.yearly_counts).length > 1" class="card p-4">
+            <h4 class="text-sm font-medium text-slate-600 mb-2 flex items-center gap-1.5">
+              <TrendingUp class="w-3.5 h-3.5" /> 年度发言统计
+            </h4>
+            <div class="flex items-end gap-2 h-16">
+              <div v-for="(cnt, yr) in archaeology.yearly_counts" :key="yr"
+                   :style="{ height: Math.max(4, (cnt / Math.max(...Object.values(archaeology.yearly_counts))) * 100) + '%' }"
+                   class="flex-1 bg-indigo-300 rounded-t-sm hover:bg-indigo-400 transition-colors relative group"
+                   :title="`${yr}: ${cnt}条`">
+              </div>
+            </div>
+            <div class="flex justify-between mt-1 text-[10px] text-slate-400">
+              <span v-for="(cnt, yr) in archaeology.yearly_counts" :key="yr">{{ yr }}</span>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
   </div>

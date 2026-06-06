@@ -53,8 +53,11 @@ export const deleteReport = (gid, date) =>
   request(`/groups/${gid}/report/${date}`, { method: 'DELETE' })
 export const getRecentReports = (gid, limit = 7) =>
   request(`/groups/${gid}/reports/recent?limit=${limit}`)
+export const getTrending = (gid, days = 7) =>
+  request(`/groups/${gid}/trending?days=${days}`)
 
 // --- 画像 ---
+export const getRelations = (gid) => request(`/groups/${gid}/relations`)
 export const getPortraits = (gid) => request(`/groups/${gid}/portraits`)
 export const getPortrait = (gid, mid) => request(`/groups/${gid}/portrait/${mid}`)
 export const refreshPortrait = (gid, mid) =>
@@ -74,6 +77,8 @@ export const getPortraitStats = (gid, mid) =>
   request(`/groups/${gid}/portrait/${mid}/stats`)
 export const getPortraitHistory = (gid, mid) =>
   request(`/groups/${gid}/portrait/${mid}/history`)
+export const getArchaeology = (gid, mid) =>
+  request(`/groups/${gid}/portrait/${mid}/archaeology`)
 export const generateDeepPortrait = async (gid, mid) => {
   const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/deep`, { method: 'POST' })
   const data = await res.json()
