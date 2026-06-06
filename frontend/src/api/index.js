@@ -39,6 +39,13 @@ export const getAnalyzedDates = (gid) => request(`/groups/${gid}/dates/analyzed`
 // --- 每日报告 ---
 export const analyzeDate = (gid, date) =>
   request(`/groups/${gid}/analyze/${date}`, { method: 'POST' })
+// 异步分析：返回 task_id
+export const analyzeDateAsync = async (gid, date) => {
+  const res = await fetch(`${BASE}/groups/${gid}/analyze/${date}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data // { task_id, status } or { cached, report, ... }
+}
 export const getReport = (gid, date) => request(`/groups/${gid}/report/${date}`)
 export const getRecentReports = (gid, limit = 7) =>
   request(`/groups/${gid}/reports/recent?limit=${limit}`)
@@ -48,6 +55,13 @@ export const getPortraits = (gid) => request(`/groups/${gid}/portraits`)
 export const getPortrait = (gid, mid) => request(`/groups/${gid}/portrait/${mid}`)
 export const refreshPortrait = (gid, mid) =>
   request(`/groups/${gid}/portrait/${mid}/refresh`, { method: 'POST' })
+// 异步刷新画像
+export const refreshPortraitAsync = async (gid, mid) => {
+  const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/refresh`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
 export const refreshAllPortraits = (gid) =>
   request(`/groups/${gid}/portraits/refresh-all`, { method: 'POST' })
 
@@ -55,3 +69,11 @@ export const refreshAllPortraits = (gid) =>
 export const getGroupStats = (gid) => request(`/groups/${gid}/stats`)
 export const getGlobalStats = () => request('/stats/global')
 export const getHealth = () => request('/health')
+
+// --- 批量分析 ---
+export const analyzeAll = async (gid) => {
+  const res = await fetch(`${BASE}/groups/${gid}/analyze-all`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}

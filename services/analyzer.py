@@ -2,11 +2,13 @@
 AI 分析服务：调用 Ollama API 生成每日报告
 使用 httpx 异步请求，支持重试和 JSON 提取
 通过 GPU 分布式锁防止多应用抢占显存
+每次调用独立会话（keep_alive=0），防止上下文累积
 """
 import json
 import re
 import time
 import logging
+import uuid
 import httpx
 from typing import Optional
 
@@ -63,17 +65,20 @@ async def call_ollama_chat(
     user_prompt: str,
     model: str = "",
     timeout: int = 0,
+    task=None,  # TaskInfo for progress reporting
 ) -> dict:
     """调用 Ollama chat API，返回解析后的 JSON
 
     自动通过 GPU 分布式锁协调多应用对 GPU 的访问。
     如果 GPU 被占用（如 ComfyUI），会等待并重试。
+    每次调用创建独立会话（keep_alive=0），防止上下文累积。
 
     Args:
         system_prompt: 系统提示词
         user_prompt: 用户提示词
         model: 模型名（默认使用配置的模型）
         timeout: 超时秒数（默认使用配置值）
+        task: 可选的 TaskInfo，用于报告进度
 
     Returns:
         {"success": bool, "data": dict|None, "error": str, "model": str, "duration_ms": int}
@@ -88,6 +93,7 @@ async def call_ollama_chat(
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
+        "keep_alive": 0,  # 推理完成后立即卸载模型，释放显存，防止上下文累积
         "options": {
             "temperature": 0.7,
             "top_p": 0.9,
@@ -96,12 +102,23 @@ async def call_ollama_chat(
 
     start_time = time.time()
     try:
+        # 进度：等待 GPU
+        if task:
+            task.update("waiting_gpu", "等待 GPU 释放...")
+
         # 获取 GPU 锁后再调用 Ollama
         async with gpu_lock(config.GPU_LOCK_WHO):
+            if task:
+                task.update("inference", "AI 推理中...")
+
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(OLLAMA_CHAT_URL, json=payload)
                 resp.raise_for_status()
                 result = resp.json()
+
+        # 进度：解析
+        if task:
+            task.update("parsing", "解析 AI 结果...")
 
         duration_ms = int((time.time() - start_time) * 1000)
         raw_content = result.get("message", {}).get("content", "")
@@ -110,6 +127,9 @@ async def call_ollama_chat(
         # 解析 JSON
         data = _extract_json(raw_content)
         if data:
+            if task:
+                task.model_used = model
+                task.finish(success=True)
             return {
                 "success": True,
                 "data": data,
@@ -119,6 +139,8 @@ async def call_ollama_chat(
             }
         else:
             logger.warning(f"JSON 解析失败，原始返回: {raw_content[:300]}...")
+            if task:
+                task.finish(success=False, error={"type": "json_parse", "detail": f"AI 返回无法解析为 JSON"})
             return {
                 "success": False,
                 "data": None,
@@ -129,24 +151,33 @@ async def call_ollama_chat(
 
     except httpx.TimeoutException:
         duration_ms = int((time.time() - start_time) * 1000)
+        err = {"type": "timeout", "detail": f"Ollama 请求超时 ({timeout}s)"}
+        if task:
+            task.finish(success=False, error=err)
         return {"success": False, "data": None,
                 "error": f"Ollama 请求超时 ({timeout}s)", "model": model,
                 "duration_ms": duration_ms}
     except httpx.ConnectError:
         duration_ms = int((time.time() - start_time) * 1000)
+        err = {"type": "ollama_down", "detail": f"无法连接到 Ollama ({config.OLLAMA_HOST})"}
+        if task:
+            task.finish(success=False, error=err)
         return {"success": False, "data": None,
                 "error": f"无法连接到 Ollama ({config.OLLAMA_HOST})，请确认 Ollama 已启动",
                 "model": model, "duration_ms": duration_ms}
     except RuntimeError as e:
-        # GPU 锁等待超时
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.error(f"GPU 锁获取失败: {e}")
+        err = {"type": "gpu_busy", "detail": str(e)}
+        if task:
+            task.finish(success=False, error=err)
         return {"success": False, "data": None,
                 "error": f"GPU 被占用，无法获取锁: {e}", "model": model,
                 "duration_ms": duration_ms}
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         logger.error(f"Ollama 调用异常: {e}")
+        if task:
+            task.finish(success=False, error={"type": "unknown", "detail": str(e)})
         return {"success": False, "data": None,
                 "error": str(e), "model": model, "duration_ms": duration_ms}
 

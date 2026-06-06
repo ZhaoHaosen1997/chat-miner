@@ -1,7 +1,9 @@
 """
 群友画像 API：获取、刷新画像
+v0.3.3: 刷新改为异步任务 + SSE 进度推送
 """
 import json
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +13,7 @@ from models.database import (
     get_member_by_sender_id, get_member,
 )
 from services.portrait import generate_single_portrait, refresh_portraits
+from services.task_manager import task_manager
 from routers.groups import get_chat_cache
 
 logger = logging.getLogger(__name__)
@@ -76,20 +79,14 @@ async def api_get_single_portrait(group_id: int, member_id: int):
     }
 
 
-@router.post("/portrait/{member_id}/refresh")
-async def api_refresh_single_portrait(group_id: int, member_id: int):
-    """刷新单个成员的画像"""
+async def _run_portrait_and_save(group_id: int, member_id: int, task):
+    """后台执行：画像生成 + 保存"""
     group = get_group(group_id)
-    if not group:
-        raise HTTPException(404, detail="群不存在")
-
     chat = get_chat_cache(group_id)
-    if not chat:
-        raise HTTPException(404, detail="群数据未加载")
-
     member = get_member(group_id, member_id)
-    if not member:
-        raise HTTPException(404, detail="成员不存在")
+    if not all([group, chat, member]):
+        task.finish(success=False, error={"type": "data_missing", "detail": "数据未找到"})
+        return
 
     result = await generate_single_portrait(
         group_id=group_id,
@@ -104,33 +101,39 @@ async def api_refresh_single_portrait(group_id: int, member_id: int):
         from models.database import save_member_portrait
         portrait_json = json.dumps(result["data"], ensure_ascii=False)
         save_member_portrait(
-            group_id=group_id,
-            member_id=member_id,
+            group_id=group_id, member_id=member_id,
             display_name=member["display_name"] or member["nickname"],
             total_messages=member["message_count"],
             portrait_json=portrait_json,
             data_start=group["date_range_start"] or "",
             data_end=group["date_range_end"] or "",
         )
-        log_analysis(group_id, "", "portrait", "success",
-                    model_used=result["model"], duration_ms=result["duration_ms"])
-
-        return {
-            "code": 200,
-            "message": f"{member['display_name']} 画像刷新成功",
-            "data": {
-                "member_id": member_id,
-                "display_name": member["display_name"],
-                "portrait": result["data"],
-                "model_used": result["model"],
-                "duration_ms": result["duration_ms"],
-            },
-        }
+        task.finish(success=True)
+        log_analysis(group_id, "", "portrait", "success", duration_ms=result["duration_ms"])
     else:
-        raise HTTPException(
-            500,
-            detail=f"画像生成失败: {result.get('error', '未知错误')}",
-        )
+        task.finish(success=False, error={"type": "ai_failed", "detail": result.get("error", "")})
+
+
+@router.post("/portrait/{member_id}/refresh")
+async def api_refresh_single_portrait(group_id: int, member_id: int):
+    """刷新单个成员的画像（异步任务）"""
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    member = get_member(group_id, member_id)
+    if not member:
+        raise HTTPException(404, detail="成员不存在")
+
+    task = task_manager.create("portrait", group_id, {"member_id": member_id})
+    task.update("pending", f"为 {member['display_name']} 生成画像...")
+    asyncio.create_task(_run_portrait_and_save(group_id, member_id, task))
+
+    return {
+        "code": 200,
+        "message": "任务已创建",
+        "data": {"task_id": task.task_id, "status": "pending"},
+    }
 
 
 @router.post("/portraits/refresh-all")

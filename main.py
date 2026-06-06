@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import config
 from models.database import init_db
-from routers import groups, report, portrait, stats
+from routers import groups, report, portrait, stats, tasks
 
 
 # --- 日志配置 ---
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于本地 Ollama AI",
-    version="0.3.1",
+    version="0.3.4",
     lifespan=lifespan,
 )
 
@@ -71,6 +71,7 @@ app.include_router(groups.router)
 app.include_router(report.router)
 app.include_router(portrait.router)
 app.include_router(stats.router)
+app.include_router(tasks.router)
 
 
 # 根路由

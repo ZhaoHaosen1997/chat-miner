@@ -1,7 +1,8 @@
 <script setup>
 import { ref, inject, watch, onMounted } from 'vue'
-import { getPortraits, refreshPortrait, getMembers } from '../api/index.js'
+import { getPortraits, refreshPortraitAsync, getMembers } from '../api/index.js'
 import { Loader2, Sparkles, RefreshCw, X, User, MessageSquare, Clock, Tag } from 'lucide-vue-next'
+import ProgressPanel from '../components/ProgressPanel.vue'
 
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
@@ -30,17 +31,28 @@ async function load() {
 
 watch(currentGroup, load, { immediate: true })
 
+const activeTaskId = ref('')
+
 async function refreshOne(memberId) {
-  if (refreshing.value === memberId) return
+  if (refreshing.value === memberId || activeTaskId.value) return
   refreshing.value = memberId
   try {
-    await refreshPortrait(currentGroup.value.id, memberId)
-    await load()
-    triggerRefresh?.()
+    const result = await refreshPortraitAsync(currentGroup.value.id, memberId)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    }
   } catch (e) {
     console.error(e)
-  } finally {
     refreshing.value = null
+  }
+}
+
+function onTaskDone(data) {
+  activeTaskId.value = ''
+  refreshing.value = null
+  if (data.status === 'done') {
+    load()
+    triggerRefresh?.()
   }
 }
 
@@ -157,6 +169,14 @@ watch([portraits, members], ([p, m]) => {
       <Sparkles class="w-12 h-12 text-slate-300 mx-auto mb-3" />
       <p class="text-slate-400">导入群聊并分析几天后，才能生成群友画像哦</p>
     </div>
+
+    <!-- 任务进度面板 -->
+    <ProgressPanel
+      v-if="activeTaskId"
+      :task-id="activeTaskId"
+      @done="onTaskDone"
+      @close="activeTaskId = ''; refreshing = null"
+    />
 
     <!-- 详情弹窗 -->
     <Teleport to="body">

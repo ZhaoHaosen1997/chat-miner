@@ -1,7 +1,9 @@
 """
 每日报告 API：触发分析、获取报告、日期列表
+v0.3.3: 分析改为异步任务 + SSE 进度推送
 """
 import json
+import asyncio
 import logging
 from collections import defaultdict
 
@@ -9,10 +11,11 @@ from fastapi import APIRouter, HTTPException
 from config import config
 from models.database import (
     get_group, get_daily_report, save_daily_report, get_analyzed_dates,
-    get_recent_reports, log_analysis,
+    get_recent_reports, log_analysis, update_group_stats,
 )
 from services.analyzer import analyze_daily_chat
 from services.parser import format_messages_for_prompt
+from services.task_manager import task_manager
 from routers.groups import get_chat_cache
 
 logger = logging.getLogger(__name__)
@@ -51,9 +54,53 @@ async def api_get_analyzed_dates(group_id: int):
     return {"code": 200, "message": "获取成功", "data": dates}
 
 
+async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task):
+    """后台执行：分析 + 保存"""
+    chat = get_chat_cache(group_id)
+    if not chat:
+        task.finish(success=False, error={"type": "data_missing", "detail": "群数据未加载"})
+        return
+
+    text_msgs = chat.get_text_messages_for_date(date)
+    if len(text_msgs) < 5:
+        task.finish(success=False, error={"type": "too_few", "detail": f"仅 {len(text_msgs)} 条文本消息"})
+        return
+
+    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name)
+    if len(chat_text) > 100000:
+        logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
+
+    result = await analyze_daily_chat(
+        group_name=group_name,
+        date=date,
+        chat_text=chat_text,
+        msg_count=len(text_msgs),
+        model=config.OLLAMA_MODEL,
+        task=task,
+    )
+
+    if result["success"] and result["data"]:
+        report_json = json.dumps(result["data"], ensure_ascii=False)
+        stats = chat.stats_for_date(date)
+        save_daily_report(
+            group_id=group_id, date=date,
+            message_count=stats["total_messages"],
+            active_members=stats["active_members"],
+            report_json=report_json,
+            model_used=result["model"],
+        )
+        analyzed_count = len(get_analyzed_dates(group_id))
+        update_group_stats(group_id, analyzed_count)
+        log_analysis(group_id, date, "daily_report", "success",
+                    model_used=result["model"], duration_ms=result["duration_ms"])
+    else:
+        log_analysis(group_id, date, "daily_report", "failed",
+                    error_msg=result.get("error", ""))
+
+
 @router.post("/analyze/{date}")
 async def api_analyze_date(group_id: int, date: str):
-    """触发分析某天的群聊"""
+    """触发分析某天（带回退缓存检查 + 异步执行）"""
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -62,7 +109,7 @@ async def api_analyze_date(group_id: int, date: str):
     if not chat:
         raise HTTPException(404, detail="群数据未加载")
 
-    # 检查是否已分析
+    # 检查缓存
     existing = get_daily_report(group_id, date)
     if existing:
         try:
@@ -79,77 +126,29 @@ async def api_analyze_date(group_id: int, date: str):
                 },
             }
         except json.JSONDecodeError:
-            pass  # 缓存损坏，重新分析
+            pass
 
-    # 获取该天的文本消息
+    # 文本消息太少
     text_msgs = chat.get_text_messages_for_date(date)
     if len(text_msgs) < 5:
         return {
             "code": 400,
             "message": f"{date} 文本消息过少（{len(text_msgs)}条），跳过 AI 分析",
-            "data": {
-                "date": date,
-                "stats": chat.stats_for_date(date),
-                "skipped": True,
-                "reason": "too_few_messages",
-            },
+            "data": {"date": date, "stats": chat.stats_for_date(date), "skipped": True, "reason": "too_few_messages"},
         }
 
-    # 格式化聊天记录
-    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name)
-    if len(chat_text) > 100000:
-        logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符，可能影响分析质量")
+    # 创建异步任务
+    task = task_manager.create("analyze_day", group_id, {"date": date})
+    task.update("pending", "任务已创建，等待 GPU...")
 
-    # 调用 AI 分析
-    result = await analyze_daily_chat(
-        group_name=group["name"],
-        date=date,
-        chat_text=chat_text,
-        msg_count=len(text_msgs),
-        model=config.OLLAMA_MODEL,
-    )
+    # 后台执行
+    asyncio.create_task(_run_analyze_and_save(group_id, group["name"], date, task))
 
-    if result["success"] and result["data"]:
-        # 保存到数据库
-        report_json = json.dumps(result["data"], ensure_ascii=False)
-        stats = chat.stats_for_date(date)
-        save_daily_report(
-            group_id=group_id,
-            date=date,
-            message_count=stats["total_messages"],
-            active_members=stats["active_members"],
-            report_json=report_json,
-            model_used=result["model"],
-        )
-
-        # 更新已分析天数
-        from models.database import update_group_stats
-        analyzed_count = len(get_analyzed_dates(group_id))
-        update_group_stats(group_id, analyzed_count)
-
-        # 日志
-        log_analysis(group_id, date, "daily_report", "success",
-                    model_used=result["model"], duration_ms=result["duration_ms"])
-
-        return {
-            "code": 200,
-            "message": f"{date} 分析完成",
-            "data": {
-                "date": date,
-                "report": result["data"],
-                "stats": stats,
-                "model_used": result["model"],
-                "cached": False,
-                "duration_ms": result["duration_ms"],
-            },
-        }
-    else:
-        log_analysis(group_id, date, "daily_report", "failed",
-                    error_msg=result.get("error", ""))
-        raise HTTPException(
-            500,
-            detail=f"AI 分析失败: {result.get('error', '未知错误')}",
-        )
+    return {
+        "code": 200,
+        "message": "任务已创建",
+        "data": {"task_id": task.task_id, "status": "pending"},
+    }
 
 
 @router.get("/report/{date}")
@@ -177,6 +176,118 @@ async def api_get_report(group_id: int, date: str):
             "model_used": report.get("model_used"),
             "created_at": report.get("created_at"),
         },
+    }
+
+
+async def _run_analyze_all(group_id: int, group_name: str, task):
+    """后台执行：批量分析所有未分析日期（从新到旧）"""
+    chat = get_chat_cache(group_id)
+    if not chat:
+        task.finish(success=False, error={"type": "data_missing", "detail": "群数据未加载"})
+        return
+
+    all_dates = chat.all_dates()
+    analyzed = set(get_analyzed_dates(group_id))
+    unanalyzed = [d for d in all_dates if d not in analyzed]
+    # 从新到旧排序
+    unanalyzed.sort(reverse=True)
+
+    if not unanalyzed:
+        task.update("done", "全部日期已分析", progress={"current": 0, "total": 0})
+        task.finish(success=True)
+        return
+
+    total = len(unanalyzed)
+    failed = 0
+    task.update("pending", f"准备分析 {total} 天...", progress={"current": 0, "total": total})
+
+    for i, date in enumerate(unanalyzed):
+        if task_manager.is_cancelled(task.task_id):
+            task.update("cancelled", f"已取消 (完成 {i}/{total})")
+            return
+
+        task.update("inference", f"分析 {date}...", progress={"current": i, "total": total})
+
+        text_msgs = chat.get_text_messages_for_date(date)
+        if len(text_msgs) < 5:
+            failed += 1
+            task.update("inference", f"跳过 {date} (消息过少)",
+                       progress={"current": i + 1, "total": total})
+            await asyncio.sleep(1)
+            continue
+
+        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name)
+        result = await analyze_daily_chat(
+            group_name=group_name, date=date,
+            chat_text=chat_text, msg_count=len(text_msgs),
+            model=config.OLLAMA_MODEL,
+        )
+
+        if result["success"] and result["data"]:
+            report_json = json.dumps(result["data"], ensure_ascii=False)
+            stats = chat.stats_for_date(date)
+            save_daily_report(
+                group_id=group_id, date=date,
+                message_count=stats["total_messages"],
+                active_members=stats["active_members"],
+                report_json=report_json, model_used=result["model"],
+            )
+            log_analysis(group_id, date, "daily_report", "success",
+                        model_used=result["model"], duration_ms=result["duration_ms"])
+        else:
+            failed += 1
+            log_analysis(group_id, date, "daily_report", "failed",
+                        error_msg=result.get("error", ""))
+
+        # 更新进度
+        analyzed_count = len(get_analyzed_dates(group_id))
+        update_group_stats(group_id, analyzed_count)
+        task.update("inference",
+                   f"已完成 {i + 1}/{total} (失败 {failed})",
+                   progress={"current": i + 1, "total": total})
+
+        # 天之间短暂冷却
+        await asyncio.sleep(3)
+
+    # 完成
+    msg = f"全量分析完成：{total - failed}/{total} 成功"
+    if failed > 0:
+        msg += f"，{failed} 天失败"
+    task.update("done", msg, progress={"current": total, "total": total})
+    task.finish(success=True)
+
+    # 更新群统计
+    final_count = len(get_analyzed_dates(group_id))
+    update_group_stats(group_id, final_count)
+
+
+@router.post("/analyze-all")
+async def api_analyze_all(group_id: int):
+    """一键分析全部未分析日期（从新到旧）"""
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    # 检查是否有待分析的日期
+    analyzed = set(get_analyzed_dates(group_id))
+    unanalyzed = [d for d in chat.all_dates() if d not in analyzed]
+    if not unanalyzed:
+        return {"code": 200, "message": "全部日期已分析", "data": {"total_unanalyzed": 0}}
+
+    total = len(unanalyzed)
+    task = task_manager.create("analyze_all", group_id, {"total": total})
+    task.update("pending", f"开始批量分析 {total} 天...", progress={"current": 0, "total": total})
+
+    asyncio.create_task(_run_analyze_all(group_id, group["name"], task))
+
+    return {
+        "code": 200,
+        "message": f"批量分析任务已创建：{total} 天待分析",
+        "data": {"task_id": task.task_id, "total_unanalyzed": total},
     }
 
 
