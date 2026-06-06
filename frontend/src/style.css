@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* 简洁亮色主题 */
+body {
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+/* 卡片 */
+.card {
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow 0.2s;
+}
+.card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+/* vue transition */
+.fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }

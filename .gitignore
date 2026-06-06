@@ -1,0 +1,27 @@
+# Config (contains local secrets)
+.env
+
+# Data (contains personal chat records)
+data/
+docs/
+logs/
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

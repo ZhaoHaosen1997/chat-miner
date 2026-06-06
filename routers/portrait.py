@@ -1,0 +1,165 @@
+"""
+群友画像 API：获取、刷新画像
+"""
+import json
+import logging
+
+from fastapi import APIRouter, HTTPException
+from config import config
+from models.database import (
+    get_group, get_portraits, get_portrait, log_analysis,
+    get_member_by_sender_id, get_member,
+)
+from services.portrait import generate_single_portrait, refresh_portraits
+from routers.groups import get_chat_cache
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/groups/{group_id}", tags=["群友画像"])
+
+
+@router.get("/portraits")
+async def api_get_portraits(group_id: int):
+    """获取群所有成员的画像"""
+    from models.database import get_portraits as db_get_portraits
+    portraits = db_get_portraits(group_id)
+
+    result = []
+    for p in portraits:
+        try:
+            pj = json.loads(p["portrait_json"])
+        except (json.JSONDecodeError, TypeError):
+            pj = {}
+
+        # 合并成员信息
+        member = get_member(group_id, p["member_id"])
+        result.append({
+            "member_id": p["member_id"],
+            "display_name": p["display_name"],
+            "avatar": member["avatar"] if member else "",
+            "total_messages": p["total_analyzed_messages"],
+            "portrait": pj,
+            "last_updated": p["last_updated"],
+        })
+
+    return {"code": 200, "message": "获取成功", "data": result}
+
+
+@router.get("/portrait/{member_id}")
+async def api_get_single_portrait(group_id: int, member_id: int):
+    """获取单个成员的画像"""
+    portrait = get_portrait(group_id, member_id)
+    if not portrait:
+        raise HTTPException(404, detail="该成员尚无画像，请先分析几天数据")
+
+    try:
+        pj = json.loads(portrait["portrait_json"])
+    except (json.JSONDecodeError, TypeError):
+        pj = {}
+
+    member = get_member(group_id, member_id)
+    return {
+        "code": 200,
+        "message": "获取成功",
+        "data": {
+            "member_id": member_id,
+            "display_name": portrait["display_name"],
+            "avatar": member["avatar"] if member else "",
+            "total_messages": portrait["total_analyzed_messages"],
+            "portrait": pj,
+            "last_updated": portrait["last_updated"],
+        },
+    }
+
+
+@router.post("/portrait/{member_id}/refresh")
+async def api_refresh_single_portrait(group_id: int, member_id: int):
+    """刷新单个成员的画像"""
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    member = get_member(group_id, member_id)
+    if not member:
+        raise HTTPException(404, detail="成员不存在")
+
+    result = await generate_single_portrait(
+        group_id=group_id,
+        group_name=group["name"],
+        sender_id=member["sender_id"],
+        sender_name=member["display_name"] or member["nickname"],
+        chat=chat,
+        model=config.OLLAMA_MODEL,
+    )
+
+    if result["success"] and result["data"]:
+        from models.database import save_member_portrait
+        portrait_json = json.dumps(result["data"], ensure_ascii=False)
+        save_member_portrait(
+            group_id=group_id,
+            member_id=member_id,
+            display_name=member["display_name"] or member["nickname"],
+            total_messages=member["message_count"],
+            portrait_json=portrait_json,
+        )
+        log_analysis(group_id, "", "portrait", "success",
+                    model_used=result["model"], duration_ms=result["duration_ms"])
+
+        return {
+            "code": 200,
+            "message": f"{member['display_name']} 画像刷新成功",
+            "data": {
+                "member_id": member_id,
+                "display_name": member["display_name"],
+                "portrait": result["data"],
+                "model_used": result["model"],
+                "duration_ms": result["duration_ms"],
+            },
+        }
+    else:
+        raise HTTPException(
+            500,
+            detail=f"画像生成失败: {result.get('error', '未知错误')}",
+        )
+
+
+@router.post("/portraits/refresh-all")
+async def api_refresh_all_portraits(group_id: int, force: bool = False):
+    """刷新群内所有需要更新的画像"""
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    results = await refresh_portraits(
+        group_id=group_id,
+        group_name=group["name"],
+        chat=chat,
+        model=config.OLLAMA_MODEL,
+        force=force,
+    )
+
+    refreshed_count = sum(1 for r in results if r["refreshed"])
+    return {
+        "code": 200,
+        "message": f"画像刷新完成，{refreshed_count}/{len(results)} 个需要更新",
+        "data": {
+            "total": len(results),
+            "refreshed": refreshed_count,
+            "results": [
+                {
+                    "member_name": r["member"]["display_name"],
+                    "refreshed": r["refreshed"],
+                    "portrait": r["portrait"]["portrait_json"] if r["portrait"] and isinstance(r["portrait"], dict) and "portrait_json" in r["portrait"] else r.get("portrait"),
+                }
+                for r in results
+            ],
+        },
+    }
