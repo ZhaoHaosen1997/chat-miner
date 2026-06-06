@@ -188,6 +188,7 @@ async def analyze_daily_chat(
     chat_text: str,
     msg_count: int,
     model: str = "",
+    task=None,  # TaskInfo for progress reporting
 ) -> dict:
     """分析一天的群聊内容，生成每日报告
 
@@ -197,6 +198,7 @@ async def analyze_daily_chat(
         chat_text: 格式化后的聊天记录文本
         msg_count: 文本消息数量
         model: 使用的模型
+        task: 可选的 TaskInfo，用于报告进度
 
     Returns:
         同 call_ollama_chat 的返回格式
@@ -209,14 +211,14 @@ async def analyze_daily_chat(
     )
 
     logger.info(f"开始分析 {group_name} {date}: {msg_count} 条消息, {len(chat_text)} 字符")
-    result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, model)
+    result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, model, task=task)
 
     # 如果主模型失败，尝试 fallback
     if not result["success"] and config.OLLAMA_MODEL_FALLBACK:
         fallback = config.OLLAMA_MODEL_FALLBACK
         if result["model"] != fallback:
             logger.info(f"主模型失败，尝试 fallback: {fallback}")
-            result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, fallback)
+            result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, fallback, task=task)
 
     return result
 
