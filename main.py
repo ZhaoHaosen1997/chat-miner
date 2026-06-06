@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于本地 Ollama AI",
-    version="0.4.1",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -81,7 +81,7 @@ async def root():
         "code": 200,
         "message": "Chat-Miner API 服务运行中",
         "data": {
-            "version": "0.4.1",
+            "version": "0.5.0",
             "docs": "/docs",
             "health": "/api/health",
         },

@@ -72,14 +72,14 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             sender_id INTEGER,
-            wxid TEXT,
+            wxid TEXT NOT NULL DEFAULT '',
             display_name TEXT,
             nickname TEXT,
             remark TEXT,
             group_nickname TEXT,
             avatar TEXT,
             message_count INTEGER DEFAULT 0,
-            UNIQUE(group_id, sender_id),
+            UNIQUE(group_id, wxid),
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
 
@@ -107,6 +107,33 @@ def init_db():
             data_end_date TEXT,
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(group_id, member_id),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS portrait_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            member_id INTEGER NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            portrait_json TEXT,
+            analyzed_msg_count INTEGER DEFAULT 0,
+            data_start_date TEXT,
+            data_end_date TEXT,
+            model_used TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS member_interactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            member_a_id INTEGER NOT NULL,
+            member_b_id INTEGER NOT NULL,
+            co_msg_count INTEGER DEFAULT 0,
+            reply_count INTEGER DEFAULT 0,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, member_a_id, member_b_id),
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
 
@@ -145,14 +172,71 @@ def init_db():
 
 
 def _migrate_db(conn):
-    """数据库迁移：为旧版本表结构添加新列"""
-    # 检查 member_portraits 是否已有 data_start_date 列
+    """数据库迁移：为旧版本表结构添加新列和索引"""
+    # member_portraits 新列
     cur = conn.execute("PRAGMA table_info(member_portraits)")
     cols = {row[1] for row in cur.fetchall()}
     if "data_start_date" not in cols:
         conn.execute("ALTER TABLE member_portraits ADD COLUMN data_start_date TEXT")
     if "data_end_date" not in cols:
         conn.execute("ALTER TABLE member_portraits ADD COLUMN data_end_date TEXT")
+
+    # group_members v0.5 迁移：唯一键从 sender_id 改为 wxid
+    cur = conn.execute("PRAGMA index_list(group_members)")
+    indexes = {row[1] for row in cur.fetchall()}
+    has_wxid_index = any("wxid" in idx for idx in indexes)
+    has_sender_index = any("sender_id" in idx for idx in indexes)
+
+    if not has_wxid_index:
+        # 1. 确保 wxid 列有值（旧数据可能为空）
+        conn.execute("""
+            UPDATE group_members SET wxid = 'fallback_' || sender_id
+            WHERE wxid IS NULL OR wxid = ''
+        """)
+        # 2. 修复 member_portraits 外键：指向保留的 member
+        fixed_rows = conn.execute("""
+            UPDATE member_portraits SET member_id = (
+                SELECT MAX(gm2.id) FROM group_members gm2
+                WHERE gm2.group_id = member_portraits.group_id
+                  AND gm2.wxid = (
+                    SELECT gm.wxid FROM group_members gm
+                    WHERE gm.id = member_portraits.member_id
+                  )
+            )
+            WHERE member_id NOT IN (
+                SELECT MAX(gm3.id) FROM group_members gm3
+                GROUP BY gm3.group_id, gm3.wxid
+            )
+            AND EXISTS (
+                SELECT 1 FROM group_members gm
+                WHERE gm.id = member_portraits.member_id
+                  AND gm.wxid IS NOT NULL AND gm.wxid != ''
+            )
+        """).rowcount
+        # 无法修复的孤儿画像直接删除
+        deleted = conn.execute("""
+            DELETE FROM member_portraits
+            WHERE member_id NOT IN (SELECT id FROM group_members)
+        """).rowcount
+        if fixed_rows or deleted:
+            pass  # 静默处理
+        # 3. 清理重复：按 wxid 去重，保留 id 最大的
+        conn.execute("""
+            DELETE FROM group_members WHERE id NOT IN (
+                SELECT MAX(id) FROM group_members
+                WHERE wxid IS NOT NULL AND wxid != ''
+                GROUP BY group_id, wxid
+            )
+        """)
+        # 4. 删旧索引 + 建 wxid 新索引
+        if has_sender_index:
+            for idx_name in indexes:
+                if "sender_id" in idx_name:
+                    conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_wxid "
+            "ON group_members(group_id, wxid)"
+        )
 
 
 # ==================== 群管理 CRUD ====================
@@ -218,22 +302,35 @@ def update_group_stats(group_id: int, analyzed_days: int):
 # ==================== 成员 CRUD ====================
 
 def upsert_members(group_id: int, senders: list[dict]):
-    """批量写入群成员（INSERT OR REPLACE）"""
+    """批量写入群成员：按 wxid 去重，新成员插入，已有成员更新非空字段
+
+    wxid 是微信账号的稳定标识，不会因重新导出而改变。
+    sender_id 是导出工具临时编号，仅用于匹配消息。
+    """
     conn = get_conn()
     for s in senders:
+        sender_id = s.get("senderID", 0)
+        wxid = s.get("wxid", "") or f"fallback_{sender_id}"
+        display_name = s.get("displayName", "")
+        nickname = s.get("nickname", "")
+        remark = s.get("remark", "")
+        group_nickname = s.get("groupNickname", "")
+        avatar = s.get("avatar", "")
+
         conn.execute(
-            """INSERT OR REPLACE INTO group_members
+            """INSERT INTO group_members
                (group_id, sender_id, wxid, display_name, nickname, remark,
                 group_nickname, avatar)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (group_id,
-             s.get("senderID"),
-             s.get("wxid", ""),
-             s.get("displayName", ""),
-             s.get("nickname", ""),
-             s.get("remark", ""),
-             s.get("groupNickname", ""),
-             s.get("avatar", ""))
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(group_id, wxid) DO UPDATE SET
+               sender_id = excluded.sender_id,
+               display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
+               nickname = COALESCE(NULLIF(excluded.nickname, ''), nickname),
+               remark = COALESCE(NULLIF(excluded.remark, ''), remark),
+               group_nickname = COALESCE(NULLIF(excluded.group_nickname, ''), group_nickname),
+               avatar = COALESCE(NULLIF(excluded.avatar, ''), avatar)""",
+            (group_id, sender_id, wxid, display_name, nickname, remark,
+             group_nickname, avatar)
         )
     conn.commit()
     conn.close()
@@ -272,12 +369,12 @@ def get_member_by_sender_id(group_id: int, sender_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def update_member_message_count(group_id: int, sender_id: int, count: int):
-    """更新成员消息计数"""
+def update_member_message_count(group_id: int, wxid: str, count: int):
+    """更新成员消息计数（按 wxid）"""
     conn = get_conn()
     conn.execute(
-        "UPDATE group_members SET message_count=? WHERE group_id=? AND sender_id=?",
-        (count, group_id, sender_id)
+        "UPDATE group_members SET message_count=? WHERE group_id=? AND wxid=?",
+        (count, group_id, wxid)
     )
     conn.commit()
     conn.close()
@@ -389,6 +486,51 @@ def get_stale_portraits(group_id: int, refresh_days: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ==================== 画像版本历史 ====================
+
+def save_portrait_version(group_id: int, member_id: int, version: int,
+                           portrait_json: str, analyzed_msg_count: int = 0,
+                           data_start: str = "", data_end: str = "",
+                           model_used: str = "", duration_ms: int = 0):
+    """保存画像的历史版本"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO portrait_versions
+           (group_id, member_id, version, portrait_json, analyzed_msg_count,
+            data_start_date, data_end_date, model_used, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (group_id, member_id, version, portrait_json, analyzed_msg_count,
+         data_start, data_end, model_used, duration_ms)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_portrait_versions(group_id: int, member_id: int) -> list[dict]:
+    """获取成员的画像版本历史（最新在前）"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM portrait_versions
+           WHERE group_id=? AND member_id=?
+           ORDER BY version DESC""",
+        (group_id, member_id)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_latest_portrait_version(group_id: int, member_id: int) -> int:
+    """获取成员画像的最新版本号，从未有过则返回 0"""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT MAX(version) as max_v FROM portrait_versions
+           WHERE group_id=? AND member_id=?""",
+        (group_id, member_id)
+    ).fetchone()
+    conn.close()
+    return row["max_v"] or 0
 
 
 # ==================== 分析日志 ====================

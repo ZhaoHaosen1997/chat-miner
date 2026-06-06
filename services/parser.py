@@ -3,6 +3,7 @@
 处理微信聊天记录导出的 JSON 格式
 """
 import json
+import re
 import logging
 from datetime import datetime
 from collections import defaultdict
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 # 有文本内容的消息类型
 TEXT_TYPES = {"文本消息", "引用消息", "视频消息"}
+# 画像分析专用：只用纯文本消息，排除引用（引用内容是别人的话）
+PORTRAIT_TEXT_TYPES = {"文本消息"}
 # 无文本但可统计的类型
 STAT_TYPES = {"图片消息", "表情消息", "语音消息", "文件消息", "位置消息",
               "视频消息", "名片消息", "小程序消息", "系统消息", "聊天记录",
@@ -33,16 +36,30 @@ class ParsedChat:
         self._by_date: Optional[dict[str, list[dict]]] = None
 
     def load(self):
-        """加载并解析 JSON 文件"""
+        """加载并解析 JSON 文件，给每条消息注入稳定的 wxid"""
         logger.info(f"加载文件: {self.file_path} ({self.file_path.stat().st_size / 1024 / 1024:.1f} MB)")
         with open(self.file_path, "r", encoding="utf-8") as f:
             self.raw = json.load(f)
 
         self.session = self.raw.get("session", {})
         self.senders = self.raw.get("senders", [])
-        self.messages = self.raw.get("messages", [])
 
-        # 按时间排序（确保顺序）
+        # 构建 senderID → (wxid, name) 映射
+        sid_to_wxid: dict[int, str] = {}
+        sid_to_name: dict[int, str] = {}
+        for s in self.senders:
+            sid = s.get("senderID", 0)
+            wxid = s.get("wxid", "") or f"unknown_{sid}"
+            sid_to_wxid[sid] = wxid
+            sid_to_name[sid] = s.get("displayName", "") or s.get("nickname", "") or wxid
+
+        # 给每条消息注入 wxid
+        self.messages = self.raw.get("messages", [])
+        for m in self.messages:
+            sid = m.get("senderID", 0)
+            m["wxid"] = sid_to_wxid.get(sid, f"unknown_{sid}")
+
+        # 按时间排序
         self.messages.sort(key=lambda m: m.get("createTime", 0))
 
         logger.info(f"解析完成: 群={self.group_name}, 消息={len(self.messages)}, 成员={len(self.senders)}")
@@ -83,16 +100,30 @@ class ParsedChat:
         return self._by_date
 
     def get_text_messages_for_date(self, date: str) -> list[dict]:
-        """获取某天的文本消息（用于 AI 分析）"""
+        """获取某天的文本消息（用于日报分析，包含引用消息）"""
         day_msgs = self.chunk_by_date().get(date, [])
         return [m for m in day_msgs if m.get("type") in TEXT_TYPES and (m.get("content") or "").strip()]
 
+    def get_portrait_messages_for_date(self, date: str) -> list[dict]:
+        """获取某天的文本消息（用于画像分析，排除引用消息避免污染）"""
+        day_msgs = self.chunk_by_date().get(date, [])
+        return [m for m in day_msgs if m.get("type") in PORTRAIT_TEXT_TYPES and (m.get("content") or "").strip()]
+
     def get_sender_name(self, sender_id: int) -> str:
-        """通过 senderID 获取显示名"""
+        """通过 senderID 获取显示名（兼容旧代码）"""
         for s in self.senders:
             if s.get("senderID") == sender_id:
                 return s.get("displayName", "") or s.get("nickname", "") or str(sender_id)
         return str(sender_id)
+
+    def get_name_by_wxid(self, wxid: str) -> str:
+        """通过 wxid 获取显示名"""
+        for s in self.senders:
+            sid = s.get("senderID", 0)
+            swxid = s.get("wxid", "") or f"unknown_{sid}"
+            if swxid == wxid:
+                return s.get("displayName", "") or s.get("nickname", "") or wxid
+        return wxid
 
     def all_dates(self) -> list[str]:
         """返回所有有消息的日期，降序"""
@@ -102,7 +133,7 @@ class ParsedChat:
         """某天的基本统计（纯 Python，不调 AI）"""
         day_msgs = self.chunk_by_date().get(date, [])
         text_msgs = [m for m in day_msgs if m.get("type") in TEXT_TYPES and (m.get("content") or "").strip()]
-        senders_set = {m.get("senderID") for m in day_msgs}
+        senders_set = {m.get("wxid") for m in day_msgs}
 
         # 消息类型分布
         type_counts = defaultdict(int)
@@ -127,16 +158,16 @@ class ParsedChat:
                                     [f"{i:02d}" for i in range(24)]},
         }
 
-    def sender_message_counts(self) -> dict[int, int]:
-        """每个发送者的消息总数"""
+    def sender_message_counts(self) -> dict[str, int]:
+        """每个发送者（按wxid）的消息总数"""
         from collections import Counter
-        return Counter(m.get("senderID") for m in self.messages)
+        return Counter(m.get("wxid") for m in self.messages)
 
-    def sender_text_counts(self) -> dict[int, int]:
-        """每个发送者的文本消息数"""
+    def sender_text_counts(self) -> dict[str, int]:
+        """每个发送者（按wxid）的文本消息数"""
         from collections import Counter
         return Counter(
-            m.get("senderID") for m in self.messages
+            m.get("wxid") for m in self.messages
             if m.get("type") in TEXT_TYPES and (m.get("content") or "").strip()
         )
 
@@ -210,6 +241,79 @@ def estimate_tokens(text: str) -> int:
     return int(chinese_chars * 1.5 + other_chars * 0.3)
 
 
+def _has_meaningful_content(content: str, min_chinese_chars: int = 2) -> bool:
+    """检查内容是否有足够的中文语义（过滤纯数字/纯符号/纯确认消息）
+
+    Args:
+        content: 消息内容
+        min_chinese_chars: 最少中文字符数
+
+    Returns:
+        True 如果值得送给 AI 分析
+    """
+    if not content:
+        return False
+    # 纯数字确认：1, 2, 123 等
+    if content.strip().isdigit():
+        return False
+    # 纯英文确认：ok, OK, okk, OKK 等
+    if re.match(r'^[a-zA-Z]{1,5}$', content.strip()):
+        return False
+    # 至少要有几个中文字符才有分析价值
+    chinese_count = len(re.findall(r'[一-鿿]', content))
+    return chinese_count >= min_chinese_chars
+
+
+def strip_mention_from_content(content: str, member_names: set[str] = None) -> str:
+    """从单条消息内容中移除 @mention 文本
+
+    处理：
+    1. 显式 @：如 "@张三 你好" → "你好"
+    2. 消息开头直接出现群友名字（回复/mention 格式）
+    """
+    if not content or not member_names:
+        return content
+
+    text = content.strip()
+
+    # 1. 移除 "@名字" 模式
+    text = re.sub(r'[@＠]\s*([^\s]{2,10})', '', text)
+
+    # 2. 移除消息开头的群友名字（回复格式："张三 你说的对" → "你说的对"）
+    for name in sorted(member_names, key=len, reverse=True):
+        if text.startswith(name) and len(name) >= 3:
+            rest = text[len(name):]
+            if not rest or rest[0] in ' 　，。！？、：；""''）)】」:：\n':
+                text = rest.lstrip(' 　，。！？、：；""''）)】」:：\n')
+                break
+
+    return text.strip()
+
+
+def build_member_name_set(messages: list[dict], senders: list[dict] = None) -> set[str]:
+    """从消息的 wxid + senders 列表中提取所有群成员名字，用于 @mention 过滤"""
+    if not senders:
+        return set()
+    # 构建 wxid → name 映射
+    wxid_to_name = {}
+    for s in senders:
+        wxid = s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}"
+        name = s.get("displayName", "") or s.get("nickname", "") or ""
+        if name and len(name) >= 2:
+            wxid_to_name[wxid] = name
+    # 从消息中收集出现过的 wxid 对应的名字
+    names = set()
+    seen_wxids = set()
+    for m in messages:
+        wxid = m.get("wxid", "")
+        if wxid and wxid not in seen_wxids:
+            seen_wxids.add(wxid)
+            name = wxid_to_name.get(wxid, "")
+            if name:
+                names.add(name)
+    return names
+
+
 # 模型上下文窗口（安全阈值，留 20% 给 prompt 模板和输出）
 _MODEL_CONTEXT_LIMITS = {
     "14b": 100_000,   # qwen2.5:14b → 128K 上下文
@@ -232,23 +336,27 @@ def get_model_token_limit(model: str = "") -> int:
 def format_messages_for_prompt(messages: list[dict],
                                 get_sender_name,
                                 max_chars: int = 50000,
-                                model: str = "") -> str:
+                                model: str = "",
+                                member_names: set[str] = None,
+                                senders: list[dict] = None) -> str:
     """将消息列表格式化为 AI prompt 的聊天记录文本
 
     Args:
         messages: 消息列表
         get_sender_name: 获取发言人名称的函数
-        max_chars: 最大字符数限制（如果 model 指定了上下文限制则优先用 token 估算）
+        max_chars: 最大字符数限制
         model: 模型名，用于根据上下文窗口调整截断阈值
+        member_names: 群成员名字集合（用于剥离 @mention）
+        senders: sender 列表（用于自动构建 member_names）
     """
-    # 根据模型自动调整截断上限
     if model:
         token_limit = get_model_token_limit(model)
-        # 估算每条消息的 prompt 模板开销约占 30%，留 70% 给聊天内容
         effective_token_limit = int(token_limit * 0.7)
-        # 保守估计：中文为主时 1 字符 ≈ 1.5 token
         char_limit = int(effective_token_limit / 1.5)
         max_chars = min(max_chars, char_limit)
+
+    if member_names is None and senders:
+        member_names = build_member_name_set(messages, senders)
 
     lines = []
     total = 0
@@ -257,8 +365,11 @@ def format_messages_for_prompt(messages: list[dict],
     for msg in messages:
         time_str = msg.get("formattedTime", "")[11:16]  # "HH:MM"
         sender = get_sender_name(msg.get("senderID", 0))
-        content = (msg.get("content") or "").strip()
-        if not content:
+        raw_content = (msg.get("content") or "").strip()
+        if not raw_content:
+            continue
+        content = strip_mention_from_content(raw_content, member_names)
+        if not content or not _has_meaningful_content(content):
             continue
 
         line = f"[{time_str}] {sender}: {content}"
@@ -276,16 +387,27 @@ def format_messages_for_prompt(messages: list[dict],
 
 def format_sender_messages_for_portrait(messages: list[dict],
                                           sender_name: str,
-                                          max_chars: int = 30000) -> str:
-    """将某个成员的发言格式化为画像分析的 prompt"""
+                                          max_chars: int = 30000,
+                                          member_names: set[str] = None) -> str:
+    """将某个成员的发言格式化为画像分析的 prompt
+
+    Args:
+        messages: 目标成员的消息列表
+        sender_name: 发言人名称
+        max_chars: 最大字符数
+        member_names: 群成员名字集合（用于剥离 @mention）
+    """
     lines = [f"{sender_name} 的发言记录：", "---"]
     total = 0
     truncated = False
 
     for msg in messages:
         time_str = msg.get("formattedTime", "")[:16]  # "2025-09-01 14:30"
-        content = (msg.get("content") or "").strip()
-        if not content:
+        raw_content = (msg.get("content") or "").strip()
+        if not raw_content:
+            continue
+        content = strip_mention_from_content(raw_content, member_names) if member_names else raw_content
+        if not content or not _has_meaningful_content(content):
             continue
 
         line = f"[{time_str}] {content}"
@@ -299,3 +421,126 @@ def format_sender_messages_for_portrait(messages: list[dict],
     if truncated:
         result += f"\n\n... (发言过多，已截断至 {len(lines) - 2} 条)"
     return result
+
+
+# ---- 上下文安全分块工具 (v0.5) ----
+
+def chunk_messages_by_month(messages: list[dict],
+                             get_sender_name,
+                             max_chars_per_chunk: int = 3000) -> list[tuple[str, str]]:
+    """按月分块发言，每块不超过 max_chars
+
+    用于深度画像的月度切片分析：每个月的发言单独给 AI 做轻量分析
+
+    Args:
+        messages: 目标成员的消息列表（已过滤 senderID）
+        get_sender_name: 获取发言人名称的函数
+        max_chars_per_chunk: 每块最大字符数
+
+    Returns:
+        [(month_label, chunk_text)] 按月份升序
+    """
+    from collections import defaultdict
+
+    # 按月分组
+    by_month: dict[str, list[dict]] = defaultdict(list)
+    for msg in messages:
+        ft = msg.get("formattedTime", "")
+        if len(ft) >= 7:
+            month = ft[:7]  # "2025-01"
+            by_month[month].append(msg)
+
+    chunks = []
+    for month in sorted(by_month.keys()):
+        month_msgs = by_month[month]
+        lines = [f"{month} 的发言：", "---"]
+        total = 0
+        truncated = False
+        for msg in month_msgs:
+            time_str = msg.get("formattedTime", "")[:16]
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            line = f"[{time_str}] {content}"
+            total += len(line)
+            if total > max_chars_per_chunk:
+                truncated = True
+                break
+            lines.append(line)
+
+        text = "\n".join(lines)
+        if truncated:
+            text += f"\n... (本月发言过多，已截断)"
+
+        # 最少 3 条消息才值得分析
+        if len(lines) > 3:
+            chunks.append((month, text))
+
+    return chunks
+
+
+def extract_interaction_context(messages: list[dict],
+                                 wxid_a: str,
+                                 wxid_b: str,
+                                 get_name_fn,
+                                 max_chars: int = 1000,
+                                 window_size: int = 10) -> str:
+    """提取两个成员互动的上下文片段
+
+    Args:
+        messages: 全部消息列表（按时间排序）
+        wxid_a: 成员 A 的 wxid
+        wxid_b: 成员 B 的 wxid
+        get_name_fn: wxid → 名字 的映射函数
+        max_chars: 返回文本的最大字符数
+        window_size: 以目标为中心扩展的窗口大小
+    """
+    all_msgs = sorted(messages, key=lambda m: m.get("createTime", 0))
+    n = len(all_msgs)
+
+    # 找两人先后发言的"接触点"
+    contact_indices = set()
+    for i, msg in enumerate(all_msgs):
+        mwxid = msg.get("wxid", "")
+        if mwxid != wxid_a and mwxid != wxid_b:
+            continue
+        ts = msg.get("createTime", 0)
+        other_wxid = wxid_b if mwxid == wxid_a else wxid_a
+        for j in range(max(0, i - 50), min(n, i + 50)):
+            if j == i:
+                continue
+            other = all_msgs[j]
+            if other.get("wxid") == other_wxid:
+                if abs(other.get("createTime", 0) - ts) <= 300:
+                    contact_indices.add(i)
+                    contact_indices.add(j)
+
+    if not contact_indices:
+        return ""
+
+    # 取接触点周围的窗口
+    window_indices = set()
+    for idx in contact_indices:
+        for w in range(max(0, idx - window_size), min(n, idx + window_size + 1)):
+            window_indices.add(w)
+
+    sorted_indices = sorted(window_indices)
+
+    # 格式化为文本
+    lines = []
+    total = 0
+    for idx in sorted_indices:
+        msg = all_msgs[idx]
+        sender = get_name_fn(msg.get("wxid", ""))
+        time_str = msg.get("formattedTime", "")[11:16]
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        line = f"[{time_str}] {sender}: {content}"
+        total += len(line)
+        if total > max_chars:
+            break
+        lines.append(line)
+
+    return "\n".join(lines)
+

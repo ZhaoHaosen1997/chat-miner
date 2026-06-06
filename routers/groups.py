@@ -6,7 +6,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 
 from config import config
@@ -122,8 +122,8 @@ async def api_upload_group(file: UploadFile = File(...)):
     # 写入成员 + 消息计数
     upsert_members(group_id, chat.senders)
     counts = chat.sender_text_counts()
-    for sender_id, count in counts.items():
-        update_member_message_count(group_id, sender_id, count)
+    for wxid_val, count in counts.items():
+        update_member_message_count(group_id, wxid_val, count)
 
     # 缓存
     _chat_cache[group_id] = chat
@@ -147,8 +147,13 @@ async def api_upload_group(file: UploadFile = File(...)):
 
 
 @router.post("/{group_id}/import")
-async def api_import_to_group(group_id: int, file: UploadFile = File(...)):
-    """向已有群追加导入 JSON 数据（去重合并）"""
+async def api_import_to_group(group_id: int, file: UploadFile = File(...),
+                               mode: str = "append"):
+    """向已有群导入 JSON 数据
+
+    Args:
+        mode: "append"=去重追加（默认）, "replace"=完全替换
+    """
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -156,92 +161,122 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".json"):
         raise HTTPException(400, detail="请上传 .json 格式的聊天记录文件")
 
-    # 保存新文件（与已有数据放在同一目录）
+    if mode not in ("append", "replace"):
+        raise HTTPException(400, detail="mode 必须是 append 或 replace")
+
     config.ensure_dirs()
     group_dir = Path(group["file_path"]).parent if group.get("file_path") else config.DATA_DIR / f"group_{group_id}"
     group_dir.mkdir(parents=True, exist_ok=True)
-    new_file_path = group_dir / f"import_{Path(file.filename).name}"
 
+    # 保存上传文件
+    upload_path = group_dir / file.filename
     try:
         content = await file.read()
-        with open(new_file_path, "wb") as f:
+        with open(upload_path, "wb") as f:
             f.write(content)
     except Exception as e:
         raise HTTPException(500, detail=f"文件保存失败: {e}")
 
     # 解析新 JSON
     try:
-        new_chat = ParsedChat(new_file_path).load()
+        new_chat = ParsedChat(upload_path).load()
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
 
-    # 检测群名变化
-    if new_chat.group_name and new_chat.group_name != group["name"]:
-        logger.info(f"群名不一致: DB={group['name']}, JSON={new_chat.group_name}，保留原群名")
-
-    # 加载已有数据并合并
     existing_chat = get_chat_cache(group_id)
-    existing_msgs = existing_chat.messages if existing_chat else []
 
-    merge_result = merge_chat_data(existing_msgs, new_chat.messages)
+    # === wxid → senderID 映射：同一个人多次导出 senderID 可能不同 ===
+    if existing_chat and mode == "append":
+        # 构建已有数据的 wxid → senderID 映射
+        wxid_to_sid: dict[str, int] = {}
+        for s in existing_chat.senders:
+            wxid = s.get("wxid", "")
+            if wxid:
+                wxid_to_sid[wxid] = s.get("senderID", 0)
 
-    if merge_result["added"]:
-        # 合并消息到已有 chat 对象
-        if existing_chat:
+        # 检查新数据中的 sender，同 wxid 但 senderID 不同 → remap
+        remap: dict[int, int] = {}  # old_sid → new_sid
+        for s in new_chat.senders:
+            wxid = s.get("wxid", "")
+            old_sid = wxid_to_sid.get(wxid, 0)
+            new_sid = s.get("senderID", 0)
+            if old_sid and old_sid != new_sid:
+                remap[new_sid] = old_sid
+                s["senderID"] = old_sid  # 更新 sender 记录
+
+        # remap 消息中的 senderID
+        if remap:
+            remapped = 0
+            for m in new_chat.messages:
+                sid = m.get("senderID", 0)
+                if sid in remap:
+                    m["senderID"] = remap[sid]
+                    remapped += 1
+            logger.info(f"senderID remap: {len(remap)} 人, {remapped} 条消息")
+
+    if mode == "replace" or not existing_chat:
+        # 完全替换
+        merged_chat = new_chat
+        added = len(new_chat.messages)
+        skipped = 0
+    else:
+        # 去重追加
+        merge_result = merge_chat_data(existing_chat.messages, new_chat.messages)
+        if merge_result["added"]:
             existing_chat.messages.extend(merge_result["added"])
             existing_chat.messages.sort(key=lambda m: m.get("createTime", 0))
-            existing_chat._by_date = None  # 使分块缓存失效
-        else:
-            # 首次导入到这个群
-            existing_chat = new_chat
+            existing_chat._by_date = None
+        merged_chat = existing_chat
+        added = len(merge_result["added"])
+        skipped = merge_result["skipped"]
 
-        # 更新数据库
-        date_start, date_end = existing_chat.get_date_range()
+    # 写回完整数据集到磁盘（重启后数据不丢失）
+    merged_path = group_dir / "merged_data.json"
+    try:
+        merged_data = {
+            "session": merged_chat.session,
+            "senders": merged_chat.senders,
+            "messages": merged_chat.messages,
+        }
+        with open(merged_path, "w", encoding="utf-8") as f:
+            json.dump(merged_data, f, ensure_ascii=False)
+        logger.info(f"完整数据已写入: {merged_path} ({len(merged_chat.messages)} 条消息)")
+    except Exception as e:
+        logger.warning(f"写入合并文件失败: {e}，数据仅存于内存中")
 
-        # 更新群信息
-        conn = get_conn()
-        conn.execute(
-            """UPDATE chat_groups SET
-               message_count=?, sender_count=?,
-               date_range_start=?, date_range_end=?
-               WHERE id=?""",
-            (len(existing_chat.messages), len(existing_chat.senders),
-             date_start, date_end, group_id)
-        )
-        conn.commit()
-        conn.close()
+    # 更新数据库
+    date_start, date_end = merged_chat.get_date_range()
+    conn = get_conn()
+    conn.execute(
+        """UPDATE chat_groups SET
+           message_count=?, sender_count=?,
+           date_range_start=?, date_range_end=?, file_path=?
+           WHERE id=?""",
+        (len(merged_chat.messages), len(merged_chat.senders),
+         date_start, date_end, str(merged_path), group_id)
+    )
+    conn.commit()
+    conn.close()
 
-        # 合并成员列表
-        upsert_members(group_id, existing_chat.senders)
-        counts = existing_chat.sender_text_counts()
-        for sender_id, count in counts.items():
-            update_member_message_count(group_id, sender_id, count)
+    # 更新成员
+    upsert_members(group_id, merged_chat.senders)
+    counts = merged_chat.sender_text_counts()
+    for wxid_val, count in counts.items():
+        update_member_message_count(group_id, wxid_val, count)
 
-        # 更新 file_path（指向导入文件所在目录）
-        if not group.get("file_path"):
-            conn2 = get_conn()
-            conn2.execute("UPDATE chat_groups SET file_path=? WHERE id=?",
-                          (str(new_file_path), group_id))
-            conn2.commit()
-            conn2.close()
-
-        _invalidate_cache(group_id)
-        _chat_cache[group_id] = existing_chat
-
-        logger.info(f"追加导入: 群={group['name']}, 新增{len(merge_result['added'])}条, "
-                    f"跳过{merge_result['skipped']}条重复")
-    else:
-        logger.info(f"追加导入: 全部 {merge_result['total_new']} 条消息均为重复，已跳过")
+    # 刷新缓存
+    _invalidate_cache(group_id)
+    _chat_cache[group_id] = merged_chat
 
     return {
         "code": 200,
-        "message": f"追加导入完成：新增 {len(merge_result['added'])} 条，跳过 {merge_result['skipped']} 条重复",
+        "message": f"导入完成：新增 {added} 条，跳过 {skipped} 条重复",
         "data": {
             "group_id": group_id,
-            "added": len(merge_result["added"]),
-            "skipped": merge_result["skipped"],
-            "total_in_file": merge_result["total_new"],
-            "total_now": (len(existing_chat.messages) if existing_chat else len(new_chat.messages)),
+            "added": added,
+            "skipped": skipped,
+            "total_now": len(merged_chat.messages),
+            "date_range": [date_start, date_end],
         },
     }
 

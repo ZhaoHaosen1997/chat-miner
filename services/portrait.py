@@ -8,6 +8,7 @@ from typing import Optional
 from models.database import (
     get_members, get_portrait, save_member_portrait, log_analysis,
     get_member_by_sender_id, get_analyzed_dates,
+    save_portrait_version, get_latest_portrait_version,
 )
 from services.analyzer import call_ollama_chat
 from services.parser import format_sender_messages_for_portrait, ParsedChat
@@ -19,33 +20,29 @@ logger = logging.getLogger(__name__)
 async def generate_single_portrait(
     group_id: int,
     group_name: str,
-    sender_id: int,
+    wxid: str,
     sender_name: str,
     chat: ParsedChat,
     model: str = "",
-    task=None,  # TaskInfo for progress reporting
+    task=None,
 ) -> dict:
     """为单个成员生成画像
 
     Args:
         group_id: 群 ID
         group_name: 群名
-        sender_id: JSON 中的原始 senderID
+        wxid: 成员的微信 wxid
         sender_name: 发言人名称
         chat: 解析后的聊天数据
         model: 模型名
-
-    Returns:
-        {"success": bool, "data": dict|None, ...}
     """
-    # 收集该成员在所有已分析日期中的发言
     all_msgs = []
     analyzed_dates = get_analyzed_dates(group_id)
     actual_dates = set()
 
     for date in analyzed_dates:
-        day_msgs = chat.get_text_messages_for_date(date)
-        sender_day_msgs = [m for m in day_msgs if m.get("senderID") == sender_id]
+        day_msgs = chat.get_portrait_messages_for_date(date)
+        sender_day_msgs = [m for m in day_msgs if m.get("wxid") == wxid]
         if sender_day_msgs:
             actual_dates.add(date)
         all_msgs.extend(sender_day_msgs)
@@ -66,8 +63,13 @@ async def generate_single_portrait(
             "duration_ms": 0,
         }
 
-    # 格式化发言
-    chat_text = format_sender_messages_for_portrait(all_msgs, sender_name)
+    # 格式化发言（剥离 @mention 避免污染分析）
+    member_names = set()
+    for s in chat.senders:
+        name = chat.get_sender_name(s.get("senderID"))
+        if name and len(name) >= 2:
+            member_names.add(name)
+    chat_text = format_sender_messages_for_portrait(all_msgs, sender_name, member_names=member_names)
 
     logger.info(f"生成画像: {sender_name} ({len(all_msgs)} 条消息, pipeline模式)")
     import time as _time
@@ -128,15 +130,13 @@ async def refresh_portraits(
     results = []
 
     for member in members:
-        sender_id = member["sender_id"]
+        wxid = member["wxid"]
         sender_name = member["display_name"] or member["nickname"]
 
-        # 检查是否需要刷新
         existing = get_portrait(group_id, member["id"])
         needs_refresh = force or (existing is None)
 
         if not needs_refresh and existing:
-            # 检查累积新消息是否超过阈值
             new_msgs = member["message_count"] - existing.get("total_analyzed_messages", 0)
             if new_msgs >= config.PORTRAIT_REFRESH_DAYS * 50:
                 needs_refresh = True
@@ -145,13 +145,26 @@ async def refresh_portraits(
             results.append({"member": member, "portrait": existing, "refreshed": False})
             continue
 
-        # 生成/刷新画像
         result = await generate_single_portrait(
-            group_id, group_name, sender_id, sender_name, chat, model
+            group_id, group_name, wxid, sender_name, chat, model
         )
 
         if result["success"] and result["data"]:
             import json
+            # 归档旧版本
+            existing = get_portrait(group_id, member["id"])
+            if existing:
+                latest_ver = get_latest_portrait_version(group_id, member["id"])
+                save_portrait_version(
+                    group_id=group_id, member_id=member["id"],
+                    version=latest_ver + 1,
+                    portrait_json=existing.get("portrait_json", "{}"),
+                    analyzed_msg_count=existing.get("total_analyzed_messages", 0),
+                    data_start=existing.get("data_start_date", ""),
+                    data_end=existing.get("data_end_date", ""),
+                    model_used=result.get("model", ""),
+                    duration_ms=result.get("duration_ms", 0),
+                )
             portrait_json = json.dumps(result["data"], ensure_ascii=False)
             save_member_portrait(
                 group_id=group_id,

@@ -67,6 +67,34 @@ export const refreshPortraitAsync = async (gid, mid) => {
 export const refreshAllPortraits = (gid) =>
   request(`/groups/${gid}/portraits/refresh-all`, { method: 'POST' })
 
+// --- 深度画像 ---
+export const getPortraitStats = (gid, mid) =>
+  request(`/groups/${gid}/portrait/${mid}/stats`)
+export const getPortraitHistory = (gid, mid) =>
+  request(`/groups/${gid}/portrait/${mid}/history`)
+export const generateDeepPortrait = async (gid, mid) => {
+  const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/deep`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
+// 统一画像分析（v0.5.1 合并：基础+深度一步完成）
+// max_days: 0=全量, 10=最近10天增量刷新
+export const analyzePortrait = async (gid, mid, maxDays = 0) => {
+  const params = maxDays > 0 ? `?max_days=${maxDays}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/analyze${params}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
+// 一键分析全群画像
+export const analyzeAllPortraits = async (gid) => {
+  const res = await fetch(`${BASE}/groups/${gid}/portraits/analyze-all`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
+
 // --- 统计 ---
 export const getGroupStats = (gid) => request(`/groups/${gid}/stats`)
 export const getGlobalStats = () => request('/stats/global')

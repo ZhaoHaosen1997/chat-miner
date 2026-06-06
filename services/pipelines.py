@@ -246,14 +246,8 @@ def _parse_active_hours(raw) -> dict:
 
 
 async def _run_sub(task, step_name: str, step_idx: int, total: int,
-                   system: str, user: str, model: str = "",
-                   result_validator = None) -> Optional[dict]:
-    """执行一个子任务，失败自动重试（最多 3 次），返回解析后的 dict
-
-    Args:
-        result_validator: 可选的结果校验函数，接收 (data) 返回 (is_valid, hint)
-                          如果前次输出格式不对，hint 会追加到重试 prompt 中
-    """
+                   system: str, user: str, model: str = "") -> Optional[dict]:
+    """执行一个子任务，失败自动重试（最多 3 次），返回解析后的 dict"""
     import asyncio
 
     last_error = ""
@@ -286,17 +280,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
         # --- 主模型 ---
         start = time.time()
-        try:
-            result = await asyncio.wait_for(
-                call_ollama_chat(system, retry_user, model, timeout=40),  # 单次调用 40s 超时
-                timeout=50  # asyncio 兜底
-            )
-        except asyncio.TimeoutError:
-            last_error = "主模型调用超时"
-            logger.warning(f"{step_name}: {last_error}")
-            if attempt < MAX_RETRIES:
-                await asyncio.sleep(2)
-            continue
+        result = await call_ollama_chat(system, retry_user, model, timeout=60)
 
         duration = int((time.time() - start) * 1000)
         logger.info(f"{step_name} 主模型: success={result['success']}, duration={duration}ms, model={result.get('model','')}")
@@ -314,17 +298,9 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
             logger.info(f"{step_name}: 主模型失败，1s后尝试 {config.OLLAMA_MODEL_FALLBACK}")
             await asyncio.sleep(1)
             start2 = time.time()
-            try:
-                result2 = await asyncio.wait_for(
-                    call_ollama_chat(system, retry_user, config.OLLAMA_MODEL_FALLBACK, timeout=40),
-                    timeout=50
-                )
-            except asyncio.TimeoutError:
-                last_error = "fallback 模型调用超时"
-                logger.warning(f"{step_name}: {last_error}")
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(2)
-                continue
+            result2 = await call_ollama_chat(
+                system, retry_user, config.OLLAMA_MODEL_FALLBACK, timeout=60
+            )
 
             d2 = int((time.time() - start2) * 1000)
             logger.info(f"{step_name} fallback: success={result2['success']}, duration={d2}ms")
@@ -436,7 +412,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if task:
         task.model_used = config.OLLAMA_MODEL
         # 批量任务不在这里 finish，由外层循环控制
-        if task.type != "analyze_all":
+        if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
             task.finish(success=True)
         # 持久化任务记录
         _save_pipeline_record(task, group_name, date)
@@ -452,7 +428,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
     if task:
         task.update("inference", f"(0/4) 分析 {sender_name}...")
-        task.steps.clear()
+        if task.type != "full_portrait":
+            task.steps.clear()  # 统一分析时不重置，追加到已有步骤
 
     prompt_user = f"{chat_text}\n\n以上是 {sender_name} 的发言。"
     role_opts = "气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人"
@@ -521,11 +498,213 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
     if task:
         task.model_used = config.OLLAMA_MODEL
-        if task.type != "analyze_all":
+        if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
             task.finish(success=True)
         _save_pipeline_record(task, group_name, sender_name)
 
     return portrait
+
+
+# ---- 深度画像 Pipeline (v0.5) ----
+# 基于 Python 统计数据摘要做 AI 分析，不直接读原始消息
+
+DEEP_PORTRAIT_PROMPTS = {
+    "emotion": {
+        "system": "你是一个情绪分析工具。基于数据摘要，用一句话描述情绪特征。不要输出任何其他内容。",
+        "user": "成员 {name} 的情绪数据：\n{emotion_summary}\n\n用一句话描述 {name} 的整体情绪特征（如\"乐天派，情绪稳定\"或\"情绪波动大，容易被激怒\"）：",
+    },
+    "language": {
+        "system": "你是一个语言风格分析工具。基于数据摘要，用 2-3 句话描述语言风格。不要输出任何其他内容。",
+        "user": "成员 {name} 的语言数据：\n{language_summary}\n\n用 2-3 句话描述 {name} 的语言风格（包括句长特点、emoji使用习惯、口头表达特点）：",
+    },
+    "emotion_trend": {
+        "system": "你是一个情绪趋势分析工具。基于情绪数据，用一句话描述趋势。不要输出任何其他内容。",
+        "user": "成员 {name} 的每日情绪变化：\n{emotion_details}\n\n用一句话描述 {name} 的情绪趋势（如\"越来越活跃积极\"、\"情绪相对稳定\"、\"最近开始变沉默\"）：",
+    },
+    "monthly_synthesis": {
+        "system": "你是一个总结工具。把多个月的分析结果整合成一段趋势描述。不要输出任何其他内容。",
+        "user": "成员 {name} 各月分析摘要：\n{monthly_summaries}\n\n用 2-3 句话总结 {name} 在 {total_months} 个月中的变化趋势（话题变化、活跃度变化、情绪变化）：",
+    },
+}
+
+
+async def _run_monthly_slice(task, month_label: str, chat_text: str,
+                              name: str, model: str = "") -> Optional[dict]:
+    """对单个自然月的发言做极简 AI 分析（2 个子任务：话题 + 情绪）
+
+    Args:
+        month_label: "2025-01"
+        chat_text: 该月的格式化发言文本（已截断 ≤ 3000 字）
+        name: 成员名
+        model: 模型名
+
+    Returns:
+        {"month": "2025-01", "topics": [...], "mood": "..."} 或 None
+    """
+    safe_chat = chat_text.replace("{", "{{").replace("}", "}}")
+    safe_name = name.replace("{", "{{").replace("}", "}}")
+
+    # 子任务 1：当月话题
+    topic_system = "你是一个话题提取工具。只输出 2-3 个话题关键词，逗号分隔。不要输出任何其他内容。"
+    topic_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。输出 2-3 个ta关注的话题关键词："
+    topic_result = await _run_sub(task, f"月度话题 {month_label}", 0, 2,
+                                   topic_system, topic_user, model)
+
+    # 子任务 2：当月情绪
+    mood_system = "你是一个情绪识别工具。只回答一个词。"
+    mood_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。ta 这个月的发言情绪是什么？只回答一个词：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕"
+    mood_result = await _run_sub(task, f"月度情绪 {month_label}", 0, 2,
+                                  mood_system, mood_user, model)
+
+    topics = _parse_kw(topic_result) if topic_result else ["未识别"]
+    mood, _ = _parse_mood(mood_result)
+
+    return {"month": month_label, "topics": topics, "mood": mood}
+
+
+async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发言（用于月度切片）
+                                      messages: list[dict],  # 目标成员的全部消息
+                                      sender_name: str,
+                                      group_name: str,
+                                      group_id: int,
+                                      msg_count: int,
+                                      stats_summary: dict,  # Python 统计数据摘要
+                                      task=None) -> dict:
+    """执行深度画像 Pipeline：月度切片 + 数据摘要 AI 分析
+
+    不替代 run_portrait_pipeline，而是作为补充，产出更深维度的画像数据。
+
+    Args:
+        chat_text: 简短发言样本（用于月度切片分析，已截断）
+        messages: 目标成员的全部消息（用于按月分块）
+        sender_name: 成员名
+        group_name: 群名
+        group_id: 群 ID
+        msg_count: 消息总数
+        stats_summary: stats_engine.format_stats_for_ai() 的产出
+        task: TaskInfo
+
+    Returns:
+        dict with emotion_profile, language_style, activity_deep, monthly_analysis
+    """
+    import time as _time
+    from services.stats_engine import compute_emotion_timeline
+    from services.parser import chunk_messages_by_month
+
+    if task:
+        task.update("inference", "深度画像分析中...")
+        if task.type != "full_portrait":
+            task.steps.clear()  # 统一分析时不重置，追加到已有步骤
+
+    failed_steps = []
+    model = config.OLLAMA_MODEL
+    safe_name = sender_name.replace("{", "{{").replace("}", "}}")
+
+    # ---- 1. 情绪画像（AI 基于 Python 统计数据） ----
+    emotion_raw = stats_summary.get("emotion_summary", "暂无数据")
+    emo_user = DEEP_PORTRAIT_PROMPTS["emotion"]["user"].format(
+        name=safe_name, emotion_summary=emotion_raw
+    )
+    emo_data = await _run_sub(task, "深度-情绪总结", 1, 6,
+                               DEEP_PORTRAIT_PROMPTS["emotion"]["system"], emo_user, model)
+    emotion_primary = str(emo_data).strip() if emo_data else "暂无数据"
+
+    # 情绪趋势
+    emotion_timeline = compute_emotion_timeline(group_id)
+    emotion_details = "\n".join(
+        f"{e['date']} {e['mood_emoji']}{e['mood']}" for e in emotion_timeline[-30:]
+    ) if emotion_timeline else "暂无情绪数据"
+    trend_user = DEEP_PORTRAIT_PROMPTS["emotion_trend"]["user"].format(
+        name=safe_name, emotion_details=emotion_details
+    )
+    trend_data = await _run_sub(task, "深度-情绪趋势", 2, 6,
+                                 DEEP_PORTRAIT_PROMPTS["emotion_trend"]["system"],
+                                 trend_user, model)
+    emotion_trend = str(trend_data).strip() if trend_data else "暂无数据"
+
+    emotion_profile = {
+        "primary": emotion_primary,
+        "trend": emotion_trend,
+        "timeline": emotion_timeline[-30:] if emotion_timeline else [],
+    }
+    if emo_data is None:
+        failed_steps.append("emotion")
+
+    # ---- 2. 语言风格洞察（AI 基于 Python 统计数据） ----
+    lang_raw = stats_summary.get("language_summary", "暂无数据")
+    lang_user = DEEP_PORTRAIT_PROMPTS["language"]["user"].format(
+        name=safe_name, language_summary=lang_raw
+    )
+    lang_data = await _run_sub(task, "深度-语言风格", 3, 6,
+                                DEEP_PORTRAIT_PROMPTS["language"]["system"],
+                                lang_user, model)
+    style_notes = str(lang_data).strip() if lang_data else "暂无数据"
+    if lang_data is None:
+        failed_steps.append("language")
+
+    language_style = {
+        "style_notes": style_notes,
+    }
+
+    # ---- 3. 月度切片分析 ----
+    from services.parser import ParsedChat
+    # 获取 sender_name 对应的 sender_id（从 messages 中推断）
+    sender_id = messages[0].get("senderID") if messages else None
+    if sender_id is None:
+        monthly_chunks = []
+    else:
+        # 按自然月分块
+        monthly_chunks = chunk_messages_by_month(messages, lambda sid: sender_name, max_chars_per_chunk=3000)
+
+    monthly_analyses = []
+    if monthly_chunks and task:
+        task.update("inference", f"月度切片分析 (0/{len(monthly_chunks)})...")
+
+    for i, (month_label, chunk) in enumerate(monthly_chunks):
+        if task:
+            task.update("inference", f"月度切片 ({i+1}/{len(monthly_chunks)}) {month_label}...")
+        analysis = await _run_monthly_slice(task, month_label, chunk, sender_name, model)
+        if analysis:
+            monthly_analyses.append(analysis)
+
+    # 月度汇总
+    monthly_summary_text = ""
+    if monthly_analyses:
+        lines = []
+        for ma in monthly_analyses:
+            lines.append(f"{ma['month']}：话题={'、'.join(ma['topics'])}，情绪={ma['mood']}")
+        monthly_summary_text = "\n".join(lines)
+
+        synth_user = DEEP_PORTRAIT_PROMPTS["monthly_synthesis"]["user"].format(
+            name=safe_name,
+            monthly_summaries=monthly_summary_text,
+            total_months=len(monthly_analyses),
+        )
+        synth_data = await _run_sub(task, "深度-月度汇总", 4, 6,
+                                     DEEP_PORTRAIT_PROMPTS["monthly_synthesis"]["system"],
+                                     synth_user, model)
+        monthly_synthesis = str(synth_data).strip() if synth_data else ""
+    else:
+        monthly_synthesis = "数据不足，无法生成月度汇总"
+
+    if task:
+        task.model_used = model
+        if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
+            task.finish(success=True)
+        _save_pipeline_record(task, group_name, sender_name)
+
+    deep_portrait = {
+        "emotion_profile": emotion_profile,
+        "language_style": language_style,
+        "monthly_analyses": monthly_analyses,
+        "monthly_synthesis": monthly_synthesis,
+    }
+    if failed_steps:
+        deep_portrait["_partial"] = True
+        deep_portrait["_failed_steps"] = failed_steps
+        logger.warning(f"深度画像部分成功: {len(failed_steps)} 个子任务失败: {failed_steps}")
+
+    return deep_portrait
 
 
 # ---- 辅助函数 ----

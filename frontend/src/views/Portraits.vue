@@ -1,7 +1,9 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
-import { getPortraits, refreshPortraitAsync, getMembers } from '../api/index.js'
-import { Loader2, Sparkles, RefreshCw, X, User, MessageSquare, Clock, Tag } from 'lucide-vue-next'
+import { ref, computed, inject, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers } from '../api/index.js'
+import { Loader2, Sparkles, RefreshCw, User, Zap, Clock } from 'lucide-vue-next'
+const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
 const activeTaskId = inject('activeTaskId')
@@ -9,8 +11,8 @@ const activeTaskId = inject('activeTaskId')
 const portraits = ref([])
 const members = ref([])
 const loading = ref(false)
-const refreshing = ref(null)
-const selected = ref(null)
+const refreshing = ref(null)      // 单个刷新的 memberId
+const batchAnalyzing = ref(false) // 批量分析中
 const error = ref('')
 
 async function load() {
@@ -30,11 +32,12 @@ async function load() {
 
 watch(currentGroup, load, { immediate: true })
 
+// 增量刷新（最近10天）
 async function refreshOne(memberId) {
   if (refreshing.value === memberId || activeTaskId.value) return
   refreshing.value = memberId
   try {
-    const result = await refreshPortraitAsync(currentGroup.value.id, memberId)
+    const result = await analyzePortrait(currentGroup.value.id, memberId, 10)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -44,11 +47,35 @@ async function refreshOne(memberId) {
   }
 }
 
-function onTaskDone(data) {
-  refreshing.value = null
-  if (data.status === 'done') {
-    load()
-    triggerRefresh?.()
+// 全量生成（无画像的成员）
+async function generateOne(memberId) {
+  if (refreshing.value === memberId || activeTaskId.value) return
+  refreshing.value = memberId
+  try {
+    const result = await analyzePortrait(currentGroup.value.id, memberId, 0)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    }
+  } catch (e) {
+    console.error(e)
+    refreshing.value = null
+  }
+}
+
+// 一键分析全部
+async function analyzeAll() {
+  if (batchAnalyzing.value || activeTaskId.value) return
+  batchAnalyzing.value = true
+  try {
+    const result = await analyzeAllPortraits(currentGroup.value.id)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    } else {
+      batchAnalyzing.value = false
+    }
+  } catch (e) {
+    console.error(e)
+    batchAnalyzing.value = false
   }
 }
 
@@ -56,16 +83,17 @@ function onTaskDone(data) {
 watch(activeTaskId, (newVal, oldVal) => {
   if (oldVal && !newVal) {
     refreshing.value = null
+    batchAnalyzing.value = false
     load()
     triggerRefresh?.()
   }
 })
 
 function openDetail(portrait) {
-  selected.value = portrait
+  router.push(`/portrait/${portrait.member_id}`)
 }
 
-// 将 portraits 和 members 合并
+// 合并 portraits 和 members
 const mergedPortraits = ref([])
 watch([portraits, members], ([p, m]) => {
   mergedPortraits.value = p.map(pt => {
@@ -73,6 +101,23 @@ watch([portraits, members], ([p, m]) => {
     return { ...pt, ...member }
   })
 })
+
+// 计算最后刷新距今几天
+function daysSince(dateStr) {
+  if (!dateStr) return 999
+  const then = new Date(dateStr)
+  const now = new Date()
+  return Math.floor((now - then) / (1000 * 60 * 60 * 24))
+}
+
+function isStale(lastUpdated) {
+  return daysSince(lastUpdated) > 10
+}
+
+// 未生成画像的成员数
+const unanalyzedCount = computed(() =>
+  members.value.filter(m => !portraits.value.find(p => p.member_id === m.id)).length
+)
 </script>
 
 <template>
@@ -83,8 +128,19 @@ watch([portraits, members], ([p, m]) => {
         <h2 class="text-xl font-bold text-slate-800">群友画像</h2>
         <p class="text-sm text-slate-400 mt-1">基于 AI 分析的成员性格、风格和角色</p>
       </div>
-      <div class="text-xs text-slate-400">
-        {{ portraits.length }} / {{ members.length }} 人已生成画像
+      <div class="flex items-center gap-3">
+        <div class="text-xs text-slate-400">
+          {{ portraits.length }} / {{ members.length }} 人
+        </div>
+        <button
+          v-if="members.length > 0"
+          @click="analyzeAll"
+          :disabled="batchAnalyzing || !!activeTaskId"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+        >
+          <Zap :class="['w-3.5 h-3.5', batchAnalyzing && 'animate-spin']" />
+          {{ batchAnalyzing ? '分析中...' : '一键分析全部' }}
+        </button>
       </div>
     </div>
 
@@ -99,7 +155,10 @@ watch([portraits, members], ([p, m]) => {
         v-for="p in mergedPortraits"
         :key="p.member_id"
         @click="openDetail(p)"
-        class="card p-4 cursor-pointer hover:border-indigo-200 transition-all group"
+        :class="[
+          'card p-4 cursor-pointer hover:border-indigo-200 transition-all group',
+          isStale(p.last_updated) && 'ring-1 ring-amber-200',
+        ]"
       >
         <!-- 头像 + name -->
         <div class="flex items-center gap-3 mb-3">
@@ -120,9 +179,15 @@ watch([portraits, members], ([p, m]) => {
           </div>
         </div>
 
+        <!-- 最后刷新时间 -->
+        <div v-if="p.last_updated" class="flex items-center gap-1 mb-2 text-[10px]" :class="isStale(p.last_updated) ? 'text-amber-500' : 'text-slate-400'">
+          <Clock class="w-3 h-3" />
+          {{ isStale(p.last_updated) ? `${daysSince(p.last_updated)}天前 · 建议刷新` : daysSince(p.last_updated) === 0 ? '今天' : `${daysSince(p.last_updated)}天前` }}
+        </div>
+
         <!-- 一句话人设 -->
         <p class="text-sm text-slate-600 leading-relaxed mb-3 group-hover:text-indigo-600 transition-colors">
-          {{ p.portrait?.one_line || '点击生成画像' }}
+          {{ p.portrait?.one_line || '点击查看详情' }}
         </p>
 
         <!-- 标签 -->
@@ -134,14 +199,17 @@ watch([portraits, members], ([p, m]) => {
           >{{ tag }}</span>
         </div>
 
-        <!-- emoji -->
+        <!-- emoji + 刷新 -->
         <div class="flex items-center justify-between">
           <span class="text-lg">{{ p.portrait?.emoji_style || '👤' }}</span>
           <button
             @click.stop="refreshOne(p.member_id)"
-            :disabled="refreshing === p.member_id"
-            class="text-slate-300 hover:text-indigo-500 transition-colors"
-            title="刷新画像"
+            :disabled="refreshing === p.member_id || !!activeTaskId"
+            :class="[
+              'transition-colors',
+              isStale(p.last_updated) ? 'text-amber-400 hover:text-amber-600' : 'text-slate-300 hover:text-indigo-500',
+            ]"
+            :title="isStale(p.last_updated) ? '超过10天未刷新，建议更新' : '增量刷新最近10天'"
           >
             <RefreshCw :class="['w-3.5 h-3.5', refreshing === p.member_id && 'animate-spin']" />
           </button>
@@ -160,8 +228,8 @@ watch([portraits, members], ([p, m]) => {
           <div class="text-xs text-slate-400">{{ m.message_count }} 条消息</div>
         </div>
         <button
-          @click="refreshOne(m.id)"
-          :disabled="refreshing === m.id"
+          @click="generateOne(m.id)"
+          :disabled="refreshing === m.id || !!activeTaskId"
           class="mt-1 px-3 py-1 text-xs text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1"
         >
           <Sparkles class="w-3 h-3" /> 生成画像
@@ -174,109 +242,5 @@ watch([portraits, members], ([p, m]) => {
       <Sparkles class="w-12 h-12 text-slate-300 mx-auto mb-3" />
       <p class="text-slate-400">导入群聊并分析几天后，才能生成群友画像哦</p>
     </div>
-
-    <!-- 详情弹窗 -->
-    <Teleport to="body">
-      <div
-        v-if="selected"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-        @click.self="selected = null"
-      >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden max-h-[85vh] overflow-y-auto">
-          <!-- Header -->
-          <div class="sticky top-0 bg-white flex items-center justify-between px-5 py-3 border-b border-slate-100">
-            <h3 class="font-semibold text-slate-800">成员画像</h3>
-            <button @click="selected = null" class="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
-              <X class="w-5 h-5" />
-            </button>
-          </div>
-
-          <!-- Body -->
-          <div class="p-5 space-y-4">
-            <!-- 基本信息 -->
-            <div class="flex items-center gap-3">
-              <img
-                v-if="selected.avatar"
-                :src="selected.avatar"
-                :alt="selected.display_name"
-                class="w-14 h-14 rounded-full bg-slate-100"
-                referrerpolicy="no-referrer"
-                @error="$event.target.style.display='none'"
-              />
-              <div v-else class="w-14 h-14 rounded-full bg-indigo-100 flex items-center justify-center">
-                <User class="w-7 h-7 text-indigo-400" />
-              </div>
-              <div>
-                <div class="text-lg font-bold text-slate-800">{{ selected.display_name }}</div>
-                <div class="text-sm text-slate-400">{{ selected.one_line || selected.portrait?.one_line }}</div>
-              </div>
-              <div class="ml-auto text-3xl">{{ selected.portrait?.emoji_style || selected.emoji_style || '👤' }}</div>
-            </div>
-
-            <!-- 分析数据日期范围 -->
-            <div v-if="selected.data_start_date || currentGroup?.date_range_start" class="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-2">
-              <span>📅</span>
-              <span>分析数据：{{ selected.data_start_date || currentGroup?.date_range_start }} ~ {{ selected.data_end_date || currentGroup?.date_range_end }}</span>
-            </div>
-
-            <!-- 画像详情 -->
-            <div class="space-y-3">
-              <div class="bg-slate-50 rounded-xl p-3">
-                <div class="text-xs text-slate-400 mb-1 flex items-center gap-1"><Tag class="w-3 h-3" /> 性格</div>
-                <div class="flex gap-1.5 flex-wrap">
-                  <span
-                    v-for="t in selected.portrait?.personality || []"
-                    :key="t"
-                    class="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium"
-                  >{{ t }}</span>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div class="bg-slate-50 rounded-xl p-3">
-                  <div class="text-xs text-slate-400 mb-1">说话风格</div>
-                  <div class="text-sm font-medium text-slate-700">{{ selected.portrait?.speaking_style || '—' }}</div>
-                </div>
-                <div class="bg-slate-50 rounded-xl p-3">
-                  <div class="text-xs text-slate-400 mb-1">群内角色</div>
-                  <div class="text-sm font-medium text-slate-700">{{ selected.portrait?.role || '—' }}</div>
-                </div>
-              </div>
-
-              <div class="bg-slate-50 rounded-xl p-3">
-                <div class="text-xs text-slate-400 mb-1 flex items-center gap-1"><Clock class="w-3 h-3" /> 活跃时段</div>
-                <div class="text-sm text-slate-700">{{ selected.portrait?.active_hours || '—' }}</div>
-              </div>
-
-              <div class="bg-slate-50 rounded-xl p-3">
-                <div class="text-xs text-slate-400 mb-1">兴趣话题</div>
-                <div class="flex gap-1.5 flex-wrap">
-                  <span
-                    v-for="t in selected.portrait?.interests || []"
-                    :key="t"
-                    class="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full text-sm"
-                  >{{ t }}</span>
-                </div>
-              </div>
-
-              <div v-if="selected.portrait?.signature_phrase" class="bg-slate-50 rounded-xl p-3">
-                <div class="text-xs text-slate-400 mb-1">口头禅</div>
-                <div class="text-sm text-slate-600 italic">"{{ selected.portrait.signature_phrase }}"</div>
-              </div>
-            </div>
-
-            <!-- 刷新按钮 -->
-            <button
-              @click="refreshOne(selected.member_id)"
-              :disabled="refreshing === selected.member_id"
-              class="w-full py-2.5 flex items-center justify-center gap-2 text-sm text-indigo-500 hover:bg-indigo-50 rounded-xl transition-colors"
-            >
-              <RefreshCw :class="['w-4 h-4', refreshing === selected.member_id && 'animate-spin']" />
-              刷新画像
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>

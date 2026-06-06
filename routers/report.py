@@ -66,7 +66,7 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
         task.finish(success=False, error={"type": "too_few", "detail": f"仅 {len(text_msgs)} 条文本消息"})
         return
 
-    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL)
+    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL, senders=chat.senders)
     if len(chat_text) > 100000:
         logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
 
@@ -244,7 +244,7 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
             await asyncio.sleep(1)
             continue
 
-        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL)
+        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL, senders=chat.senders)
         # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
         task.update("inference", f"({i+1}/{total}) 分析 {date}...",
                    progress={"current": i, "total": total})
