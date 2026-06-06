@@ -39,6 +39,8 @@ async def api_get_portraits(group_id: int):
             "avatar": member["avatar"] if member else "",
             "total_messages": p["total_analyzed_messages"],
             "portrait": pj,
+            "data_start_date": p.get("data_start_date") or "",
+            "data_end_date": p.get("data_end_date") or "",
             "last_updated": p["last_updated"],
         })
 
@@ -67,6 +69,8 @@ async def api_get_single_portrait(group_id: int, member_id: int):
             "avatar": member["avatar"] if member else "",
             "total_messages": portrait["total_analyzed_messages"],
             "portrait": pj,
+            "data_start_date": portrait.get("data_start_date") or "",
+            "data_end_date": portrait.get("data_end_date") or "",
             "last_updated": portrait["last_updated"],
         },
     }
@@ -105,6 +109,8 @@ async def api_refresh_single_portrait(group_id: int, member_id: int):
             display_name=member["display_name"] or member["nickname"],
             total_messages=member["message_count"],
             portrait_json=portrait_json,
+            data_start=group["date_range_start"] or "",
+            data_end=group["date_range_end"] or "",
         )
         log_analysis(group_id, "", "portrait", "success",
                     model_used=result["model"], duration_ms=result["duration_ms"])

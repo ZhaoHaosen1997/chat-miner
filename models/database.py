@@ -76,6 +76,8 @@ def init_db():
             display_name TEXT,
             total_analyzed_messages INTEGER DEFAULT 0,
             portrait_json TEXT,
+            data_start_date TEXT,
+            data_end_date TEXT,
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(group_id, member_id),
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
@@ -93,8 +95,21 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    # 向后兼容：为已有数据库添加新列
+    _migrate_db(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_db(conn):
+    """数据库迁移：为旧版本表结构添加新列"""
+    # 检查 member_portraits 是否已有 data_start_date 列
+    cur = conn.execute("PRAGMA table_info(member_portraits)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "data_start_date" not in cols:
+        conn.execute("ALTER TABLE member_portraits ADD COLUMN data_start_date TEXT")
+    if "data_end_date" not in cols:
+        conn.execute("ALTER TABLE member_portraits ADD COLUMN data_end_date TEXT")
 
 
 # ==================== 群管理 CRUD ====================
@@ -280,16 +295,17 @@ def get_recent_reports(group_id: int, limit: int = 7) -> list[dict]:
 # ==================== 群友画像 CRUD ====================
 
 def save_member_portrait(group_id: int, member_id: int, display_name: str,
-                          total_messages: int, portrait_json: str):
+                          total_messages: int, portrait_json: str,
+                          data_start: str = "", data_end: str = ""):
     """保存成员画像"""
     conn = get_conn()
     conn.execute(
         """INSERT OR REPLACE INTO member_portraits
            (group_id, member_id, display_name, total_analyzed_messages,
-            portrait_json, last_updated)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+            portrait_json, data_start_date, data_end_date, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (group_id, member_id, display_name, total_messages,
-         portrait_json, datetime.now().isoformat())
+         portrait_json, data_start, data_end, datetime.now().isoformat())
     )
     conn.commit()
     conn.close()

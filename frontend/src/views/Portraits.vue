@@ -196,6 +196,12 @@ watch([portraits, members], ([p, m]) => {
               <div class="ml-auto text-3xl">{{ selected.portrait?.emoji_style || selected.emoji_style || '👤' }}</div>
             </div>
 
+            <!-- 分析数据日期范围 -->
+            <div v-if="selected.data_start_date || currentGroup?.date_range_start" class="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-2">
+              <span>📅</span>
+              <span>分析数据：{{ selected.data_start_date || currentGroup?.date_range_start }} ~ {{ selected.data_end_date || currentGroup?.date_range_end }}</span>
+            </div>
+
             <!-- 画像详情 -->
             <div class="space-y-3">
               <div class="bg-slate-50 rounded-xl p-3">

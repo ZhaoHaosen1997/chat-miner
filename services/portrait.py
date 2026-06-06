@@ -125,12 +125,15 @@ async def refresh_portraits(
         if result["success"] and result["data"]:
             import json
             portrait_json = json.dumps(result["data"], ensure_ascii=False)
+            date_start, date_end = chat.get_date_range()
             save_member_portrait(
                 group_id=group_id,
                 member_id=member["id"],
                 display_name=sender_name,
                 total_messages=member["message_count"],
                 portrait_json=portrait_json,
+                data_start=date_start,
+                data_end=date_end,
             )
             log_analysis(group_id, "", "portrait", "success",
                         model=result["model"], duration_ms=result["duration_ms"])

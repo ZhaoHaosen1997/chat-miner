@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
+import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDate, getPortraits,
@@ -38,7 +38,7 @@ async function loadAll() {
 
 watch(currentGroup, loadAll, { immediate: true })
 
-// 找到最新未分析的一天
+// 最新未分析的一天
 const latestUnanalyzed = ref(null)
 watch(dates, (d) => {
   const sorted = [...d].sort((a, b) => b.date.localeCompare(a.date))
@@ -52,59 +52,114 @@ async function analyzeLatest() {
     await analyzeDate(currentGroup.value.id, latestUnanalyzed.value.date)
     await loadAll()
     triggerRefresh?.()
-  } catch (e) {
-    console.error(e)
-  } finally {
-    analyzing.value = false
-  }
+  } catch (e) { console.error(e) }
+  finally { analyzing.value = false }
 }
 
 function goReport(date) {
   router.push(`/report/${date}`)
 }
 
-// 日历数据：最近60天
-const calendarData = ref([])
-watch(dates, (d) => {
-  const now = new Date()
-  const days = []
-  for (let i = 59; i >= 0; i--) {
-    const date = new Date(now)
-    date.setDate(date.getDate() - i)
-    const dateStr = date.toISOString().slice(0, 10)
-    const info = d.find(dt => dt.date === dateStr)
-    days.push({
-      date: dateStr,
-      label: date.toLocaleDateString('zh', { month: 'short', day: 'numeric' }),
-      hasData: !!info,
-      analyzed: info?.analyzed || false,
-      count: info?.total_messages || 0,
-    })
+// ---- 月视图日历 ----
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+
+// 构建 日期字符串 -> 日期信息 的索引
+const dateMap = computed(() => {
+  const m = {}
+  for (const d of dates.value) {
+    m[d.date] = d
   }
-  calendarData.value = days
+  return m
 })
 
-// 情绪分布 emoji
-const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐槽': '😤', '平淡': '😐', '热闹': '🎉', '伤感': '😢', '沙雕': '🤪' }
+// 根据数据起止日期生成月份列表
+const calendarMonths = computed(() => {
+  if (!stats.value?.group) return []
+  const start = stats.value.group.date_range_start
+  const end = stats.value.group.date_range_end
+  if (!start || !end) return []
 
-// 消息量给颜色
-function barColor(count, max) {
-  const pct = max > 0 ? count / max : 0
-  if (pct > 0.7) return 'bg-indigo-500'
-  if (pct > 0.4) return 'bg-indigo-400'
-  if (pct > 0.15) return 'bg-indigo-300'
-  return 'bg-indigo-200'
-}
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+  const months = []
+  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+
+  while (cursor <= endDate) {
+    const year = cursor.getFullYear()
+    const month = cursor.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+
+    // 计算每天的格子
+    const weeks = []
+    let currentWeek = []
+    // 补齐第一周的空白天（星期一=1, 星期日=7 -> 0）
+    let dayOfWeek = firstDay.getDay()
+    dayOfWeek = dayOfWeek === 0 ? 6 : dayOfWeek - 1  // 转为 周一=0
+    for (let i = 0; i < dayOfWeek; i++) {
+      currentWeek.push(null)
+    }
+
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      const dateObj = new Date(year, month, d)
+      const dateStr = dateObj.toISOString().slice(0, 10)
+      const info = dateMap.value[dateStr]
+      const inRange = dateObj >= startDate && dateObj <= endDate
+
+      currentWeek.push({
+        date: dateStr,
+        day: d,
+        hasData: !!info,
+        analyzed: info?.analyzed || false,
+        count: info?.total_messages || 0,
+        inRange,
+      })
+
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek)
+        currentWeek = []
+      }
+    }
+    // 最后一周
+    if (currentWeek.length > 0) {
+      while (currentWeek.length < 7) currentWeek.push(null)
+      weeks.push(currentWeek)
+    }
+
+    months.push({
+      label: `${year}年${month + 1}月`,
+      weeks,
+    })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return months
+})
+
+// 情绪 emoji
+const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐槽': '😤', '平淡': '😐', '热闹': '🎉', '伤感': '😢', '沙雕': '🤪' }
 </script>
 
 <template>
   <div v-if="currentGroup">
-    <!-- 加载状态 -->
     <div v-if="loading" class="flex items-center justify-center py-20">
       <Loader2 class="w-8 h-8 animate-spin text-indigo-400" />
     </div>
 
     <template v-else>
+      <!-- 数据日期横幅 -->
+      <div v-if="stats?.group?.date_range_start" class="card p-3 mb-5 flex items-center gap-2 text-sm text-slate-500">
+        <span class="text-base">📅</span>
+        <span class="font-medium text-slate-700">数据范围：{{ stats.group.date_range_start }} ~ {{ stats.group.date_range_end }}</span>
+        <span class="text-slate-300">·</span>
+        <span>共 <strong class="text-slate-700">{{ stats.total_days_with_data }}</strong> 天有消息</span>
+        <span class="text-slate-300">·</span>
+        <span>已分析 <strong class="text-emerald-600">{{ stats.analyzed_count }}</strong> 天</span>
+        <span v-if="stats.analyzed_count > 0" class="text-slate-300">·</span>
+        <span v-if="stats.analyzed_count > 0">
+          进度 <strong class="text-indigo-600">{{ stats.progress_pct }}%</strong>
+        </span>
+      </div>
+
       <!-- 概览卡片 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div class="card p-4 flex items-center gap-3">
@@ -153,7 +208,7 @@ function barColor(count, max) {
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- 左列：日历 + 分析按钮 -->
         <div class="lg:col-span-2 space-y-6">
-          <!-- 分析最新一天 -->
+          <!-- 分析按钮 -->
           <div class="card p-4 flex items-center justify-between">
             <div>
               <div class="font-semibold text-slate-700">每日分析</div>
@@ -179,28 +234,56 @@ function barColor(count, max) {
             </button>
           </div>
 
-          <!-- 日历热力图 -->
+          <!-- 月视图日历 -->
           <div class="card p-4">
             <h3 class="font-semibold text-slate-700 mb-3">数据日历</h3>
-            <div class="grid grid-cols-10 gap-1">
+
+            <!-- 月份遍历 -->
+            <div v-for="mon in calendarMonths" :key="mon.label" class="mb-4 last:mb-0">
+              <div class="text-xs font-medium text-slate-400 mb-1.5">{{ mon.label }}</div>
+              <!-- 表头 -->
+              <div class="grid grid-cols-7 mb-1">
+                <div
+                  v-for="wd in WEEKDAYS"
+                  :key="wd"
+                  :class="['text-center text-[10px]', wd === '六' || wd === '日' ? 'text-slate-300' : 'text-slate-400']"
+                >{{ wd }}</div>
+              </div>
+              <!-- 周 -->
               <div
-                v-for="day in calendarData"
-                :key="day.date"
-                :title="`${day.date}: ${day.hasData ? day.count + '条消息' : '无数据'}${day.analyzed ? ' (已分析)' : ''}`"
-                :class="[
-                  'w-full aspect-square rounded-md text-[10px] flex items-center justify-center transition-colors',
-                  !day.hasData ? 'bg-slate-50 border border-slate-100 text-transparent' :
-                  day.analyzed ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
-                  'bg-indigo-50 text-indigo-400 border border-indigo-100',
-                ]"
+                v-for="(week, wi) in mon.weeks"
+                :key="wi"
+                class="grid grid-cols-7 gap-[2px]"
               >
-                {{ day.label.slice(0, 2) }}
+                <div
+                  v-for="(day, di) in week"
+                  :key="di"
+                  v-tooltip="day ? `${day.date}: ${day.count}条消息${day.analyzed ? ' (已分析)' : ''}` : ''"
+                  :class="[
+                    'aspect-square rounded-[3px] flex items-center justify-center text-[11px] transition-colors',
+                    !day ? '' :
+                    !day.inRange ? 'bg-slate-50 text-transparent' :
+                    day.analyzed ? 'bg-emerald-100 text-emerald-700 font-medium cursor-pointer hover:bg-emerald-200' :
+                    day.hasData ? 'bg-indigo-50 text-indigo-400 cursor-pointer hover:bg-indigo-100' :
+                    'bg-slate-50 text-transparent',
+                  ]"
+                  @click="day?.analyzed && goReport(day.date)"
+                >
+                  {{ day ? day.day : '' }}
+                </div>
               </div>
             </div>
-            <div class="flex items-center gap-4 mt-3 text-xs text-slate-400">
-              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-slate-50 border border-slate-100" /> 无数据</span>
-              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-indigo-50 border border-indigo-100" /> 有数据</span>
-              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> 已分析</span>
+
+            <div v-if="calendarMonths.length === 0" class="text-sm text-slate-400 py-4 text-center">
+              暂无数据，请先导入群聊 JSON 文件
+            </div>
+
+            <!-- 图例 -->
+            <div class="flex items-center gap-4 mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
+              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-slate-50 border border-slate-100" /> 无数据</span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-indigo-50 border border-indigo-100" /> 有数据</span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-200" /> 已分析</span>
+              <span class="ml-auto text-slate-300">点击已分析日期查看报告</span>
             </div>
           </div>
 
@@ -252,6 +335,9 @@ function barColor(count, max) {
                 <span class="text-slate-600">{{ moodIcons[mood] || '💬' }} {{ mood }}</span>
                 <span class="font-medium text-slate-700">{{ cnt }}天</span>
               </div>
+            </div>
+            <div v-if="Object.keys(stats.mood_distribution).length === 0" class="text-sm text-slate-400 py-2">
+              尚未分析，暂无情绪数据
             </div>
           </div>
 
