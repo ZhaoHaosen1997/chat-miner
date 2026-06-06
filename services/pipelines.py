@@ -35,8 +35,8 @@ PROMPTS = {
         "user": "{chat}\n\n找出 3-5 条最搞笑/精彩的发言。输出格式（严格按此格式）：\n发言人|原话|你的吐槽\n示例：\n张三|我昨天梦到自己在写代码|社畜的自我修养\n李四|今天天气真好，适合摸鱼|说出了大家的心声\n\n你的输出：",
     },
     "mood": {
-        "system": "你是一个情绪识别工具。只回答一个词：欢乐、温馨、严肃、吐槽、平淡、热闹、伤感、沙雕。不要输出任何其他内容。",
-        "user": "{chat}\n\n今天群聊的整体氛围是什么？只回答一个词（从以下选一个）：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕",
+        "system": "你是一个情绪识别工具。只回答一个词。不要输出任何其他内容。",
+        "user": "{chat}\n\n今天群聊的整体氛围是什么？只回答一个词（从以下选）：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 开车 破防 凡尔赛 社死 真香 画饼 CPU 离谱 上头",
     },
     "keywords": {
         "system": "你是一个关键词提取工具。只输出 3-5 个关键词，逗号分隔。不要输出任何其他内容。",
@@ -50,12 +50,33 @@ PROMPTS = {
         "system": "你是一个活跃度分析工具。一句话描述活跃规律。不要输出任何其他内容。",
         "user": "消息按小时分布：\n{hourly_stats}\n\n一句话描述活跃规律（如\"下午2-5点最活跃，上午安静\"）：",
     },
+    # ---- v0.5.1 趣味功能 ----
+    "headline": {
+        "system": "你是一个综艺节目预告片编导。用UC震惊体/综艺体给群聊写一句话预告。要夸张有趣。只输出一句话，不要输出任何其他内容。",
+        "user": "{chat}\n\n用综艺预告片的语气，写一句15字内的群聊今日预告（要抓马、有梗）：",
+    },
+    "scene_commentary": {
+        "system": "你是一个综艺节目花字写手。给群聊名场面配花字吐槽，要犀利好笑。只输出一句话，不要输出任何其他内容。",
+        "user": "群聊名场面：{scene}\n\n用综艺花字风格写一句吐槽点评（10字内，要犀利）：",
+    },
+}
+
+# ---- 趣味称号 Prompt ----
+FUN_TITLE_PROMPTS = {
+    "system": "你是一个综艺节目人设编剧。根据数据给群友起一个有趣的称号，要精准有梗。只输出称号，不要输出任何其他内容。",
+    "user": "成员 {name} 的数据：\n{data_summary}\n\n给ta起一个有趣的称号（6字内，如\"深夜哲学家\"\"红包闪电侠\"\"潜水冠军\"\"表情包大户\"\"奶茶品鉴师\"）：",
+}
+
+# ---- 关系趣味解读 Prompt ----
+FUN_RELATION_PROMPTS = {
+    "system": "你是一个综艺节目旁白。给一对群友的互动写趣味关系解读，要像星座配对一样好玩。只输出一句话，不要输出任何其他内容。",
+    "user": "{name_a} 和 {name_b} 互动 {count} 次，关系类型：{relation_type}\n\n用一句话趣味解读他们的群内关系（15字内，如\"互怼328次的最佳损友\"\"深夜固定聊天搭子\"）：",
 }
 
 PORTRAIT_PROMPTS = {
     "persona": {
         "system": "你是一个人物分析工具。每行一个标签。不要输出任何其他内容，不要解释。",
-        "user": "{chat}\n\n以上是 {name} 的发言。分析ta的特征，输出三行：\n第一行：性格标签（逗号分隔，2-3个，如：幽默,话痨,热心肠）\n第二行：说话风格（一个词，如：豪爽/温柔/毒舌/理性/活泼/老成）\n第三行：群内角色（从以下选一个：气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人）\n示例：\n幽默,话痨,热心肠\n活泼\n气氛组\n\n你的输出：",
+        "user": "{chat}\n\n以上是 {name} 的发言。分析ta的特征，输出三行：\n第一行：性格标签（逗号分隔，2-3个，如：幽默,话痨,热心肠）\n第二行：说话风格（一个词，如：豪爽/温柔/毒舌/理性/活泼/老成/沙雕/阴阳怪气/一本正经/骚话连篇/惜字如金）\n第三行：群内角色（从以下选一个：气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人）\n示例：\n幽默,话痨,热心肠\n活泼\n气氛组\n\n你的输出：",
     },
     "interests": {
         "system": "你是一个兴趣分析工具。输出两行，不要输出任何其他内容。",
@@ -146,7 +167,7 @@ def _parse_lines(raw) -> list[str]:
     for line in text.strip().split("\n"):
         line = line.strip().lstrip("-*•1234567890.、）) ").strip()
         # 过滤空行、太短的行、道歉行
-        if line and len(line) > 2 and not _is_ai_apology(line):
+        if line and len(line) >= 1 and not _is_ai_apology(line):
             lines.append(line)
     return lines
 
@@ -187,7 +208,11 @@ def _parse_kw(raw) -> list[str]:
     return result[:5] if result else ["群聊"]
 
 
-MOOD_MAP = {"欢乐":"😄","温馨":"🥰","严肃":"🧐","吐槽":"😤","平淡":"😐","热闹":"🎉","伤感":"😢","沙雕":"🤪"}
+MOOD_MAP = {
+    "欢乐":"😄","温馨":"🥰","严肃":"🧐","吐槽":"😤","平淡":"😐","热闹":"🎉","伤感":"😢","沙雕":"🤪",
+    "吃瓜":"🍉","摸鱼":"🎣","摆烂":"🫠","内卷":"💪","开车":"🚗","破防":"💔","凡尔赛":"👑",
+    "社死":"💀","真香":"🍚","画饼":"🫓","CPU":"🔥","离谱":"👽","上头":"🤯",
+}
 
 
 def _parse_mood(raw) -> tuple[str, str]:
@@ -204,11 +229,24 @@ def _parse_mood(raw) -> tuple[str, str]:
         "开心": "欢乐", "高兴": "欢乐", "愉快": "欢乐", "快乐": "欢乐",
         "温暖": "温馨", "感动": "温馨",
         "吵架": "严肃", "争论": "严肃", "认真": "严肃",
-        "抱怨": "吐槽", "不满": "吐槽",
+        "抱怨": "吐槽", "不满": "吐槽", "阴阳": "吐槽",
         "无聊": "平淡", "安静": "平淡",
         "兴奋": "热闹", "活跃": "热闹",
         "难过": "伤感", "悲伤": "伤感", "emo": "伤感",
         "搞笑": "沙雕", "整活": "沙雕",
+        "围观": "吃瓜", "八卦": "吃瓜", "吃瓜群众": "吃瓜",
+        "偷懒": "摸鱼", "划水": "摸鱼", "摸鱼摸鱼": "摸鱼",
+        "躺平": "摆烂", "放弃": "摆烂", "累了": "摆烂",
+        "卷": "内卷", "加班": "内卷", "卷王": "内卷",
+        "黄腔": "开车", "飙车": "开车", "车速": "开车",
+        "心碎": "破防", "崩溃": "破防", "绷不住": "破防",
+        "炫耀": "凡尔赛", "装逼": "凡尔赛",
+        "尬": "社死", "尴尬": "社死", "社死现场": "社死",
+        "打脸": "真香", "反转": "真香",
+        "许诺": "画饼", "饼": "画饼", "画大饼": "画饼",
+        "洗脑": "CPU", "PUA": "CPU",
+        "夸张": "离谱", "离谱他妈": "离谱",
+        "震惊": "上头", "震撼": "上头", "惊呆": "上头",
     }
     for alias, mood in MOOD_ALIAS.items():
         if alias in text:
@@ -232,13 +270,13 @@ def _parse_active_hours(raw) -> dict:
     """解析活跃规律描述"""
     text = str(raw).strip() if raw else ""
     # 从描述中推断 peak_label，先精确后模糊
-    PEAKS = {"上午摸鱼":"上午","午间活跃":"中午","下午茶话会":"下午","晚间热闹":"晚上","夜猫子专场":"深夜","全天在线":"全天"}
+    PEAKS = {"上午摸鱼":"上午","午间活跃":"中午","下午茶话会":"下午","晚间热闹":"晚上","夜猫子专场":"深夜","全天在线":"全天","凌晨修仙":"凌晨","通宵战神":"通宵"}
     peak_label = ""
     for k, v in PEAKS.items():
         if k in text: peak_label = k; break
     if not peak_label:
         # 模糊匹配
-        for kw, label in [("上午","上午摸鱼"),("中午","午间活跃"),("下午","下午茶话会"),("晚上","晚间热闹"),("夜间","夜猫子专场"),("凌晨","夜猫子专场"),("全天","全天在线")]:
+        for kw, label in [("上午","上午摸鱼"),("中午","午间活跃"),("下午","下午茶话会"),("晚上","晚间热闹"),("夜间","夜猫子专场"),("凌晨","凌晨修仙"),("通宵","通宵战神"),("全天","全天在线")]:
             if kw in text: peak_label = label; break
     if not peak_label:
         peak_label = "全天在线"  # 兜底
@@ -255,6 +293,11 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
     for attempt in range(1, MAX_RETRIES + 1):
         result2 = None  # 每轮重置，避免跨迭代污染
+
+        # 取消检查
+        if task and hasattr(task, '_cancelled') and task._cancelled:
+            logger.info(f"{step_name}: 任务已取消")
+            return None
 
         # 熔断器检查
         if _circuit_state["tripped"] and not _check_circuit():
@@ -333,8 +376,8 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 async def run_daily_pipeline(chat_text: str, group_name: str,
                               date: str, msg_count: int, task=None,
                               hourly_stats: str = "") -> dict:
-    """执行 6 步子任务管道，拼装每日报告 JSON"""
-    total = 6
+    """执行 8 步子任务管道，拼装每日报告 JSON（含趣味功能）"""
+    total = 8
 
     if task:
         task.update("inference", f"(0/6) 开始分析...")
@@ -343,7 +386,12 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     failed_steps = []
 
+    # 取消检查辅助
+    def _cancelled():
+        return task and hasattr(task, '_cancelled') and task._cancelled
+
     # 1. 话题（每行一个）
+    if _cancelled(): return {}
     topics_data = await _run_sub(task, "提取话题", 1, total,
                                   PROMPTS["topics"]["system"],
                                   f"{chat_text}\n\n{PROMPTS['topics']['user']}")
@@ -353,6 +401,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("topics")
 
     # 2. 搞笑发言（发言人|原话|吐槽）
+    if _cancelled(): return {}
     quotes_data = await _run_sub(task, "找搞笑发言", 2, total,
                                   PROMPTS["quotes"]["system"],
                                   f"{chat_text}\n\n{PROMPTS['quotes']['user']}")
@@ -361,6 +410,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("quotes")
 
     # 3. 情绪（一个词）
+    if _cancelled(): return {}
     mood_data = await _run_sub(task, "判断情绪", 3, total,
                                 PROMPTS["mood"]["system"],
                                 f"{chat_text}\n\n{PROMPTS['mood']['user']}")
@@ -369,6 +419,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("mood")
 
     # 4. 关键词（逗号分隔）
+    if _cancelled(): return {}
     kw_data = await _run_sub(task, "提取关键词", 4, total,
                               PROMPTS["keywords"]["system"],
                               f"{chat_text}\n\n{PROMPTS['keywords']['user']}")
@@ -377,6 +428,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("keywords")
 
     # 5. 一句话总结（两行：总结+高光）
+    if _cancelled(): return {}
     ol_data = await _run_sub(task, "一句话总结", 5, total,
                               PROMPTS["oneline"]["system"],
                               f"{chat_text}\n\n{PROMPTS['oneline']['user']}")
@@ -385,6 +437,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("oneline")
 
     # 6. 活跃时段（一句话描述）
+    if _cancelled(): return {}
     hs = (hourly_stats or "(无小时分布数据)").replace("{", "{{").replace("}", "}}")
     hs_user = PROMPTS["active_hours"]["user"].replace("{hourly_stats}", hs)
     ah_data = await _run_sub(task, "活跃时段分析", 6, total,
@@ -392,6 +445,26 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     ah = _parse_active_hours(ah_data)
     if ah_data is None:
         failed_steps.append("active_hours")
+
+    # 7. 趣味标题（UC震惊体/综艺预告片风）
+    if _cancelled(): return {}
+    headline_data = await _run_sub(task, "趣味标题", 7, total,
+                                    PROMPTS["headline"]["system"],
+                                    f"{chat_text}\n\n{PROMPTS['headline']['user']}")
+    headline = str(headline_data).strip() if headline_data else ""
+
+    # 8. 名场面（取最佳搞笑发言，AI配花字吐槽）
+    scene_commentary = ""
+    if quotes and len(quotes) > 0:
+        best_quote = quotes[0]
+        scene_text = f"{best_quote.get('speaker','某人')}：「{best_quote.get('quote','')}」"
+        scene_user = PROMPTS["scene_commentary"]["user"].format(scene=scene_text)
+        scene_data = await _run_sub(task, "名场面吐槽", 8, total,
+                                     PROMPTS["scene_commentary"]["system"],
+                                     scene_user)
+        scene_commentary = str(scene_data).strip() if scene_data else ""
+    if headline_data is None:
+        failed_steps.append("headline")
 
     # 拼装
     report = {
@@ -403,6 +476,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         "keywords": keywords,
         "one_line": one_line,
         "active_hours": ah,
+        "headline": headline or one_line,  # 趣味标题，无则回退到总结
+        "scene_commentary": scene_commentary,  # 名场面花字吐槽
     }
     if failed_steps:
         report["_partial"] = True
@@ -432,10 +507,14 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
             task.steps.clear()  # 统一分析时不重置，追加到已有步骤
 
     prompt_user = f"{chat_text}\n\n以上是 {sender_name} 的发言。"
-    role_opts = "气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人"
+    role_opts = "气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/开车司机/破防boy/摆烂王者"
     failed_steps = []
 
+    def _cancelled_portrait():
+        return task and hasattr(task, '_cancelled') and task._cancelled
+
     # 1. 性格+角色（三行文本）
+    if _cancelled_portrait(): return {}
     p_data = await _run_sub(task, "分析性格角色", 1, total,
                              PORTRAIT_PROMPTS["persona"]["system"],
                              f"{prompt_user}{PORTRAIT_PROMPTS['persona']['user'].replace('{name}', sender_name)}")
@@ -552,7 +631,7 @@ async def _run_monthly_slice(task, month_label: str, chat_text: str,
 
     # 子任务 2：当月情绪
     mood_system = "你是一个情绪识别工具。只回答一个词。"
-    mood_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。ta 这个月的发言情绪是什么？只回答一个词：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕"
+    mood_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。ta 这个月的发言情绪是什么？只回答一个词：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 凡尔赛 社死 真香 画饼 离谱 上头"
     mood_result = await _run_sub(task, f"月度情绪 {month_label}", 0, 2,
                                   mood_system, mood_user, model)
 
@@ -588,36 +667,63 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
         dict with emotion_profile, language_style, activity_deep, monthly_analysis
     """
     import time as _time
-    from services.stats_engine import compute_emotion_timeline
     from services.parser import chunk_messages_by_month
 
     if task:
         task.update("inference", "深度画像分析中...")
         if task.type != "full_portrait":
-            task.steps.clear()  # 统一分析时不重置，追加到已有步骤
+            task.steps.clear()
 
     failed_steps = []
     model = config.OLLAMA_MODEL
     safe_name = sender_name.replace("{", "{{").replace("}", "}}")
+    TOTAL_STEPS = 5
 
-    # ---- 1. 情绪画像（AI 基于 Python 统计数据） ----
-    emotion_raw = stats_summary.get("emotion_summary", "暂无数据")
+    def _cancelled_deep():
+        return task and hasattr(task, '_cancelled') and task._cancelled
+
+    # ---- 1. 月度切片分析（先收集数据，后续情绪分析依赖这些数据） ----
+    if _cancelled_deep(): return {}
+    from services.parser import ParsedChat
+    monthly_chunks = chunk_messages_by_month(messages, lambda sid: sender_name, max_chars_per_chunk=3000)
+
+    monthly_analyses = []
+    if monthly_chunks and task:
+        task.update("inference", f"月度切片分析 (0/{len(monthly_chunks)})...")
+
+    for i, (month_label, chunk) in enumerate(monthly_chunks):
+        if _cancelled_deep(): break
+        if task:
+            task.update("inference", f"月度切片 ({i+1}/{len(monthly_chunks)}) {month_label}...")
+        analysis = await _run_monthly_slice(task, month_label, chunk, sender_name, model)
+        if analysis:
+            monthly_analyses.append(analysis)
+
+    # ---- 2. 情绪画像（基于月度切片的 mood 数据，不依赖 daily_reports） ----
+    if monthly_analyses:
+        emotion_details_lines = [
+            f"{ma['month']}：情绪={ma['mood']}" for ma in monthly_analyses
+        ]
+        emotion_details = "\n".join(emotion_details_lines)
+        emotion_timeline = [
+            {"date": ma["month"], "mood": ma["mood"], "mood_emoji": ""}
+            for ma in monthly_analyses
+        ]
+    else:
+        emotion_details = "暂无情绪数据（月度切片不足）"
+        emotion_timeline = []
+
     emo_user = DEEP_PORTRAIT_PROMPTS["emotion"]["user"].format(
-        name=safe_name, emotion_summary=emotion_raw
+        name=safe_name, emotion_summary=emotion_details
     )
-    emo_data = await _run_sub(task, "深度-情绪总结", 1, 6,
+    emo_data = await _run_sub(task, "深度-情绪总结", 2, TOTAL_STEPS,
                                DEEP_PORTRAIT_PROMPTS["emotion"]["system"], emo_user, model)
     emotion_primary = str(emo_data).strip() if emo_data else "暂无数据"
 
-    # 情绪趋势
-    emotion_timeline = compute_emotion_timeline(group_id)
-    emotion_details = "\n".join(
-        f"{e['date']} {e['mood_emoji']}{e['mood']}" for e in emotion_timeline[-30:]
-    ) if emotion_timeline else "暂无情绪数据"
     trend_user = DEEP_PORTRAIT_PROMPTS["emotion_trend"]["user"].format(
         name=safe_name, emotion_details=emotion_details
     )
-    trend_data = await _run_sub(task, "深度-情绪趋势", 2, 6,
+    trend_data = await _run_sub(task, "深度-情绪趋势", 2, TOTAL_STEPS,
                                  DEEP_PORTRAIT_PROMPTS["emotion_trend"]["system"],
                                  trend_user, model)
     emotion_trend = str(trend_data).strip() if trend_data else "暂无数据"
@@ -625,17 +731,17 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
     emotion_profile = {
         "primary": emotion_primary,
         "trend": emotion_trend,
-        "timeline": emotion_timeline[-30:] if emotion_timeline else [],
+        "timeline": emotion_timeline,
     }
     if emo_data is None:
         failed_steps.append("emotion")
 
-    # ---- 2. 语言风格洞察（AI 基于 Python 统计数据） ----
+    # ---- 3. 语言风格洞察 ----
     lang_raw = stats_summary.get("language_summary", "暂无数据")
     lang_user = DEEP_PORTRAIT_PROMPTS["language"]["user"].format(
         name=safe_name, language_summary=lang_raw
     )
-    lang_data = await _run_sub(task, "深度-语言风格", 3, 6,
+    lang_data = await _run_sub(task, "深度-语言风格", 3, TOTAL_STEPS,
                                 DEEP_PORTRAIT_PROMPTS["language"]["system"],
                                 lang_user, model)
     style_notes = str(lang_data).strip() if lang_data else "暂无数据"
@@ -646,28 +752,7 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
         "style_notes": style_notes,
     }
 
-    # ---- 3. 月度切片分析 ----
-    from services.parser import ParsedChat
-    # 获取 sender_name 对应的 sender_id（从 messages 中推断）
-    sender_id = messages[0].get("senderID") if messages else None
-    if sender_id is None:
-        monthly_chunks = []
-    else:
-        # 按自然月分块
-        monthly_chunks = chunk_messages_by_month(messages, lambda sid: sender_name, max_chars_per_chunk=3000)
-
-    monthly_analyses = []
-    if monthly_chunks and task:
-        task.update("inference", f"月度切片分析 (0/{len(monthly_chunks)})...")
-
-    for i, (month_label, chunk) in enumerate(monthly_chunks):
-        if task:
-            task.update("inference", f"月度切片 ({i+1}/{len(monthly_chunks)}) {month_label}...")
-        analysis = await _run_monthly_slice(task, month_label, chunk, sender_name, model)
-        if analysis:
-            monthly_analyses.append(analysis)
-
-    # 月度汇总
+    # ---- 4. 月度汇总 ----
     monthly_summary_text = ""
     if monthly_analyses:
         lines = []
@@ -680,7 +765,7 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
             monthly_summaries=monthly_summary_text,
             total_months=len(monthly_analyses),
         )
-        synth_data = await _run_sub(task, "深度-月度汇总", 4, 6,
+        synth_data = await _run_sub(task, "深度-月度汇总", 4, TOTAL_STEPS,
                                      DEEP_PORTRAIT_PROMPTS["monthly_synthesis"]["system"],
                                      synth_user, model)
         monthly_synthesis = str(synth_data).strip() if synth_data else ""

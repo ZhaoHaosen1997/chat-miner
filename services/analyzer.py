@@ -198,7 +198,7 @@ async def call_ollama_chat(
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "keep_alive": 0,  # 推理完成后立即卸载模型，释放显存
+        "keep_alive": 300,  # 模型常驻 5 分钟，pipeline 期间避免反复加载卸载
         "options": {
             "temperature": 0.1,  # 极低温度让输出更稳定，适合小模型格式化输出
             "top_p": 0.9,

@@ -130,6 +130,7 @@ watch(stats, (s) => {
       <div class="card p-6 mb-6 text-center">
         <div class="text-5xl mb-3">{{ report.mood_emoji }}</div>
         <h2 class="text-2xl font-bold text-slate-800 mb-1">{{ report.one_line }}</h2>
+        <p v-if="report.headline && report.headline !== report.one_line" class="text-sm text-indigo-500 font-medium mb-1">📺 {{ report.headline }}</p>
         <div class="flex items-center justify-center gap-3">
           <p class="text-slate-400 text-sm">{{ props.date }} · {{ report.mood }}</p>
           <button
@@ -173,11 +174,14 @@ watch(stats, (s) => {
             </div>
           </div>
 
-          <!-- 搞笑发言 -->
+          <!-- 名场面 -->
           <div class="card p-5">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Sparkles class="w-4 h-4 text-amber-400" /> 精彩发言
+              <Sparkles class="w-4 h-4 text-amber-400" /> 名场面
             </h3>
+            <div v-if="report.scene_commentary" class="mb-3 px-3 py-2 bg-gradient-to-r from-amber-100 to-orange-100 rounded-lg text-sm text-amber-700 font-medium">
+              🎬 {{ report.scene_commentary }}
+            </div>
             <div class="space-y-3">
               <div
                 v-for="(q, i) in report.funny_quotes"

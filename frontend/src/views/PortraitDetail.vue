@@ -57,7 +57,7 @@ async function doAnalyze() {
   if (analyzing.value || activeTaskId.value) return
   analyzing.value = true
   try {
-    const result = await analyzePortrait(currentGroup.value.id, props.memberId)
+    const result = await analyzePortrait(currentGroup.value.id, props.memberId, hasPortrait.value ? 10 : 0)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -178,7 +178,7 @@ const currentVersion = computed(() => {
               ]"
             >
               <RefreshCw :class="['w-3.5 h-3.5', analyzing && 'animate-spin']" />
-              {{ analyzing ? '分析中...' : hasPortrait ? '刷新画像' : '生成画像' }}
+              {{ analyzing ? '分析中...' : hasPortrait ? '增量刷新(10天)' : '生成画像' }}
             </button>
           </div>
         </div>
@@ -241,6 +241,17 @@ const currentVersion = computed(() => {
         <div v-if="portrait.portrait?.signature_phrase" class="card p-4">
           <div class="text-xs text-slate-400 mb-1">口头禅</div>
           <div class="text-sm text-slate-600 italic">"{{ portrait.portrait.signature_phrase }}"</div>
+        </div>
+
+        <!-- 趣味称号 + 关系解读 -->
+        <div v-if="portrait.portrait?.fun_title" class="card p-4 bg-gradient-to-r from-amber-50 to-orange-50 border-amber-100">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">{{ portrait.portrait?.emoji_style || '🏆' }}</span>
+            <div>
+              <p class="text-sm font-bold text-amber-700">{{ portrait.portrait.fun_title }}</p>
+              <p v-if="portrait.portrait.fun_relation" class="text-xs text-amber-500 mt-0.5">{{ portrait.portrait.fun_relation }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- 深度画像结果 -->

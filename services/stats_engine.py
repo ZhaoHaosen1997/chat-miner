@@ -211,14 +211,19 @@ def compute_language_stats(messages: list[dict], wxid: str,
         # 剥离 @mention 后再做词分析和 emoji 提取
         content = strip_mentions(raw_content, member_names)
 
-        # Emoji 提取：仅匹配微信 [表情] 格式
+        # Emoji 提取：仅匹配微信 [表情] 格式，排除元数据占位符
         wechat_emojis = WECHAT_EMOJI_PATTERN.findall(content)
         for e in wechat_emojis:
-            emoji_counter[e] += 1
+            inner = e[1:-1]  # 去掉括号
+            if inner not in _META_TOKENS:  # [图片][视频][链接] 不算表情
+                emoji_counter[e] += 1
 
         # 中文分词（简单 2-gram）
-        # WeChat 表情 [捂脸] → 去掉方括号保留中文 "捂脸"（表情名有语义，反映性格）
-        clean_content = WECHAT_EMOJI_PATTERN.sub(lambda m: m.group(0)[1:-1], content)
+        # [捂脸] → 保留 "捂脸"（有语义）；[图片][视频] → 整体删除（元数据噪音）
+        clean_content = WECHAT_EMOJI_PATTERN.sub(
+            lambda m: '' if m.group(0)[1:-1] in _META_TOKENS else m.group(0)[1:-1],
+            content
+        )
         # 提取连续中文字符作为词
         chinese_chunks = re.findall(r'[一-鿿]{2,4}', clean_content)
         for chunk in chinese_chunks:
@@ -391,4 +396,80 @@ def format_stats_for_ai(activity: dict, language: dict, relations: list[dict],
         "language_summary": lang_summary,
         "relation_summary": rel_summary,
         "emotion_summary": emo_summary,
+    }
+
+
+def compute_fun_title_basis(activity: dict, language: dict,
+                             relations: list[dict], emoji_stats: list[dict]) -> dict:
+    """根据统计数据生成趣味称号的依据，供 AI 起名
+
+    Returns:
+        {category: str, data_bullets: [str]} — 最适合的称号类别 + 数据支撑
+    """
+    candidates = []
+
+    # 深夜活跃
+    peak_h = activity.get("peak_hour", 12)
+    if peak_h >= 23 or peak_h <= 2:
+        candidates.append(("夜猫子", f"最活跃时段{peak_h}:00"))
+    elif peak_h >= 22:
+        candidates.append(("深夜选手", f"最活跃时段{peak_h}:00"))
+    if 0 <= peak_h <= 5:
+        candidates.append(("修仙大佬", f"凌晨{peak_h}点还在线"))
+
+    # 早起鸟
+    if 5 <= peak_h <= 8:
+        candidates.append(("早起冠军", f"最活跃时段{peak_h}:00"))
+
+    # 话痨/潜水/摸鱼
+    avg = activity.get("avg_daily_msgs", 0)
+    if avg >= 30:
+        candidates.append(("话痨担当", f"日均发言{avg}条"))
+    elif avg <= 3 and activity.get("total_days_active", 0) >= 10:
+        candidates.append(("潜水冠军", f"日均发言仅{avg}条"))
+    if 3 < avg <= 8 and activity.get("total_days_active", 0) >= 10:
+        candidates.append(("摸鱼选手", f"日均{avg}条，张弛有度"))
+
+    # 表情包大户
+    total_emoji = language.get("total_emoji_count", 0)
+    if total_emoji >= 100:
+        candidates.append(("表情包大户", f"使用了{total_emoji}次表情"))
+
+    # 惜字如金 / 长篇大论
+    avg_len = language.get("avg_msg_len", 0)
+    if avg_len <= 5 and language.get("total_text_msgs", 0) >= 50:
+        candidates.append(("惜字如金", f"平均每条仅{avg_len}字"))
+    elif avg_len >= 40:
+        candidates.append(("小作文选手", f"平均每条{avg_len}字"))
+
+    # 社交达人
+    if len(relations) >= 3 and relations[0].get("total_interactions", 0) >= 200:
+        candidates.append(("社交达人", f"与{relations[0]['name']}等{len(relations)}人频繁互动"))
+
+    # 气氛组
+    top_emoji = emoji_stats[0]["emoji"] if emoji_stats else ""
+    if top_emoji and any(e in top_emoji for e in ["偷笑", "捂脸", "呲牙", "憨笑"]):
+        candidates.append(("气氛组担当", f"最爱发{top_emoji}"))
+    if top_emoji and any(e in top_emoji for e in ["强", "抱拳", "OK"]):
+        candidates.append(("捧场王", f"最爱发{top_emoji}"))
+
+    # 真香/打脸
+    if avg_len <= 10 and avg >= 10:
+        candidates.append(("短句战神", "短小精悍，句句暴击"))
+
+    if not candidates:
+        candidates.append(("神秘群友", "数据不足以判断"))
+
+    # 挑第一个匹配的（按优先级）
+    chosen = candidates[0]
+    data_lines = [chosen[1]]
+    # 补充更多数据
+    if activity.get("total_days_active", 0) > 0:
+        data_lines.append(f"活跃{activity['total_days_active']}天，共{activity.get('total_messages',0)}条消息")
+    if relations:
+        data_lines.append(f"互动最多：{relations[0]['name']}")
+
+    return {
+        "category": chosen[0],
+        "data_summary": "；".join(data_lines),
     }

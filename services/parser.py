@@ -363,6 +363,9 @@ def format_messages_for_prompt(messages: list[dict],
     truncated = False
 
     for msg in messages:
+        # 跳过引用消息：content 是被引用者的原文，sender 却是引用者 → 张冠李戴
+        if msg.get("type") == "引用消息":
+            continue
         time_str = msg.get("formattedTime", "")[11:16]  # "HH:MM"
         sender = get_sender_name(msg.get("senderID", 0))
         raw_content = (msg.get("content") or "").strip()

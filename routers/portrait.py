@@ -327,32 +327,49 @@ async def _run_full_portrait_analysis(group_id: int, member_id: int, task,
         task.steps.clear()
 
     # ---- Step 1: 基础画像 Pipeline（性格/角色/兴趣/口头禅/一句话） ----
-    # 直接用已收集的 all_msgs，不经过 generate_single_portrait 的 analyzed_dates 过滤
-    task.update("inference", "基础画像分析中...")
-    from services.parser import format_sender_messages_for_portrait
-    from services.pipelines import run_portrait_pipeline
+    # 增量模式：保留已有的 AI 性格分析，只刷新数据统计
+    if max_days > 0 and existing_data and existing_data.get("personality"):
+        portrait_data = {
+            "personality": existing_data.get("personality", []),
+            "speaking_style": existing_data.get("speaking_style", ""),
+            "role": existing_data.get("role", ""),
+            "interests": existing_data.get("interests", []),
+            "active_hours": existing_data.get("active_hours", ""),
+            "signature_phrase": existing_data.get("signature_phrase"),
+            "one_line": existing_data.get("one_line", ""),
+            "emoji_style": existing_data.get("emoji_style", "👤"),
+        }
+        portrait_data["_data_start"] = existing_data.get("_data_start", "")
+        portrait_data["_data_end"] = all_dates[-1] if all_dates else ""
+        portrait_data["_incremental"] = True
+        logger.info(f"增量刷新: {sender_name}, 保留性格画像, 仅更新统计数据")
+    else:
+        # 全量模式或无已有画像：完整运行基础 pipeline
+        task.update("inference", "基础画像分析中...")
+        from services.parser import format_sender_messages_for_portrait
+        from services.pipelines import run_portrait_pipeline
 
-    member_names = set()
-    for s in chat.senders:
-        name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
-        if name and len(name) >= 2:
-            member_names.add(name)
+        member_names = set()
+        for s in chat.senders:
+            name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
+            if name and len(name) >= 2:
+                member_names.add(name)
 
-    chat_text = format_sender_messages_for_portrait(all_msgs, sender_name,
-                                                     member_names=member_names)
-    try:
-        portrait_data = await run_portrait_pipeline(
-            chat_text, sender_name, group["name"], len(all_msgs), task=task
-        )
-        data_start = all_dates[0] if all_dates else ""
-        data_end = all_dates[-1] if all_dates else ""
-        portrait_data["_data_start"] = data_start
-        portrait_data["_data_end"] = data_end
-    except Exception as e:
-        logger.error(f"基础画像 pipeline 失败: {sender_name}: {e}")
-        if task.type != "analyze_all_portraits":
-            task.finish(success=False, error={"type": "basic_failed", "detail": str(e)})
-        return
+        chat_text = format_sender_messages_for_portrait(all_msgs, sender_name,
+                                                         member_names=member_names)
+        try:
+            portrait_data = await run_portrait_pipeline(
+                chat_text, sender_name, group["name"], len(all_msgs), task=task
+            )
+            data_start = all_dates[0] if all_dates else ""
+            data_end = all_dates[-1] if all_dates else ""
+            portrait_data["_data_start"] = data_start
+            portrait_data["_data_end"] = data_end
+        except Exception as e:
+            logger.error(f"基础画像 pipeline 失败: {sender_name}: {e}")
+            if task.type != "analyze_all_portraits":
+                task.finish(success=False, error={"type": "basic_failed", "detail": str(e)})
+            return
 
     # ---- Step 2: Python 统计 ----
     task.update("inference", "数据分析中...")
@@ -376,22 +393,30 @@ async def _run_full_portrait_analysis(group_id: int, member_id: int, task,
         for s in task.steps:
             if s["name"] == "统计数据" and s["status"] == "running":
                 s["status"] = "done"
-    task.update("inference", "深度分析中...")
-    from services.pipelines import run_deep_portrait_pipeline
-    deep_data = await run_deep_portrait_pipeline(
-        chat_text="",
-        messages=all_msgs,
-        sender_name=sender_name,
-        group_name=group["name"],
-        group_id=group_id,
-        msg_count=len(all_msgs),
-        stats_summary=stats_summary,
-        task=task,
-    )
+    # 增量模式：保留已有的深度洞察，只更新数据统计
+    if max_days > 0 and existing_data:
+        portrait_data["emotion_profile"] = existing_data.get("emotion_profile", {})
+        portrait_data["language_style"] = existing_data.get("language_style", {})
+        portrait_data["monthly_synthesis"] = existing_data.get("monthly_synthesis", "")
+        deep_data = {"monthly_analyses": []}
+    else:
+        task.update("inference", "深度分析中...")
+        from services.pipelines import run_deep_portrait_pipeline
+        deep_data = await run_deep_portrait_pipeline(
+            chat_text="",
+            messages=all_msgs,
+            sender_name=sender_name,
+            group_name=group["name"],
+            group_id=group_id,
+            msg_count=len(all_msgs),
+            stats_summary=stats_summary,
+            task=task,
+        )
+        portrait_data["emotion_profile"] = deep_data.get("emotion_profile", {})
+        portrait_data["language_style"] = deep_data.get("language_style", {})
+        portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
 
-    # ---- 合并全部数据 ----
-    portrait_data["emotion_profile"] = deep_data.get("emotion_profile", {})
-    portrait_data["language_style"] = deep_data.get("language_style", {})
+    # ---- 合并数据统计（增量全量都更新） ----
     portrait_data["social_relations"] = social_relations
     portrait_data["activity_stats"] = {
         "total_days_active": activity["total_days_active"],
@@ -402,6 +427,40 @@ async def _run_full_portrait_analysis(group_id: int, member_id: int, task,
         "monthly_trend": activity["monthly_trend"],
     }
     portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
+    # ---- 趣味功能 (v0.5.1) ----
+    task.update("inference", "趣味分析中...")
+    from services.stats_engine import compute_fun_title_basis
+    from services.pipelines import FUN_TITLE_PROMPTS, FUN_RELATION_PROMPTS
+    from services.analyzer import call_ollama_chat
+
+    # 趣味称号
+    title_basis = compute_fun_title_basis(activity, language, social_relations,
+                                           language.get("top_emojis", []))
+    title_user = FUN_TITLE_PROMPTS["user"].format(
+        name=sender_name, data_summary=title_basis["data_summary"]
+    )
+    title_result = await call_ollama_chat(
+        FUN_TITLE_PROMPTS["system"], title_user, config.OLLAMA_MODEL, timeout=20
+    )
+    fun_title = str(title_result["data"]).strip() if title_result.get("data") else title_basis["category"]
+
+    # 关系趣味解读（Top 1 互动对象）
+    fun_relation = ""
+    if social_relations and len(social_relations) > 0:
+        top = social_relations[0]
+        rel_user = FUN_RELATION_PROMPTS["user"].format(
+            name_a=sender_name, name_b=top.get("name", "?"),
+            count=top.get("total_interactions", 0),
+            relation_type=top.get("relation_type", "群友"),
+        )
+        rel_result = await call_ollama_chat(
+            FUN_RELATION_PROMPTS["system"], rel_user, config.OLLAMA_MODEL, timeout=20
+        )
+        fun_relation = str(rel_result["data"]).strip() if rel_result.get("data") else ""
+
+    portrait_data["fun_title"] = fun_title
+    portrait_data["fun_relation"] = fun_relation
+
     portrait_data["_analyzed_at"] = datetime.now().isoformat()
     portrait_data["_analyzed_msg_count"] = len(all_msgs)
     if is_incremental and existing_data:
