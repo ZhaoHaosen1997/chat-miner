@@ -148,11 +148,12 @@ async def api_upload_group(file: UploadFile = File(...)):
 
 @router.post("/{group_id}/import")
 async def api_import_to_group(group_id: int, file: UploadFile = File(...),
-                               mode: str = "append"):
+                               mode: str = "append", rename: str = ""):
     """向已有群导入 JSON 数据
 
     Args:
         mode: "append"=去重追加（默认）, "replace"=完全替换
+        rename: "1"=用JSON中的群名替换当前群名
     """
     group = get_group(group_id)
     if not group:
@@ -182,6 +183,17 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         new_chat = ParsedChat(upload_path).load()
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
+
+    # 用 JSON 中的群名替换当前群名
+    if rename in ("1", "true") and new_chat.group_name and new_chat.group_name != group["name"]:
+        conn = get_conn()
+        conn.execute("UPDATE chat_groups SET name=?, display_name=? WHERE id=?",
+                    (new_chat.group_name, new_chat.group_name, group_id))
+        conn.commit()
+        conn.close()
+        _invalidate_cache(group_id)
+        group = get_group(group_id)  # 刷新
+        logger.info(f"群名已更新: {new_chat.group_name}")
 
     existing_chat = get_chat_cache(group_id)
 
@@ -279,6 +291,28 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
             "date_range": [date_start, date_end],
         },
     }
+
+
+@router.put("/{group_id}")
+async def api_rename_group(group_id: int, name: str = None, display_name: str = None):
+    """修改群名 / 显示名"""
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+    if not name and not display_name:
+        raise HTTPException(400, detail="请提供 name 或 display_name")
+
+    conn = get_conn()
+    if name:
+        conn.execute("UPDATE chat_groups SET name=? WHERE id=?", (name.strip(), group_id))
+    if display_name:
+        conn.execute("UPDATE chat_groups SET display_name=? WHERE id=?", (display_name.strip(), group_id))
+    conn.commit()
+    conn.close()
+
+    _invalidate_cache(group_id)
+    updated = get_group(group_id)
+    return {"code": 200, "message": "修改成功", "data": updated}
 
 
 @router.delete("/{group_id}")

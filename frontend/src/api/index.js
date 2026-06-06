@@ -18,6 +18,8 @@ async function request(url, options = {}) {
 
 // --- 群管理 ---
 export const listGroups = () => request('/groups')
+export const renameGroup = (id, name) =>
+  request(`/groups/${id}?name=${encodeURIComponent(name)}`, { method: 'PUT' })
 export const deleteGroup = (id) => request(`/groups/${id}`, { method: 'DELETE' })
 
 export async function uploadGroup(file) {

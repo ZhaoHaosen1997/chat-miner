@@ -9,9 +9,12 @@ const fileRef = ref(null)
 const uploading = ref(false)
 const error = ref('')
 const preview = ref(null)
+const jsonGroupName = ref('')
+const renameGroup = ref(false)
 
 const isGroupImport = computed(() => !!props.group)
 const groupName = computed(() => props.group?.display_name || props.group?.name || '')
+const showRenameOption = computed(() => isGroupImport.value && jsonGroupName.value && jsonGroupName.value !== groupName.value)
 
 function onFileChange(e) {
   const f = e.target.files?.[0]
@@ -25,6 +28,22 @@ function onFileChange(e) {
   error.value = ''
   preview.value = { name: f.name, size: (f.size / 1024 / 1024).toFixed(1) + ' MB' }
   fileRef.value = f
+  renameGroup.value = false
+  jsonGroupName.value = ''
+
+  // 读取 JSON 中的群名
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result)
+      const name = data?.session?.nickname || data?.session?.displayName || ''
+      if (name && isGroupImport.value && name !== groupName.value) {
+        jsonGroupName.value = name
+        renameGroup.value = true
+      }
+    } catch (_) { /* JSON parse error, ignore */ }
+  }
+  reader.readAsText(f.slice(0, 1024 * 1024)) // 只读前 1MB 就够了
 }
 
 async function handleUpload() {
@@ -38,6 +57,7 @@ async function handleUpload() {
     let url, method
     if (isGroupImport.value) {
       url = `/api/groups/${props.group.id}/import`
+      if (renameGroup.value) url += '?rename=1'
       method = 'POST'
     } else {
       url = '/api/groups/upload'
@@ -100,6 +120,14 @@ async function handleUpload() {
             </div>
           </template>
         </label>
+
+        <!-- 群名替换确认 -->
+        <div v-if="showRenameOption" class="mt-3 flex items-start gap-2 p-3 bg-amber-50 rounded-lg text-sm">
+          <input type="checkbox" id="renameChk" v-model="renameGroup" class="mt-0.5" />
+          <label for="renameChk" class="text-amber-700 cursor-pointer">
+            用 JSON 中的群名「<strong>{{ jsonGroupName }}</strong>」替换当前群名「<strong>{{ groupName }}</strong>」
+          </label>
+        </div>
 
         <div v-if="error" class="mt-3 text-sm text-red-500 bg-red-50 px-3 py-2 rounded-lg">
           {{ error }}
