@@ -1,9 +1,9 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, inject, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
-import { MessageCircle, Users, LayoutDashboard } from 'lucide-vue-next'
+import { MessageCircle, Users, LayoutDashboard, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps({ currentGroup: Object })
 const emit = defineEmits(['group-change'])
@@ -11,6 +11,7 @@ const emit = defineEmits(['group-change'])
 const router = useRouter()
 const route = useRoute()
 const showUpload = ref(false)
+const activeTaskId = inject('activeTaskId', ref(''))
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
@@ -62,6 +63,11 @@ function onUploaded(group) {
             <component :is="item.icon" class="w-4 h-4" />
             {{ item.label }}
           </button>
+          <!-- 任务进行中指示灯 -->
+          <div v-if="activeTaskId" class="flex items-center gap-1.5 px-2 py-1 text-xs text-indigo-500">
+            <Loader2 class="w-3.5 h-3.5 animate-spin" />
+            <span class="hidden sm:inline">分析中</span>
+          </div>
         </nav>
       </div>
     </header>

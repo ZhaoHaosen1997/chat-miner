@@ -29,9 +29,6 @@ function connect() {
       duration.value = data.duration_ms || 0
 
       if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
-        if (data.status === 'done') {
-          setTimeout(() => { if (expanded.value) expanded.value = false }, 2000)
-        }
         emit('done', data)
         eventSource?.close()
       }
@@ -86,7 +83,7 @@ onUnmounted(() => eventSource?.close())
 </script>
 
 <template>
-  <div v-if="expanded || status === 'failed'" class="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transition-all">
+  <div v-if="expanded" class="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transition-all">
     <!-- Header -->
     <div :class="[
       'flex items-center justify-between px-4 py-2.5',

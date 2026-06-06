@@ -6,11 +6,11 @@ import {
 } from '../api/index.js'
 import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
-import ProgressPanel from '../components/ProgressPanel.vue'
 
 const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
+const activeTaskId = inject('activeTaskId')
 
 const stats = ref(null)
 const dates = ref([])
@@ -40,6 +40,17 @@ async function loadAll() {
 }
 
 watch(currentGroup, () => { monthOffset.value = 0; loadAll() }, { immediate: true })
+
+// 监听全局任务完成
+watch(activeTaskId, (newVal, oldVal) => {
+  if (oldVal && !newVal) {
+    // 任务 ID 被清空 = 任务结束
+    analyzing.value = false
+    batchTotal.value = 0
+    loadAll()
+    triggerRefresh?.()
+  }
+})
 
 // 最新未分析的一天
 const latestUnanalyzed = ref(null)
@@ -80,7 +91,6 @@ async function startAnalyzeAll() {
 function onTaskDone(data) {
   if (data.status === 'done' || data.status === 'failed') {
     analyzing.value = false
-    activeTaskId.value = ''
     batchTotal.value = 0
     loadAll()
     triggerRefresh?.()
@@ -444,14 +454,6 @@ const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐�
       :group="currentGroup"
       @close="showUpload = false"
       @uploaded="showUpload = false; loadAll(); triggerRefresh?.()"
-    />
-
-    <!-- 任务进度面板 -->
-    <ProgressPanel
-      v-if="activeTaskId"
-      :task-id="activeTaskId"
-      @done="onTaskDone"
-      @close="activeTaskId = ''"
     />
   </div>
 </template>
