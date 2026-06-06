@@ -157,19 +157,33 @@ async def api_refresh_all_portraits(group_id: int, force: bool = False):
     )
 
     refreshed_count = sum(1 for r in results if r["refreshed"])
+    # 构建返回结果：portrait 可能是 DB 行的 portrait_json 字符串，也可能是已解析的 dict
+    result_list = []
+    for r in results:
+        portrait = r.get("portrait")
+        if isinstance(portrait, dict):
+            # 如果是 DB 行 dict（有 portrait_json 键），解析 JSON 字符串
+            if "portrait_json" in portrait:
+                try:
+                    portrait_data = json.loads(portrait["portrait_json"])
+                except (json.JSONDecodeError, TypeError):
+                    portrait_data = {}
+            else:
+                # 已经是解析好的画像 dict
+                portrait_data = portrait
+        else:
+            portrait_data = {}
+        result_list.append({
+            "member_name": r["member"]["display_name"],
+            "refreshed": r["refreshed"],
+            "portrait": portrait_data,
+        })
     return {
         "code": 200,
         "message": f"画像刷新完成，{refreshed_count}/{len(results)} 个需要更新",
         "data": {
             "total": len(results),
             "refreshed": refreshed_count,
-            "results": [
-                {
-                    "member_name": r["member"]["display_name"],
-                    "refreshed": r["refreshed"],
-                    "portrait": r["portrait"]["portrait_json"] if r["portrait"] and isinstance(r["portrait"], dict) and "portrait_json" in r["portrait"] else r.get("portrait"),
-                }
-                for r in results
-            ],
+            "results": result_list,
         },
     }

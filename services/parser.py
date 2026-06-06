@@ -203,16 +203,53 @@ def merge_chat_data(existing_messages: list[dict],
     }
 
 
+def estimate_tokens(text: str) -> int:
+    """简单估算 token 数（中文约 1 字符=1.5 token，英文约 4 字符=1 token）"""
+    chinese_chars = sum(1 for c in text if '一' <= c <= '鿿')
+    other_chars = len(text) - chinese_chars
+    return int(chinese_chars * 1.5 + other_chars * 0.3)
+
+
+# 模型上下文窗口（安全阈值，留 20% 给 prompt 模板和输出）
+_MODEL_CONTEXT_LIMITS = {
+    "14b": 100_000,   # qwen2.5:14b → 128K 上下文
+    "9b": 25_000,     # qwen3.5:9b → 32K 上下文
+    "7b": 25_000,
+    "8b": 25_000,
+    "default": 50_000,
+}
+
+
+def get_model_token_limit(model: str = "") -> int:
+    """根据模型名估算安全的输入 token 上限"""
+    model_lower = model.lower()
+    for key, limit in _MODEL_CONTEXT_LIMITS.items():
+        if key in model_lower:
+            return limit
+    return _MODEL_CONTEXT_LIMITS["default"]
+
+
 def format_messages_for_prompt(messages: list[dict],
                                 get_sender_name,
-                                max_chars: int = 50000) -> str:
+                                max_chars: int = 50000,
+                                model: str = "") -> str:
     """将消息列表格式化为 AI prompt 的聊天记录文本
 
     Args:
         messages: 消息列表
         get_sender_name: 获取发言人名称的函数
-        max_chars: 最大字符数限制（超过则截断并加提示）
+        max_chars: 最大字符数限制（如果 model 指定了上下文限制则优先用 token 估算）
+        model: 模型名，用于根据上下文窗口调整截断阈值
     """
+    # 根据模型自动调整截断上限
+    if model:
+        token_limit = get_model_token_limit(model)
+        # 估算每条消息的 prompt 模板开销约占 30%，留 70% 给聊天内容
+        effective_token_limit = int(token_limit * 0.7)
+        # 保守估计：中文为主时 1 字符 ≈ 1.5 token
+        char_limit = int(effective_token_limit / 1.5)
+        max_chars = min(max_chars, char_limit)
+
     lines = []
     total = 0
     truncated = False

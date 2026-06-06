@@ -153,7 +153,7 @@ async def gpu_lock(who: str = ""):
     else:
         owner = await get_lock_owner()
         raise RuntimeError(
-            f"GPU 一直被 '{owner}' 占用，等待 {config.GPU_LOCK_MAX_RETRIES * config.GPU_LOCK_RETRIES}s 后放弃"
+            f"GPU 一直被 '{owner}' 占用，等待 {config.GPU_LOCK_MAX_RETRIES * config.GPU_LOCK_RETRY_INTERVAL}s 后放弃"
         )
 
     # 2. 加锁

@@ -23,6 +23,32 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
+    """清理过期的分析日志和任务记录
+
+    Args:
+        retention_days: 保留最近 N 天的记录
+        max_records: 每个表最多保留的记录数
+    """
+    try:
+        conn = get_conn()
+        # 清理分析日志
+        conn.execute(
+            "DELETE FROM analysis_log WHERE created_at < datetime('now', ?)",
+            (f'-{retention_days} days',)
+        )
+        # 保留最近 max_records 条任务记录
+        conn.execute("""
+            DELETE FROM task_records WHERE id NOT IN (
+                SELECT id FROM task_records ORDER BY created_at DESC LIMIT ?
+            )
+        """, (max_records,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # 清理失败不影响主流程
+
+
 def init_db():
     """初始化所有表"""
     conn = get_conn()
@@ -53,6 +79,7 @@ def init_db():
             group_nickname TEXT,
             avatar TEXT,
             message_count INTEGER DEFAULT 0,
+            UNIQUE(group_id, sender_id),
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
 
@@ -113,6 +140,8 @@ def init_db():
     _migrate_db(conn)
     conn.commit()
     conn.close()
+    # 清理过期日志（不阻塞启动）
+    cleanup_old_logs()
 
 
 def _migrate_db(conn):

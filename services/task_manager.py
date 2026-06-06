@@ -109,12 +109,27 @@ class TaskManager:
         return cls._instance
 
     def create(self, task_type: str, group_id: int, params: dict = None) -> TaskInfo:
+        # 清理已完成超过 30 分钟的旧任务（防止内存泄漏）
+        self._cleanup_stale()
         task_id = uuid.uuid4().hex[:12]
         task = TaskInfo(task_id, task_type, group_id, params)
         task.start()
         self._tasks[task_id] = task
         logger.info(f"创建任务: {task_id} type={task_type} group={group_id}")
         return task
+
+    def _cleanup_stale(self, max_age_seconds: int = 1800):
+        """清理已完成/失败/取消的旧任务（默认 30 分钟）"""
+        now = time.time()
+        stale_ids = []
+        for tid, t in self._tasks.items():
+            if t.status in ("done", "failed", "cancelled"):
+                if t._start_time > 0 and (now - t._start_time) > max_age_seconds:
+                    stale_ids.append(tid)
+        for tid in stale_ids:
+            self._tasks.pop(tid, None)
+        if stale_ids:
+            logger.debug(f"清理 {len(stale_ids)} 个过期任务")
 
     def get(self, task_id: str) -> Optional[TaskInfo]:
         return self._tasks.get(task_id)
