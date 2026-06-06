@@ -66,26 +66,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 路由注册
+# 路由注册（API 必须在静态文件之前注册）
 app.include_router(groups.router)
 app.include_router(report.router)
 app.include_router(portrait.router)
 app.include_router(stats.router)
 app.include_router(tasks.router)
 
-
-# 根路由
-@app.get("/")
-async def root():
-    return {
-        "code": 200,
-        "message": "Chat-Miner API 服务运行中",
-        "data": {
-            "version": "0.5.1",
-            "docs": "/docs",
-            "health": "/api/health",
-        },
-    }
+# 挂载前端静态文件（API 路由优先，未匹配的走静态文件）
+import os
+dist_path = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+if os.path.exists(dist_path):
+    app.mount("/", StaticFiles(directory=dist_path, html=True), name="frontend")
 
 
 # --- 入口 ---
