@@ -215,18 +215,24 @@ watch(stats, (s) => {
 
           <!-- 24小时活跃分布 -->
           <div v-if="stats?.hourly_distribution" class="card p-4">
-            <h4 class="text-sm font-medium text-slate-600 mb-3 flex items-center gap-1.5">
+            <h4 class="text-sm font-medium text-slate-600 mb-2 flex items-center gap-1.5">
               <Clock class="w-3.5 h-3.5" /> 活跃时段
             </h4>
+            <!-- AI 活跃规律描述 -->
+            <div v-if="report.active_hours?.peak_desc || report.active_hours?.peak_label" class="mb-3 text-xs text-slate-500 bg-indigo-50 rounded-lg px-3 py-2">
+              <span v-if="report.active_hours.peak_label" class="font-medium text-indigo-600">{{ report.active_hours.peak_label }}</span>
+              <span v-if="report.active_hours.peak_desc"> · {{ report.active_hours.peak_desc }}</span>
+              <span v-if="report.active_hours.quiet_note" class="block mt-0.5 text-slate-400">{{ report.active_hours.quiet_note }}</span>
+            </div>
             <div class="flex items-end gap-[2px] h-16">
               <div
                 v-for="h in hourLabels"
                 :key="h"
-                :title="`${h}: ${stats.hourly_distribution[h] || 0}条`"
-                :style="{ height: `${((stats.hourly_distribution[h] || 0) / maxHourCount) * 100}%` }"
+                :title="`${h}: ${stats.hourly_distribution[h.slice(0,2)] || 0}条`"
+                :style="{ height: `${((stats.hourly_distribution[h.slice(0,2)] || 0) / maxHourCount) * 100}%` }"
                 :class="[
                   'flex-1 rounded-t-sm transition-colors',
-                  (stats.hourly_distribution[h] || 0) > 0 ? 'bg-indigo-300 hover:bg-indigo-400' : 'bg-slate-100',
+                  (stats.hourly_distribution[h.slice(0,2)] || 0) > 0 ? 'bg-indigo-300 hover:bg-indigo-400' : 'bg-slate-100',
                 ]"
               />
             </div>

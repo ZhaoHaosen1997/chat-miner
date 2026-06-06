@@ -70,6 +70,12 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
     if len(chat_text) > 100000:
         logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
 
+    # 用 Python 统计精确的小时分布，供活跃时段分析
+    day_stats = chat.stats_for_date(date)
+    hourly_lines = [f"{h}:00 - {cnt}条" for h, cnt in
+                    sorted(day_stats.get("hourly_distribution", {}).items()) if cnt > 0]
+    hourly_stats_str = "\n".join(hourly_lines) if hourly_lines else ""
+
     result = await analyze_daily_chat(
         group_name=group_name,
         date=date,
@@ -77,6 +83,7 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
         msg_count=len(text_msgs),
         model=config.OLLAMA_MODEL,
         task=task,
+        hourly_stats=hourly_stats_str,
     )
 
     if result["success"] and result["data"]:
@@ -151,9 +158,10 @@ async def api_analyze_date(group_id: int, date: str, force: bool = False):
     # 文本消息太少
     text_msgs = chat.get_text_messages_for_date(date)
     if len(text_msgs) < 5:
+        # 返回 200，让前端正常处理（不报错），同时记录为跳过
         return {
-            "code": 400,
-            "message": f"{date} 文本消息过少（{len(text_msgs)}条），跳过 AI 分析",
+            "code": 200,
+            "message": f"{date} 文本消息过少（{len(text_msgs)}条），已跳过",
             "data": {"date": date, "stats": chat.stats_for_date(date), "skipped": True, "reason": "too_few_messages"},
         }
 
@@ -237,10 +245,19 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
             continue
 
         chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name)
+        # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
+        task.update("inference", f"({i+1}/{total}) 分析 {date}...",
+                   progress={"current": i, "total": total})
+        day_stats = chat.stats_for_date(date)
+        hourly_lines = [f"{h}:00 - {cnt}条" for h, cnt in
+                        sorted(day_stats.get("hourly_distribution", {}).items()) if cnt > 0]
+        hourly_stats_str = "\n".join(hourly_lines) if hourly_lines else ""
         result = await analyze_daily_chat(
             group_name=group_name, date=date,
             chat_text=chat_text, msg_count=len(text_msgs),
+            task=task,
             model=config.OLLAMA_MODEL,
+            hourly_stats=hourly_stats_str,
         )
 
         if result["success"] and result["data"]:

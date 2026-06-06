@@ -239,7 +239,7 @@ def format_messages_for_prompt(messages: list[dict],
 
 def format_sender_messages_for_portrait(messages: list[dict],
                                           sender_name: str,
-                                          max_chars: int = 8000) -> str:
+                                          max_chars: int = 30000) -> str:
     """将某个成员的发言格式化为画像分析的 prompt"""
     lines = [f"{sender_name} 的发言记录：", "---"]
     total = 0

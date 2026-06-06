@@ -13,7 +13,6 @@ import httpx
 from typing import Optional
 
 from config import config
-from prompts.daily_report import DAILY_REPORT_SYSTEM, DAILY_REPORT_USER
 from services.gpu_lock import gpu_lock
 
 logger = logging.getLogger(__name__)
@@ -70,6 +69,18 @@ def _extract_json(text: str) -> Optional[dict]:
 
     text = text.strip()
 
+    # 预处理：全角符号 → 半角
+    text = text.replace("｛", "{").replace("｝", "}")  # ｛｝
+    text = text.replace("［", "[").replace("］", "]")  # ［］
+    text = text.replace("：", ":").replace("，", ",")  # ：，
+
+    # 补缺失的开头 {
+    if text and text[0] not in "{[":
+        text = "{" + text
+    # 补缺失的结尾 }
+    if text and text[-1] not in "}]":
+        text = text + "}"
+
     # 尝试 1：直接解析
     try:
         return json.loads(text)
@@ -84,14 +95,23 @@ def _extract_json(text: str) -> Optional[dict]:
         except json.JSONDecodeError:
             pass
 
-    # 尝试 3：找到第一个 { 和最后一个 } 之间的内容
+    # 尝试 3：找到第一个 {，然后从后往前找 }，逐步缩短直到解析成功
     start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            return json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            pass
+    if start != -1:
+        end = text.rfind("}")
+        while end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                end = text.rfind("}", start, end)  # 往前找上一个 }
+        # 如果 rfind 收缩失败，尝试最后一个 }
+        if end == -1:
+            end = text.rfind("}")
+            if end > start:
+                try:
+                    return json.loads(text[start:end + 1])
+                except json.JSONDecodeError:
+                    pass
 
     return None
 
@@ -160,32 +180,24 @@ async def call_ollama_chat(
         raw_content = result.get("message", {}).get("content", "")
         logger.info(f"Ollama 响应 ({model}): {duration_ms}ms, {len(raw_content)} 字符")
 
-        # 解析 JSON
+        # 尝试 JSON 解析，解析不到就用纯文本（pipeline 已改为纯文本提示词）
         data = _extract_json(raw_content)
         if data:
-            # 兜底：规范化 AI 输出格式
             data = _normalize_report(data)
             if task:
                 task.model_used = model
                 task.finish(success=True)
-            return {
-                "success": True,
-                "data": data,
-                "error": None,
-                "model": model,
-                "duration_ms": duration_ms,
-            }
-        else:
-            logger.warning(f"JSON 解析失败，原始返回: {raw_content[:300]}...")
+            return {"success": True, "data": data, "error": None, "model": model, "duration_ms": duration_ms}
+        elif raw_content.strip():
+            # 非 JSON 但有内容 → pipeline 会自己解析纯文本
+            logger.info(f"纯文本响应 ({len(raw_content)}字符): {raw_content[:80]}...")
             if task:
-                task.finish(success=False, error={"type": "json_parse", "detail": f"AI 返回无法解析为 JSON"})
-            return {
-                "success": False,
-                "data": None,
-                "error": f"无法从 AI 返回中提取 JSON。原始返回前300字: {raw_content[:300]}",
-                "model": model,
-                "duration_ms": duration_ms,
-            }
+                task.model_used = model
+                task.finish(success=True)
+            return {"success": True, "data": raw_content.strip(), "error": None, "model": model, "duration_ms": duration_ms}
+        else:
+            logger.warning(f"空响应 from {model}")
+            return {"success": False, "data": None, "error": "AI 返回空内容", "model": model, "duration_ms": duration_ms}
 
     except httpx.TimeoutException:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -226,39 +238,45 @@ async def analyze_daily_chat(
     chat_text: str,
     msg_count: int,
     model: str = "",
-    task=None,  # TaskInfo for progress reporting
+    task=None,
+    hourly_stats: str = "",
 ) -> dict:
     """分析一天的群聊内容，生成每日报告
 
-    Args:
-        group_name: 群名
-        date: 日期字符串 "2025-09-01"
-        chat_text: 格式化后的聊天记录文本
-        msg_count: 文本消息数量
-        model: 使用的模型
-        task: 可选的 TaskInfo，用于报告进度
+    通过 5 步子任务管道执行：话题 → 搞笑发言 → 情绪 → 关键词 → 总结
+    每个子任务独立调用 Ollama，降低单次复杂度，提高 9B 模型成功率。
 
     Returns:
-        同 call_ollama_chat 的返回格式
+        {"success": bool, "data": dict, "error": str, "model": str, "duration_ms": int}
     """
-    user_prompt = DAILY_REPORT_USER.format(
-        group_name=group_name,
-        date=date,
-        msg_count=msg_count,
-        chat_text=chat_text,
-    )
+    import time as _time
+    from services.pipelines import run_daily_pipeline
 
-    logger.info(f"开始分析 {group_name} {date}: {msg_count} 条消息, {len(chat_text)} 字符")
-    result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, model, task=task)
+    logger.info(f"开始分析 {group_name} {date}: {msg_count} 条消息, {len(chat_text)} 字符 (pipeline模式)")
 
-    # 如果主模型失败，尝试 fallback
-    if not result["success"] and config.OLLAMA_MODEL_FALLBACK:
-        fallback = config.OLLAMA_MODEL_FALLBACK
-        if result["model"] != fallback:
-            logger.info(f"主模型失败，尝试 fallback: {fallback}")
-            result = await call_ollama_chat(DAILY_REPORT_SYSTEM, user_prompt, fallback, task=task)
-
-    return result
+    start = _time.time()
+    try:
+        data = await run_daily_pipeline(chat_text, group_name, date, msg_count, task, hourly_stats)
+        duration = int((_time.time() - start) * 1000)
+        return {
+            "success": True,
+            "data": data,
+            "error": None,
+            "model": config.OLLAMA_MODEL,
+            "duration_ms": duration,
+        }
+    except Exception as e:
+        duration = int((_time.time() - start) * 1000)
+        logger.error(f"Pipeline 失败: {e}")
+        if task:
+            task.finish(success=False, error={"type": "pipeline_failed", "detail": str(e)})
+        return {
+            "success": False,
+            "data": None,
+            "error": str(e),
+            "model": config.OLLAMA_MODEL,
+            "duration_ms": duration,
+        }
 
 
 async def check_ollama_health() -> dict:

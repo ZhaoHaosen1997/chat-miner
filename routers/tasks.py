@@ -1,16 +1,25 @@
 """
-任务 API：查询任务状态、SSE 进度流
+任务 API：查询任务状态、SSE 进度流、历史记录
 """
 import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from models.database import get_task_history
 from services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["任务"])
+
+
+# 注意：/history 必须在 /{task_id} 之前，否则会被动态路由吃掉
+@router.get("/history")
+async def api_task_history(group_id: int = None, limit: int = 20):
+    """查询任务历史"""
+    records = get_task_history(group_id, limit)
+    return {"code": 200, "message": "获取成功", "data": records}
 
 
 @router.get("/{task_id}")

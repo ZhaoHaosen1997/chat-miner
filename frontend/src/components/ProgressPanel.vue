@@ -10,6 +10,7 @@ const emit = defineEmits(['done', 'close'])
 const status = ref('pending')
 const step = ref('')
 const progress = ref({ current: 0, total: 0 })
+const steps = ref([])
 const error = ref(null)
 const duration = ref(0)
 const expanded = ref(true)
@@ -25,6 +26,7 @@ function connect() {
       status.value = data.status
       step.value = data.step
       if (data.progress) progress.value = data.progress
+      if (data.steps) steps.value = data.steps
       if (data.error) error.value = data.error
       duration.value = data.duration_ms || 0
 
@@ -115,7 +117,7 @@ onUnmounted(() => eventSource?.close())
       <!-- 批量进度条 -->
       <div v-if="progress.total > 0" class="mb-2">
         <div class="flex justify-between text-xs text-slate-500 mb-1">
-          <span>已分析 {{ progress.current }}/{{ progress.total }} 天</span>
+          <span>{{ progress.total > 10 ? `已分析 ${progress.current}/${progress.total} 天` : `步骤 ${progress.current}/${progress.total}` }}</span>
           <span>{{ Math.round(progress.current / progress.total * 100) }}%</span>
         </div>
         <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -124,8 +126,25 @@ onUnmounted(() => eventSource?.close())
         </div>
       </div>
 
+      <!-- 子步骤列表 -->
+      <div v-if="steps.length > 0" class="space-y-1">
+        <div
+          v-for="(s, i) in steps"
+          :key="i"
+          class="flex items-center justify-between text-xs"
+        >
+          <div class="flex items-center gap-1.5">
+            <CheckCircle2 v-if="s.status === 'done'" class="w-3 h-3 text-emerald-500" />
+            <XCircle v-else-if="s.status === 'failed'" class="w-3 h-3 text-red-400" />
+            <Loader2 v-else class="w-3 h-3 animate-spin text-indigo-400" />
+            <span :class="s.status === 'failed' ? 'text-red-500' : 'text-slate-600'">{{ s.name }}</span>
+          </div>
+          <span class="text-slate-400 font-mono">{{ s.duration_ms > 0 ? (s.duration_ms / 1000).toFixed(1) + 's' : '' }}</span>
+        </div>
+      </div>
+
       <!-- 步骤 -->
-      <div class="text-xs text-slate-500">{{ step }}</div>
+      <div v-if="steps.length === 0" class="text-xs text-slate-500">{{ step }}</div>
 
       <!-- 错误详情 -->
       <div v-if="error" class="p-2 bg-red-50 rounded-lg text-xs text-red-600">

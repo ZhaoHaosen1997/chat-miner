@@ -137,6 +137,13 @@ async def gpu_lock(who: str = ""):
             break
 
         owner = await get_lock_owner()
+        # 如果锁是 chat-miner 自己持有的（上次崩溃残留），强制解锁
+        if owner == who:
+            logger.warning(f"GPU 锁被自己({who})占用（可能是上次崩溃残留），强制解锁")
+            await release_lock()
+            await asyncio.sleep(1)
+            continue
+
         retries += 1
         logger.info(
             f"GPU 被 '{owner}' 占用，等待 {config.GPU_LOCK_RETRY_INTERVAL}s "

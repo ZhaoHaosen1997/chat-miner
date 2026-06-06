@@ -71,6 +71,7 @@ export const refreshAllPortraits = (gid) =>
 export const getGroupStats = (gid) => request(`/groups/${gid}/stats`)
 export const getGlobalStats = () => request('/stats/global')
 export const getHealth = () => request('/health')
+export const getTaskHistory = (gid, limit = 10) => request(`/tasks/history?group_id=${gid}&limit=${limit}`)
 
 // --- 批量分析 ---
 export const analyzeAll = async (gid) => {

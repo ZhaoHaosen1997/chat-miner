@@ -104,7 +104,7 @@ async def _run_portrait_and_save(group_id: int, member_id: int, task):
         save_member_portrait(
             group_id=group_id, member_id=member_id,
             display_name=member["display_name"] or member["nickname"],
-            total_messages=member["message_count"],
+            total_messages=result.get("_analyzed_msg_count", member["message_count"]),
             portrait_json=portrait_json,
             data_start=result.get("_data_start") or group.get("date_range_start") or "",
             data_end=result.get("_data_end") or group.get("date_range_end") or "",

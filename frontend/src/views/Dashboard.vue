@@ -3,8 +3,9 @@ import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
+  getTaskHistory,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 
 const router = useRouter()
@@ -18,6 +19,7 @@ const recentReports = ref([])
 const loading = ref(false)
 const analyzing = ref(false)
 const portraits = ref([])
+const taskHistory = ref([])
 const showUpload = ref(false)
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
@@ -26,16 +28,18 @@ async function loadAll() {
   loading.value = true
   const gid = currentGroup.value.id
   try {
-    const [s, d, r, p] = await Promise.all([
+    const [s, d, r, p, h] = await Promise.all([
       getGroupStats(gid),
       getDates(gid),
       getRecentReports(gid, 14),
       getPortraits(gid),
+      getTaskHistory(gid, 8),
     ])
     stats.value = s
     dates.value = d
     recentReports.value = r
     portraits.value = p
+    taskHistory.value = h
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -53,19 +57,25 @@ watch(activeTaskId, (newVal, oldVal) => {
   }
 })
 
-// 最新未分析的一天
+// 最新未分析的一天（自动跳过消息太少 <5 的日期）
 const latestUnanalyzed = ref(null)
+const skippedDates = ref(new Set())
 watch(dates, (d) => {
   const sorted = [...d].sort((a, b) => b.date.localeCompare(a.date))
-  latestUnanalyzed.value = sorted.find(dt => !dt.analyzed) || null
+  latestUnanalyzed.value = sorted.find(dt => !dt.analyzed && !skippedDates.value.has(dt.date) && dt.text_messages >= 5) || null
 })
 
 async function analyzeLatest() {
-  if (!latestUnanalyzed.value || analyzing.value) return
+  if (!latestUnanalyzed.value || analyzing.value || activeTaskId.value) return
   analyzing.value = true
+  const date = latestUnanalyzed.value.date
   try {
-    const result = await analyzeDateAsync(currentGroup.value.id, latestUnanalyzed.value.date)
-    if (result.task_id) {
+    const result = await analyzeDateAsync(currentGroup.value.id, date)
+    if (result.skipped) {
+      skippedDates.value.add(date)
+      analyzing.value = false
+      await loadAll()
+    } else if (result.task_id) {
       activeTaskId.value = result.task_id
     } else if (result.cached) {
       await loadAll(); triggerRefresh?.(); analyzing.value = false
@@ -440,6 +450,32 @@ const moodIcons = { '欢乐': '😄', '温馨': '🥰', '严肃': '🧐', '吐�
                 ]">{{ i + 1 }}</span>
                 <span class="flex-1 text-slate-700 truncate">{{ m.display_name || m.remark || m.nickname }}</span>
                 <span class="text-slate-400 font-mono text-xs">{{ m.message_count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 最近任务 -->
+          <div v-if="taskHistory.length > 0" class="card p-4">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+              <Clock class="w-4 h-4" /> 最近任务
+            </h3>
+            <div class="space-y-2">
+              <div
+                v-for="t in taskHistory.slice(0, 5)"
+                :key="t.task_id"
+                class="flex items-center gap-2 text-xs"
+              >
+                <CheckCircle2 v-if="t.status === 'done'" class="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                <XCircle v-else-if="t.status === 'failed'" class="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                <Loader2 v-else class="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+                <div class="flex-1 min-w-0">
+                  <div class="text-slate-600 truncate">{{ t.target }}</div>
+                  <div class="text-slate-400">
+                    {{ t.task_type === 'analyze_day' ? '日分析' : t.task_type === 'analyze_all' ? '全量' : '画像' }}
+                    <span v-if="t.total_duration_ms"> · {{ (t.total_duration_ms / 1000).toFixed(0) }}s</span>
+                    <span v-if="t.error_summary" class="text-red-400"> · {{ t.error_summary }}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

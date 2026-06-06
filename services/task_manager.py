@@ -28,6 +28,7 @@ class TaskInfo:
         self.model_used = ""
         self.started_at = ""
         self.duration_ms = 0
+        self.steps = []  # [{name, status, duration_ms, model, error}]
         self._start_time = 0.0
         # SSE 事件队列
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -64,6 +65,18 @@ class TaskInfo:
         self._cancelled = True
         self.update("cancelled", "已取消")
 
+    def add_step(self, name: str, status: str = "running", duration_ms: int = 0,
+                 model: str = "", error: str = ""):
+        """记录一个子步骤"""
+        self.steps.append({
+            "name": name, "status": status, "duration_ms": duration_ms,
+            "model": model, "error": error,
+        })
+        # 推进到当前步骤
+        done = sum(1 for s in self.steps if s["status"] == "done")
+        self.update("inference", f"({done}/{len(self.steps)}) {name}...",
+                   progress={"current": done, "total": len(self.steps)})
+
     def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
@@ -76,6 +89,7 @@ class TaskInfo:
             "model_used": self.model_used,
             "started_at": self.started_at,
             "duration_ms": self.duration_ms,
+            "steps": self.steps,
         }
 
     def to_event(self) -> str:

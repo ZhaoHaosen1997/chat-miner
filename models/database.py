@@ -94,6 +94,20 @@ def init_db():
             error_msg TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS task_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            group_id INTEGER,
+            task_type TEXT,
+            target TEXT,
+            status TEXT,
+            total_duration_ms INTEGER DEFAULT 0,
+            model_used TEXT,
+            steps_json TEXT,
+            error_summary TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
@@ -366,8 +380,7 @@ def log_analysis(group_id: int, date: str, analysis_type: str,
 
 
 def get_group_dates(group_id: int) -> list[str]:
-    """获取某个群有消息的日期列表（从 analysis_log 推断或外部传入）"""
-    # 日期信息存储在 daily_reports 中（已分析过），也可以外部提供所有日期
+    """获取某个群有消息的日期列表"""
     conn = get_conn()
     rows = conn.execute(
         "SELECT date_range_start, date_range_end FROM chat_groups WHERE id=?",
@@ -375,3 +388,48 @@ def get_group_dates(group_id: int) -> list[str]:
     ).fetchone()
     conn.close()
     return dict(rows) if rows else None
+
+
+# ==================== 任务记录 CRUD ====================
+
+def save_task_record(task_id: str, group_id: int, task_type: str, target: str,
+                     status: str, total_duration_ms: int, model_used: str = "",
+                     steps_json: str = "", error_summary: str = ""):
+    """保存任务执行记录"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO task_records (task_id, group_id, task_type, target, status,
+           total_duration_ms, model_used, steps_json, error_summary)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (task_id, group_id, task_type, target, status,
+         total_duration_ms, model_used, steps_json, error_summary)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_task_history(group_id: int = None, limit: int = 20) -> list[dict]:
+    """查询任务历史"""
+    conn = get_conn()
+    if group_id:
+        rows = conn.execute(
+            "SELECT * FROM task_records WHERE group_id=? ORDER BY created_at DESC LIMIT ?",
+            (group_id, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM task_records ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_task_record(task_id: str) -> dict | None:
+    """查询单个任务记录"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM task_records WHERE task_id=?", (task_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None

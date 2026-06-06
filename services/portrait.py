@@ -11,7 +11,6 @@ from models.database import (
 )
 from services.analyzer import call_ollama_chat
 from services.parser import format_sender_messages_for_portrait, ParsedChat
-from prompts.portrait import PORTRAIT_SYSTEM, PORTRAIT_USER
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -70,28 +69,40 @@ async def generate_single_portrait(
     # 格式化发言
     chat_text = format_sender_messages_for_portrait(all_msgs, sender_name)
 
-    # 组装 prompt
-    user_prompt = PORTRAIT_USER.format(
-        sender_name=sender_name,
-        group_name=group_name,
-        msg_count=len(all_msgs),
-        chat_text=chat_text,
-    )
+    logger.info(f"生成画像: {sender_name} ({len(all_msgs)} 条消息, pipeline模式)")
+    import time as _time
+    from services.pipelines import run_portrait_pipeline
 
-    logger.info(f"生成画像: {sender_name} ({len(all_msgs)} 条消息, {len(chat_text)} 字符)")
-    if task:
-        task.update("inference", f"为 {sender_name} 生成画像...")
-
-    result = await call_ollama_chat(PORTRAIT_SYSTEM, user_prompt, model, task=task)
-
-    if not result["success"] and config.OLLAMA_MODEL_FALLBACK:
-        result = await call_ollama_chat(PORTRAIT_SYSTEM, user_prompt,
-                                         config.OLLAMA_MODEL_FALLBACK, task=task)
-
-    # 附加实际数据范围
-    result["_data_start"] = data_start
-    result["_data_end"] = data_end
-    return result
+    start = _time.time()
+    try:
+        data = await run_portrait_pipeline(chat_text, sender_name, group_name, len(all_msgs), task)
+        duration = int((_time.time() - start) * 1000)
+        data["_data_start"] = data_start
+        data["_data_end"] = data_end
+        return {
+            "success": True,
+            "data": data,
+            "error": None,
+            "model": config.OLLAMA_MODEL,
+            "duration_ms": duration,
+            "_data_start": data_start,
+            "_data_end": data_end,
+            "_analyzed_msg_count": len(all_msgs),  # 实际参与分析的发言数
+        }
+    except Exception as e:
+        duration = int((_time.time() - start) * 1000)
+        logger.error(f"画像 pipeline 失败: {e}")
+        if task:
+            task.finish(success=False, error={"type": "pipeline_failed", "detail": str(e)})
+        return {
+            "success": False,
+            "data": None,
+            "error": str(e),
+            "model": config.OLLAMA_MODEL,
+            "duration_ms": duration,
+            "_data_start": data_start,
+            "_data_end": data_end,
+        }
 
 
 async def refresh_portraits(
@@ -146,7 +157,7 @@ async def refresh_portraits(
                 group_id=group_id,
                 member_id=member["id"],
                 display_name=sender_name,
-                total_messages=member["message_count"],
+                total_messages=result.get("_analyzed_msg_count", member["message_count"]),
                 portrait_json=portrait_json,
                 data_start=result.get("_data_start", ""),
                 data_end=result.get("_data_end", ""),
