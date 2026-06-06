@@ -98,8 +98,28 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
                     error_msg=result.get("error", ""))
 
 
+@router.delete("/report/{date}")
+async def api_delete_report(group_id: int, date: str):
+    """删除某天的分析报告"""
+    from models.database import get_conn
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM daily_reports WHERE group_id=? AND date=?",
+        (group_id, date)
+    )
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    if deleted:
+        # 更新已分析天数
+        analyzed_count = len(get_analyzed_dates(group_id))
+        update_group_stats(group_id, analyzed_count)
+        return {"code": 200, "message": f"已删除 {date} 的分析报告", "data": None}
+    raise HTTPException(404, detail=f"{date} 没有分析记录")
+
+
 @router.post("/analyze/{date}")
-async def api_analyze_date(group_id: int, date: str):
+async def api_analyze_date(group_id: int, date: str, force: bool = False):
     """触发分析某天（带回退缓存检查 + 异步执行）"""
     group = get_group(group_id)
     if not group:
@@ -109,9 +129,9 @@ async def api_analyze_date(group_id: int, date: str):
     if not chat:
         raise HTTPException(404, detail="群数据未加载")
 
-    # 检查缓存
+    # 检查缓存（force=true 时跳过）
     existing = get_daily_report(group_id, date)
-    if existing:
+    if existing and not force:
         try:
             report_data = json.loads(existing["report_json"])
             return {

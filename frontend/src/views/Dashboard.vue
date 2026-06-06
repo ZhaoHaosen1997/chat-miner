@@ -19,6 +19,7 @@ const loading = ref(false)
 const analyzing = ref(false)
 const portraits = ref([])
 const showUpload = ref(false)
+const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
 async function loadAll() {
   if (!currentGroup.value) return
@@ -113,9 +114,6 @@ const dateMap = computed(() => {
   return m
 })
 
-// 当月偏移（0=当前月, -1=上月, 1=下月）
-const monthOffset = ref(0)
-
 // 根据 stats.group 得到有数据的月份范围
 const dataRange = computed(() => {
   const s = stats.value?.group
@@ -165,7 +163,8 @@ const calendarWeeks = computed(() => {
 
   for (let d = 1; d <= lastDay.getDate(); d++) {
     const dateObj = new Date(year, month, d)
-    const dateStr = dateObj.toISOString().slice(0, 10)
+    // 用本地时间格式化，避免 UTC 时区偏移导致日期差一天
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const info = dateMap.value[dateStr]
     const inRange = range ? dateObj >= range.start && dateObj <= range.end : false
 

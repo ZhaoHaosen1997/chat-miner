@@ -24,6 +24,7 @@ async def generate_single_portrait(
     sender_name: str,
     chat: ParsedChat,
     model: str = "",
+    task=None,  # TaskInfo for progress reporting
 ) -> dict:
     """为单个成员生成画像
 
@@ -41,17 +42,27 @@ async def generate_single_portrait(
     # 收集该成员在所有已分析日期中的发言
     all_msgs = []
     analyzed_dates = get_analyzed_dates(group_id)
+    actual_dates = set()
 
     for date in analyzed_dates:
         day_msgs = chat.get_text_messages_for_date(date)
         sender_day_msgs = [m for m in day_msgs if m.get("senderID") == sender_id]
+        if sender_day_msgs:
+            actual_dates.add(date)
         all_msgs.extend(sender_day_msgs)
 
+    # 实际分析的数据范围
+    data_start = min(actual_dates) if actual_dates else ""
+    data_end = max(actual_dates) if actual_dates else ""
+
     if len(all_msgs) < 5:
+        err = {"type": "too_few", "detail": f"{sender_name} 仅 {len(all_msgs)} 条文本消息（需至少 5 条）"}
+        if task:
+            task.finish(success=False, error=err)
         return {
             "success": False,
             "data": None,
-            "error": f"{sender_name} 的文本消息过少（{len(all_msgs)}条），不足以生成画像",
+            "error": err["detail"],
             "model": "",
             "duration_ms": 0,
         }
@@ -68,12 +79,18 @@ async def generate_single_portrait(
     )
 
     logger.info(f"生成画像: {sender_name} ({len(all_msgs)} 条消息, {len(chat_text)} 字符)")
-    result = await call_ollama_chat(PORTRAIT_SYSTEM, user_prompt, model)
+    if task:
+        task.update("inference", f"为 {sender_name} 生成画像...")
+
+    result = await call_ollama_chat(PORTRAIT_SYSTEM, user_prompt, model, task=task)
 
     if not result["success"] and config.OLLAMA_MODEL_FALLBACK:
         result = await call_ollama_chat(PORTRAIT_SYSTEM, user_prompt,
-                                         config.OLLAMA_MODEL_FALLBACK)
+                                         config.OLLAMA_MODEL_FALLBACK, task=task)
 
+    # 附加实际数据范围
+    result["_data_start"] = data_start
+    result["_data_end"] = data_end
     return result
 
 
@@ -125,15 +142,14 @@ async def refresh_portraits(
         if result["success"] and result["data"]:
             import json
             portrait_json = json.dumps(result["data"], ensure_ascii=False)
-            date_start, date_end = chat.get_date_range()
             save_member_portrait(
                 group_id=group_id,
                 member_id=member["id"],
                 display_name=sender_name,
                 total_messages=member["message_count"],
                 portrait_json=portrait_json,
-                data_start=date_start,
-                data_end=date_end,
+                data_start=result.get("_data_start", ""),
+                data_end=result.get("_data_end", ""),
             )
             log_analysis(group_id, "", "portrait", "success",
                         model=result["model"], duration_ms=result["duration_ms"])

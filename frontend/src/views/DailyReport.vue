@@ -1,12 +1,33 @@
 <script setup>
 import { ref, inject, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getReport, analyzeDate } from '../api/index.js'
-import { ArrowLeft, Sparkles, Loader2, Clock, MessageSquare, Users, Hash } from 'lucide-vue-next'
+import { getReport, analyzeDateAsync, deleteReport } from '../api/index.js'
+import { ArrowLeft, Sparkles, Loader2, Clock, MessageSquare, Users, Hash, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps({ date: String })
 const router = useRouter()
 const currentGroup = inject('currentGroup')
+const activeTaskId = inject('activeTaskId')
+
+const reanalyzing = ref(false)
+
+async function reanalyze() {
+  if (reanalyzing.value || activeTaskId.value) return
+  reanalyzing.value = true
+  try {
+    // 删除旧报告
+    try { await deleteReport(currentGroup.value.id, props.date) } catch(e) {}
+    // 触发重分析
+    const result = await analyzeDateAsync(currentGroup.value.id, props.date)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    } else {
+      // 立即完成（消息太少等）
+      await load()
+    }
+  } catch (e) { console.error(e) }
+  finally { reanalyzing.value = false }
+}
 
 const report = ref(null)
 const stats = ref(null)
@@ -51,6 +72,13 @@ async function startAnalyze() {
 }
 
 watch([currentGroup, () => props.date], load, { immediate: true })
+
+// 重分析完成后刷新
+watch(activeTaskId, (newVal, oldVal) => {
+  if (oldVal && !newVal) {
+    load()
+  }
+})
 
 function goBack() { router.push('/') }
 
@@ -102,7 +130,18 @@ watch(stats, (s) => {
       <div class="card p-6 mb-6 text-center">
         <div class="text-5xl mb-3">{{ report.mood_emoji }}</div>
         <h2 class="text-2xl font-bold text-slate-800 mb-1">{{ report.one_line }}</h2>
-        <p class="text-slate-400 text-sm">{{ props.date }} · {{ report.mood }}</p>
+        <div class="flex items-center justify-center gap-3">
+          <p class="text-slate-400 text-sm">{{ props.date }} · {{ report.mood }}</p>
+          <button
+            @click="reanalyze"
+            :disabled="reanalyzing"
+            class="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-500 transition-colors disabled:opacity-50"
+            title="重新分析（删除旧报告后调用 AI 重跑）"
+          >
+            <RefreshCw :class="['w-3 h-3', reanalyzing && 'animate-spin']" />
+            {{ reanalyzing ? '分析中...' : '重新分析' }}
+          </button>
+        </div>
         <div class="flex justify-center gap-2 mt-3">
           <span
             v-for="kw in report.keywords"

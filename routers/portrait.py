@@ -95,6 +95,7 @@ async def _run_portrait_and_save(group_id: int, member_id: int, task):
         sender_name=member["display_name"] or member["nickname"],
         chat=chat,
         model=config.OLLAMA_MODEL,
+        task=task,
     )
 
     if result["success"] and result["data"]:
@@ -105,8 +106,8 @@ async def _run_portrait_and_save(group_id: int, member_id: int, task):
             display_name=member["display_name"] or member["nickname"],
             total_messages=member["message_count"],
             portrait_json=portrait_json,
-            data_start=group["date_range_start"] or "",
-            data_end=group["date_range_end"] or "",
+            data_start=result.get("_data_start") or group.get("date_range_start") or "",
+            data_end=result.get("_data_end") or group.get("date_range_end") or "",
         )
         task.finish(success=True)
         log_analysis(group_id, "", "portrait", "success", duration_ms=result["duration_ms"])

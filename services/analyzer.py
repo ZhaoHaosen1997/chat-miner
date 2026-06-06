@@ -21,6 +21,42 @@ logger = logging.getLogger(__name__)
 OLLAMA_CHAT_URL = f"{config.OLLAMA_HOST}/api/chat"
 
 
+def _normalize_report(data: dict) -> dict:
+    """规范化 AI 返回的 JSON，修正常见格式问题"""
+    if not isinstance(data, dict):
+        return data
+
+    # topic_summary: 对象数组 → 字符串数组
+    topics = data.get("topic_summary", [])
+    if topics and isinstance(topics[0], dict):
+        data["topic_summary"] = [
+            t.get("description") or t.get("topic") or t.get("summary") or str(t)
+            for t in topics
+        ]
+
+    # keywords: 可能是逗号分隔字符串
+    keywords = data.get("keywords", [])
+    if isinstance(keywords, str):
+        data["keywords"] = [k.strip() for k in keywords.split(",") if k.strip()]
+
+    # funny_quotes: 确保每个元素有 speaker/quote/comment
+    quotes = data.get("funny_quotes", [])
+    if quotes and isinstance(quotes, list):
+        normalized = []
+        for q in quotes:
+            if isinstance(q, str):
+                normalized.append({"speaker": "某人", "quote": q, "comment": ""})
+            elif isinstance(q, dict):
+                normalized.append({
+                    "speaker": q.get("speaker", "") or q.get("name", ""),
+                    "quote": q.get("quote", "") or q.get("content", ""),
+                    "comment": q.get("comment", "") or "",
+                })
+        data["funny_quotes"] = normalized
+
+    return data
+
+
 def _extract_json(text: str) -> Optional[dict]:
     """从 AI 返回的文本中提取 JSON 对象
 
@@ -93,9 +129,9 @@ async def call_ollama_chat(
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "keep_alive": 0,  # 推理完成后立即卸载模型，释放显存，防止上下文累积
+        "keep_alive": 0,  # 推理完成后立即卸载模型，释放显存
         "options": {
-            "temperature": 0.7,
+            "temperature": 0.3,  # 降低温度让输出更稳定
             "top_p": 0.9,
         },
     }
@@ -127,6 +163,8 @@ async def call_ollama_chat(
         # 解析 JSON
         data = _extract_json(raw_content)
         if data:
+            # 兜底：规范化 AI 输出格式
+            data = _normalize_report(data)
             if task:
                 task.model_used = model
                 task.finish(success=True)

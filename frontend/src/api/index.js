@@ -47,6 +47,8 @@ export const analyzeDateAsync = async (gid, date) => {
   return data.data // { task_id, status } or { cached, report, ... }
 }
 export const getReport = (gid, date) => request(`/groups/${gid}/report/${date}`)
+export const deleteReport = (gid, date) =>
+  request(`/groups/${gid}/report/${date}`, { method: 'DELETE' })
 export const getRecentReports = (gid, limit = 7) =>
   request(`/groups/${gid}/reports/recent?limit=${limit}`)
 
