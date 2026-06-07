@@ -44,6 +44,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"数据库: {config.DATABASE_PATH}")
     logger.info(f"Ollama: {config.OLLAMA_HOST} | 模型: {config.OLLAMA_MODEL}")
     logger.info(f"端口: {config.PORT}")
+
+    # 预加载群数据到内存，避免首次请求等待（使用 pickle 缓存加速）
+    try:
+        from models.database import list_groups
+        from routers.groups import get_chat_cache
+        groups = list_groups()
+        if groups:
+            logger.info(f"预加载 {len(groups)} 个群数据...")
+            for g in groups:
+                get_chat_cache(g["id"])
+            logger.info("预加载完成")
+    except Exception as e:
+        logger.warning(f"预加载失败（不影响正常使用）: {e}")
+
     logger.info("=" * 50)
     yield
     logger.info("Chat-Miner 已关闭")

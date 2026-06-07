@@ -243,7 +243,7 @@ async def api_portrait_stats(group_id: int, member_id: int):
     except (json.JSONDecodeError, TypeError):
         portrait_json = {}
 
-    # 从缓存读取
+    # 从缓存读取（画像刷新时一次性计算并存储）
     activity = portrait_json.get("activity_stats", {})
     language = portrait_json.get("language_stats", {})
     social_relations = portrait_json.get("social_relations", [])
@@ -251,6 +251,13 @@ async def api_portrait_stats(group_id: int, member_id: int):
     topic_role = portrait_json.get("topic_role", {})
     highlight_quotes = portrait_json.get("highlight_quotes", [])
     signature_emoji = portrait_json.get("signature_emoji", "")
+
+    # 仅补全轻量级字段（不需要全量消息遍历的）
+    if not message_style and activity:
+        from services.stats_engine import compute_message_style
+        message_style = compute_message_style(language, activity)
+    if not signature_emoji and language:
+        signature_emoji = language.get("top_emojis", [{}])[0].get("emoji", "") if language.get("top_emojis") else ""
 
     # 使用深度画像中的月度情绪数据作为 timeline
     from services.pipelines import MOOD_MAP
@@ -273,15 +280,15 @@ async def api_portrait_stats(group_id: int, member_id: int):
     # 仅 realtime 数据需要实时计算（轻量，只查最近30天）
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
-    recent_status = {}
-    if chat and member:
-        member_names = set()
+    wxid = member["wxid"] if member else ""
+    member_names = set()
+    if chat and wxid:
         for s in chat.senders:
             name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
             if name and len(name) >= 2:
                 member_names.add(name)
+        sender_msgs = [m for m in chat.messages if m.get("wxid") == wxid]
         from services.stats_engine import compute_recent_status
-        sender_msgs = [m for m in chat.messages if m.get("wxid") == member["wxid"]]
         recent_status = compute_recent_status([], member_names=member_names, sender_msgs=sender_msgs)
 
     return {

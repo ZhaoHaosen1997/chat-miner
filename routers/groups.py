@@ -242,17 +242,38 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         added = len(merge_result["added"])
         skipped = merge_result["skipped"]
 
-    # 写回完整数据集到磁盘（重启后数据不丢失）
+    # 写回完整数据集到磁盘（原子写入，防数据丢失）
     merged_path = group_dir / "merged_data.json"
+    merged_pickle = Path(str(merged_path) + ".pickle")
+    old_pickle = Path(str(group.get("file_path", "")) + ".pickle") if group.get("file_path") else None
     try:
         merged_data = {
             "session": merged_chat.session,
             "senders": merged_chat.senders,
             "messages": merged_chat.messages,
         }
-        with open(merged_path, "w", encoding="utf-8") as f:
+        # 原子写入：先写临时文件，成功后再 rename
+        tmp_path = merged_path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(merged_data, f, ensure_ascii=False)
+        tmp_path.replace(merged_path)
         logger.info(f"完整数据已写入: {merged_path} ({len(merged_chat.messages)} 条消息)")
+
+        # 同步创建 pickle 缓存，避免下次重启重新解析
+        import pickle
+        with open(merged_pickle, "wb") as f:
+            pickle.dump({
+                "session": merged_chat.session,
+                "senders": merged_chat.senders,
+                "messages": merged_chat.messages,
+                "_by_date": merged_chat._by_date,
+            }, f, protocol=pickle.HIGHEST_PROTOCOL)
+        logger.info(f"pickle 缓存已同步: {merged_pickle}")
+
+        # 清理旧的 pickle（如果 file_path 变了）
+        if old_pickle and old_pickle.exists() and old_pickle != merged_pickle:
+            old_pickle.unlink(missing_ok=True)
+            logger.info(f"已清理旧 pickle: {old_pickle}")
     except Exception as e:
         logger.warning(f"写入合并文件失败: {e}，数据仅存于内存中")
 
