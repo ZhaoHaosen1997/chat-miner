@@ -41,7 +41,7 @@ def compute_group_stats(group_id: int) -> dict:
     # 已分析日期的情绪分布
     mood_counts = defaultdict(int)
     recent_reports = []
-    for date in sorted(analyzed_dates, reverse=True)[:30]:
+    for date in sorted(analyzed_dates, reverse=True):
         report = get_daily_report(group_id, date)
         if report and report.get("report_json"):
             import json
