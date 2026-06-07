@@ -18,18 +18,21 @@ logger = logging.getLogger(__name__)
 LOCK_CHECK_URL = f"{config.GPU_LOCK_URL}/api/gpu/lock/check"
 LOCK_URL = f"{config.GPU_LOCK_URL}/api/gpu/lock"
 
+# 模块级 httpx 客户端复用（避免每次 AI 调用创建 3 个客户端）
+_lock_client: httpx.AsyncClient | None = None
+
+def _get_lock_client() -> httpx.AsyncClient:
+    global _lock_client
+    if _lock_client is None or _lock_client.is_closed:
+        _lock_client = httpx.AsyncClient(timeout=5)
+    return _lock_client
+
 
 async def check_gpu_free() -> bool:
-    """检测 GPU 是否空闲
-
-    Returns:
-        True: GPU 空闲可用
-        False: GPU 被占用
-    """
+    """检测 GPU 是否空闲"""
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(LOCK_CHECK_URL)
-            return resp.status_code == 200
+        resp = await _get_lock_client().get(LOCK_CHECK_URL)
+        return resp.status_code == 200
     except httpx.ConnectError:
         logger.warning(f"无法连接到 GPU 锁服务 ({config.GPU_LOCK_URL})，假定 GPU 空闲")
         return True
@@ -39,68 +42,44 @@ async def check_gpu_free() -> bool:
 
 
 async def get_lock_owner() -> str | None:
-    """查看谁占着 GPU
-
-    Returns:
-        占用者名称，空闲返回 None
-    """
+    """查看谁占着 GPU"""
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(LOCK_URL)
-            data = resp.json()
-            if data.get("locked"):
-                return data.get("who", "unknown")
-            return None
+        resp = await _get_lock_client().get(LOCK_URL)
+        data = resp.json()
+        return data.get("who") if data.get("locked") else None
     except Exception as e:
         logger.warning(f"查询 GPU 锁持有者失败: {e}")
         return None
 
 
 async def acquire_lock(who: str = "") -> bool:
-    """加锁，标记 GPU 正在被使用
-
-    Args:
-        who: 使用者标识，默认使用配置中的 GPU_LOCK_WHO
-
-    Returns:
-        True: 加锁成功
-        False: 加锁失败（已被他人占用）
-    """
+    """加锁，标记 GPU 正在被使用"""
     who = who or config.GPU_LOCK_WHO
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.put(
-                LOCK_URL,
-                headers={"Content-Type": "application/json"},
-                json={"who": who},
-            )
-            if resp.status_code == 200:
-                logger.info(f"GPU 锁已获取 (who={who})")
-                return True
-            else:
-                logger.warning(f"GPU 锁获取失败: HTTP {resp.status_code}")
-                return False
+        resp = await _get_lock_client().put(
+            LOCK_URL,
+            headers={"Content-Type": "application/json"},
+            json={"who": who},
+        )
+        if resp.status_code == 200:
+            logger.info(f"GPU 锁已获取 (who={who})")
+            return True
+        logger.warning(f"GPU 锁获取失败: HTTP {resp.status_code}")
+        return False
     except Exception as e:
         logger.warning(f"GPU 锁获取异常: {e}")
         return False
 
 
 async def release_lock() -> bool:
-    """解锁，释放 GPU
-
-    Returns:
-        True: 解锁成功
-        False: 解锁失败
-    """
+    """解锁，释放 GPU"""
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.delete(LOCK_URL)
-            if resp.status_code == 200:
-                logger.info("GPU 锁已释放")
-                return True
-            else:
-                logger.warning(f"GPU 锁释放失败: HTTP {resp.status_code}")
-                return False
+        resp = await _get_lock_client().delete(LOCK_URL)
+        if resp.status_code == 200:
+            logger.info("GPU 锁已释放")
+            return True
+        logger.warning(f"GPU 锁释放失败: HTTP {resp.status_code}")
+        return False
     except Exception as e:
         logger.warning(f"GPU 锁释放异常: {e}")
         return False

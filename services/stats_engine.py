@@ -249,28 +249,38 @@ def compute_language_stats(messages: list[dict], wxid: str,
 
 
 def compute_social_relations(messages: list[dict], wxid: str,
-                              get_sender_name, get_name_by_wxid=None) -> list[dict]:
+                              get_sender_name, get_name_by_wxid=None,
+                              member_names: dict[str, str] = None) -> list[dict]:
     """计算成员的社交关系
 
     互动定义：
     - 共现：两人在 5 分钟内先后发言
-    - @提及：消息内容中包含对方名字
+    - @提及：消息内容中包含对方名字（用正则一次匹配所有人）
+
+    Args:
+        messages: 全部消息列表
+        wxid: 目标成员 wxid
+        get_sender_name: 兼容旧代码
+        get_name_by_wxid: wxid → 名字 的映射函数
+        member_names: 预建的 {wxid: name} 字典（避免重复查询，批量分析时传入）
 
     Returns:
         [{wxid, name, co_msg_count, mention_count, total_interactions}]
         按 total_interactions 降序，Top 10
     """
-    # 预建名字缓存（wxid → name）
-    wxid_name_cache: dict[str, str] = {}
+    import bisect, re
 
-    def get_name(w):
-        if w not in wxid_name_cache:
-            wxid_name_cache[w] = (get_name_by_wxid(w) if get_name_by_wxid
-                                   else get_sender_name(0)) if w != wxid else ""
-        return wxid_name_cache[w]
+    # 预建名字映射（wxid → name），批量分析时可复用
+    if member_names is None:
+        member_names = {}
+        for m in messages:
+            w = m.get("wxid", "")
+            if w and w not in member_names and w != wxid:
+                name = (get_name_by_wxid(w) if get_name_by_wxid else get_sender_name(0))
+                if name:
+                    member_names[w] = name
 
-    # 1. 共现计数
-    import bisect
+    # 1. 共现计数（O(m log n) — 对每个他人消息二分查找目标成员最近发言）
     co_counter = Counter()
     target_tss = sorted([m.get("createTime", 0) for m in messages
                           if m.get("wxid") == wxid and m.get("createTime", 0)])
@@ -278,7 +288,7 @@ def compute_social_relations(messages: list[dict], wxid: str,
     if target_tss:
         for m in messages:
             mwxid = m.get("wxid", "")
-            if mwxid == wxid:
+            if mwxid == wxid or mwxid not in member_names:
                 continue
             ts = m.get("createTime", 0)
             if not ts:
@@ -287,49 +297,139 @@ def compute_social_relations(messages: list[dict], wxid: str,
             if (idx > 0 and abs(ts - target_tss[idx - 1]) <= 300) or \
                (idx < len(target_tss) and abs(ts - target_tss[idx]) <= 300):
                 co_counter[mwxid] += 1
-                # 顺便缓存名字
-                if mwxid not in wxid_name_cache:
-                    wxid_name_cache[mwxid] = get_name_by_wxid(mwxid) if get_name_by_wxid else mwxid
 
-    # 2. @提及检测
-    sender_msgs = [m for m in messages if m.get("wxid") == wxid]
+    # 2. @提及检测（正则一次匹配所有人，替代 O(n×m) 嵌套循环）
     mention_counter = Counter()
-    all_wxids = set(wxid_name_cache.keys()) | {m.get("wxid", "") for m in messages if m.get("wxid")}
-
-    for m in sender_msgs:
-        content = (m.get("content") or "").strip()
-        if not content:
-            continue
-        for other_wxid in all_wxids:
-            if other_wxid == wxid or not other_wxid:
+    # 构建 name→wxid 反向索引和正则
+    name_to_wxid: dict[str, str] = {}
+    names_for_regex: list[str] = []
+    for w, n in member_names.items():
+        if w != wxid and len(n) >= 2:
+            name_to_wxid[n] = w
+            if n not in names_for_regex:  # 去重（可能有同名）
+                names_for_regex.append(re.escape(n))
+    if names_for_regex:
+        # 按长度降序排列，确保长名先匹配（如 "unique pig" 优先于 "pig"）
+        names_for_regex.sort(key=len, reverse=True)
+        name_pattern = re.compile("|".join(names_for_regex))
+        for m in (m for m in messages if m.get("wxid") == wxid):
+            content = (m.get("content") or "").strip()
+            if not content:
                 continue
-            name = wxid_name_cache.get(other_wxid) or (get_name_by_wxid(other_wxid) if get_name_by_wxid else "")
-            if not name:
-                name = other_wxid
-                wxid_name_cache[other_wxid] = name
-            if name and len(name) >= 2 and name in content:
-                mention_counter[other_wxid] += 1
+            for match in name_pattern.finditer(content):
+                matched_name = match.group()
+                matched_wxid = name_to_wxid.get(matched_name)
+                if matched_wxid:
+                    mention_counter[matched_wxid] += 1
 
     # 3. 合并
-    all_interactors = set(list(co_counter.keys()) + list(mention_counter.keys()))
+    all_interactors = set(co_counter) | set(mention_counter)
     relations = []
     for w in all_interactors:
         if w == wxid:
             continue
         co = co_counter.get(w, 0)
         mention = mention_counter.get(w, 0)
-        total = co + mention * 3
-        name = wxid_name_cache.get(w, w)
         relations.append({
             "wxid": w,
-            "name": name,
+            "name": member_names.get(w, w),
             "co_msg_count": co,
             "mention_count": mention,
-            "total_interactions": total,
+            "total_interactions": co + mention * 3,
         })
 
     relations.sort(key=lambda x: x["total_interactions"], reverse=True)
     return relations[:10]
+
+
+def compute_all_social_relations(messages: list[dict],
+                                  get_name_by_wxid=None) -> dict[str, list[dict]]:
+    """批量计算所有成员的社交关系（一次扫描，复用索引）
+
+    对批量画像分析显著提速：所有成员的共现矩阵只建一次。
+
+    Returns:
+        {wxid: [{wxid, name, ...}, ...]}  每个成员的 Top 10 关系
+    """
+    import bisect, re
+    from collections import defaultdict
+
+    # 1. 预建名字映射（一次扫描）
+    member_names: dict[str, str] = {}
+    member_tss: dict[str, list[int]] = defaultdict(list)
+    for m in messages:
+        w = m.get("wxid", "")
+        if not w:
+            continue
+        ts = m.get("createTime", 0)
+        if ts:
+            member_tss[w].append(ts)
+        if w not in member_names and get_name_by_wxid:
+            name = get_name_by_wxid(w)
+            if name:
+                member_names[w] = name
+
+    # 排序所有成员的时间戳
+    for w in member_tss:
+        member_tss[w].sort()
+
+    # 2. 构建正则（一次）
+    name_to_wxid = {}
+    names_for_regex = []
+    for w, n in member_names.items():
+        if len(n) >= 2:
+            name_to_wxid[n] = w
+            if n not in names_for_regex:
+                names_for_regex.append(re.escape(n))
+    names_for_regex.sort(key=len, reverse=True)
+    name_pattern = re.compile("|".join(names_for_regex)) if names_for_regex else None
+
+    # 3. 对每个成员计算（复用所有索引）
+    result: dict[str, list[dict]] = {}
+    for wxid in member_names:
+        co_counter = Counter()
+        mention_counter = Counter()
+        tss = member_tss.get(wxid, [])
+
+        # 共现：对每个他人消息检查
+        if tss:
+            for m in messages:
+                mwxid = m.get("wxid", "")
+                if mwxid == wxid or mwxid not in member_names:
+                    continue
+                ts = m.get("createTime", 0)
+                if not ts:
+                    continue
+                idx = bisect.bisect_left(tss, ts)
+                if (idx > 0 and ts - tss[idx - 1] <= 300) or \
+                   (idx < len(tss) and tss[idx] - ts <= 300):
+                    co_counter[mwxid] += 1
+
+        # @提及
+        if name_pattern:
+            for m in (m for m in messages if m.get("wxid") == wxid):
+                content = (m.get("content") or "").strip()
+                if not content:
+                    continue
+                for match in name_pattern.finditer(content):
+                    mw = name_to_wxid.get(match.group())
+                    if mw and mw != wxid:
+                        mention_counter[mw] += 1
+
+        # 合并
+        relations = []
+        for w in set(co_counter) | set(mention_counter):
+            co = co_counter.get(w, 0)
+            mention = mention_counter.get(w, 0)
+            relations.append({
+                "wxid": w, "name": member_names.get(w, w),
+                "co_msg_count": co, "mention_count": mention,
+                "total_interactions": co + mention * 3,
+            })
+        relations.sort(key=lambda x: x["total_interactions"], reverse=True)
+        result[wxid] = relations[:10]
+
+    return result
 
 
 def compute_emotion_timeline(group_id: int) -> list[dict]:
@@ -744,24 +844,24 @@ def compute_topic_role(messages: list[dict], wxid: str,
     initiated_days = sum(1 for d, w in day_first_speaker.items() if w == wxid)
     initiation_rate = round(initiated_days / total_days, 2) if total_days > 0 else 0
 
-    # 被回复率估算（该成员发言后 5 分钟内其他人的发言次数）
+    # 被回复率估算：用已排序的全量消息二分查找，O(n log N) 替代 O(n×N)
     reply_count = 0
     msg_count = 0
-    sender_msgs = sorted(
-        [m for m in messages if m.get("wxid") == wxid],
-        key=lambda x: x.get("createTime", 0)
-    )
+    import bisect
+    sender_msgs = [m for m in messages if m.get("wxid") == wxid]
+    sender_msgs.sort(key=lambda x: x.get("createTime", 0))
+    # 预建其他成员的时间戳索引（只建一次）
+    other_ts = sorted(m.get("createTime", 0) for m in messages
+                      if m.get("wxid") != wxid and m.get("wxid") and m.get("createTime", 0))
     for sm in sender_msgs:
         ts = sm.get("createTime", 0)
         if not ts:
             continue
         msg_count += 1
-        for m in messages:
-            if m.get("wxid") != wxid and m.get("wxid"):
-                mts = m.get("createTime", 0)
-                if mts and 0 < mts - ts <= 300:
-                    reply_count += 1
-                    break
+        # 二分查找第一个在 ts 之后的消息
+        idx = bisect.bisect_right(other_ts, ts)
+        if idx < len(other_ts) and other_ts[idx] - ts <= 300:
+            reply_count += 1
 
     avg_reply = round(reply_count / max(msg_count, 1), 2)
 
@@ -791,30 +891,38 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
         [{date, content, context}] 最多 3 条
     """
     import json
-    from models.database import get_daily_report, get_analyzed_dates
+    from models.database import get_conn
 
     quotes = []
-    dates = get_analyzed_dates(group_id)
-    for date in sorted(dates, reverse=True):
-        report = get_daily_report(group_id, date)
-        if not report or not report.get("report_json"):
-            continue
-        try:
-            rj = json.loads(report["report_json"])
-            funny_quotes = rj.get("funny_quotes", [])
-            for q in funny_quotes:
-                speaker = q.get("speaker", "")
-                # 模糊匹配发言人（AI 可能用简称或昵称）
-                if speaker in member_name or member_name in speaker:
-                    quotes.append({
-                        "date": date,
-                        "content": q.get("quote", "")[:100],
-                        "comment": q.get("comment", ""),
-                    })
-                    if len(quotes) >= 3:
-                        return quotes
-        except (json.JSONDecodeError, TypeError):
-            continue
+    try:
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT date, report_json FROM daily_reports WHERE group_id=? ORDER BY date DESC",
+            (group_id,)
+        ).fetchall()
+        conn.close()
+
+        for row in rows:
+            date = row["date"]
+            if not row["report_json"]:
+                continue
+            try:
+                rj = json.loads(row["report_json"])
+                funny_quotes = rj.get("funny_quotes", [])
+                for q in funny_quotes:
+                    speaker = q.get("speaker", "")
+                    if speaker in member_name or member_name in speaker:
+                        quotes.append({
+                            "date": date,
+                            "content": q.get("quote", "")[:100],
+                            "comment": q.get("comment", ""),
+                        })
+                        if len(quotes) >= 3:
+                            return quotes
+            except (json.JSONDecodeError, TypeError):
+                continue
+    except Exception:
+        pass
 
     # 如果没有找到，从该成员的消息中挑最长的一条作为亮点
     if not quotes and messages:

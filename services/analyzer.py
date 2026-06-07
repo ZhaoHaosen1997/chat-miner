@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_CHAT_URL = f"{config.OLLAMA_HOST}/api/chat"
 
+# 模块级 httpx 客户端复用（批量分析时避免频繁创建/销毁连接）
+_ollama_client: httpx.AsyncClient | None = None
+
+def _get_ollama_client(timeout: int = 120) -> httpx.AsyncClient:
+    global _ollama_client
+    if _ollama_client is None or _ollama_client.is_closed:
+        _ollama_client = httpx.AsyncClient(timeout=timeout)
+    return _ollama_client
+
 
 def _normalize_report(data: dict) -> dict:
     """规范化 AI 返回的 JSON，修正常见格式问题"""
@@ -216,10 +225,10 @@ async def call_ollama_chat(
             if task:
                 task.update("inference", "AI 推理中...")
 
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(OLLAMA_CHAT_URL, json=payload)
-                resp.raise_for_status()
-                result = resp.json()
+            client = _get_ollama_client(timeout)
+            resp = await client.post(OLLAMA_CHAT_URL, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
 
         # 进度：解析
         if task:

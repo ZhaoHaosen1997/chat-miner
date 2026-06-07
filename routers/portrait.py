@@ -566,9 +566,7 @@ async def api_deep_portrait(group_id: int, member_id: int):
 
 
 async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
-    """后台执行：一键分析全群画像
-    - 无画像的成员 → 全量深度画像
-    - 有画像的成员 → 最近10天增量刷新
+    """后台执行：一键分析全群画像（全量分析所有成员，不做增量跳过）
     """
     chat = get_chat_cache(group_id)
     if not chat:
@@ -591,7 +589,6 @@ async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
             return
 
         sender_name = member["display_name"] or member["nickname"]
-        existing = get_portrait(group_id, member["id"])
         task.update("inference", f"({i+1}/{total}) 分析 {sender_name}...",
                    progress={"current": i, "total": total})
 
@@ -606,6 +603,12 @@ async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
         task.update("inference", f"已完成 {i + 1}/{total} (失败 {failed})",
                    progress={"current": i + 1, "total": total})
         await asyncio.sleep(2)  # 成员之间短暂冷却
+
+    # 分析完成后强制 Python GC 回收临时对象
+    import gc
+    gc.collect()
+    # 注：系统级缓存（Ollama 模型遗留的 ~8GB page cache）由 WSL autoMemoryReclaim 自动回收
+    # 不要手动 drop_caches，可能触发 OOM 或导致其他服务异常
 
     msg = f"画像分析完成：{total - failed}/{total} 成功"
     if failed > 0:

@@ -25,6 +25,10 @@ WSL 发行版: DebianDev
 Python: venv 在项目目录下 venv/
 服务名: chat-miner.service
 
+# ⚠️ 部署前先检查是否有运行中的分析任务！
+# 如果任务正在运行，部署会中断分析造成数据不完整。
+# 先在前端确认无活跃任务，或等待完成后再部署。
+
 # 推荐：rsync 增量部署（快且安全，只传变更文件）
 wsl -d DebianDev -- sh -c "rsync -av --delete \
   --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
@@ -33,6 +37,10 @@ wsl -d DebianDev -- sh -c "rsync -av --delete \
   /mnt/c/mycode/chat-miner/ /home/zhaohaosen/applications/chat-miner/ && \
   cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && \
   sudo systemctl restart chat-miner && echo 'Deploy OK'"
+
+# 如果确认有任务在运行，用 reload 代替 restart（不中断正在处理的请求）
+# sudo systemctl reload chat-miner  # 注意：需要服务支持 SIGHUP
+# 或者等任务完成后再 restart
 
 # 备用：tar 打包部署（兼容旧方式）
 # cd /mnt/c/mycode/chat-miner
