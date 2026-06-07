@@ -327,6 +327,13 @@ async def _run_full_portrait_analysis(group_id: int, member_id: int, task,
         task.steps.clear()
 
     # ---- Step 1: 基础画像 Pipeline（性格/角色/兴趣/口头禅/一句话） ----
+    # 构建 member_names（增量和全量都需要）
+    member_names = set()
+    for s in chat.senders:
+        name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
+        if name and len(name) >= 2:
+            member_names.add(name)
+
     # 增量模式：保留已有的 AI 性格分析，只刷新数据统计
     if max_days > 0 and existing_data and existing_data.get("personality"):
         portrait_data = {
@@ -348,12 +355,6 @@ async def _run_full_portrait_analysis(group_id: int, member_id: int, task,
         task.update("inference", "基础画像分析中...")
         from services.parser import format_sender_messages_for_portrait
         from services.pipelines import run_portrait_pipeline
-
-        member_names = set()
-        for s in chat.senders:
-            name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
-            if name and len(name) >= 2:
-                member_names.add(name)
 
         chat_text = format_sender_messages_for_portrait(all_msgs, sender_name,
                                                          member_names=member_names)
