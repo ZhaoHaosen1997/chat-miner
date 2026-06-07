@@ -3,6 +3,7 @@
 每个子任务只问一件事，返回极简格式，管道拼装完整 JSON
 """
 import json
+import re
 import time
 import logging
 from typing import Optional
