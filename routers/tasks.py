@@ -58,4 +58,4 @@ async def api_cancel_task(task_id: str):
     """取消正在执行的任务"""
     if task_manager.cancel(task_id):
         return {"code": 200, "message": "任务已取消", "data": None}
-    raise HTTPException(404, detail="任务不存在或已完成")
+    return {"code": 200, "message": "任务已完成或不存在，无需取消", "data": None}

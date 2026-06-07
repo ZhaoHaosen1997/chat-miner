@@ -268,6 +268,15 @@ async def api_portrait_stats(group_id: int, member_id: int):
 
 async def _run_full_portrait_analysis(group_id: int, member_id: int, task):
     """统一画像分析：基础 pipeline + 深度 pipeline + Python 统计，一次生成完整画像"""
+    try:
+        await _do_run_full_portrait_analysis(group_id, member_id, task)
+    except Exception as e:
+        logger.error(f"画像分析异常: {e}", exc_info=True)
+        if task.type != "analyze_all_portraits":
+            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+
+
+async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
     group = get_group(group_id)
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
