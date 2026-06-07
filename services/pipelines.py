@@ -88,8 +88,8 @@ PORTRAIT_PROMPTS = {
         "user": "{chat}\n\n以上是 {name} 的发言。ta 有口头禅或习惯用语吗？\n- 如果有，输出 1-3 个口头禅，逗号分隔（如：笑死,哈哈哈,我去）\n- 如果没有明显口头禅，只回答：无\n你的输出：",
     },
     "oneline_portrait": {
-        "system": "你是一个人物素描工具。只输出两行纯文字，不要加前缀和引号。第一行人设描述，第二行标签词。",
-        "user": "{chat}\n\n以上是 {name} 的发言。分析ta最突出的特征，输出两行：\n\n第一行：15字内人设描述。不要写\"热心的老大哥\"\"爱吐槽的xxx\"这种泛泛的模板。要抓ta最特别的一个点。\n\n第二行：选一个最匹配的标签词（只复制一个词，不要加数字和解释）：\n乐天派 整活王 暖心 暴脾气 老学究 派对咖 emo怪 沙雕\n吃瓜群众 摸鱼达人 摆烂王 卷王 老司机 玻璃心 凡尔赛\n社死选手 真香定律 画饼大师 CPU专家 外星人\n夜猫子 咖啡续命 游戏宅 美食家 潜水冠军 捧场王 毒舌 话痨 文艺青年 运动达人 追剧狂魔\n\n只输出两行，不要抄示例：",
+        "system": "你是一个人物素描工具。只输出两行纯文字，不要加前缀和引号。第一行人设描述，第二行标签词。注意根据发言内容和语气判断性别，不要用性别错位的称呼（如对女生叫大哥、兄弟）。",
+        "user": "{chat}\n\n以上是 {name} 的发言。分析ta最突出的特征，输出两行：\n\n第一行：8-18字的人设描述。不要写\"热心的老大哥\"\"爱吐槽的xxx\"这种泛泛模板。要抓最特别的一个点，可以调侃但要准确。\n\n第二行：选一个最匹配的标签词（只复制一个词，不要加数字和解释）：\n乐天派 整活王 暖心 暴脾气 老学究 派对咖 emo怪 沙雕\n吃瓜群众 摸鱼达人 摆烂王 卷王 老司机 玻璃心 凡尔赛\n社死选手 真香定律 画饼大师 CPU专家 外星人\n夜猫子 咖啡续命 游戏宅 美食家 潜水冠军 捧场王 毒舌 话痨 文艺青年 运动达人 追剧狂魔\n\n只输出两行，不要抄示例：",
     },
 }
 
@@ -648,42 +648,61 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         # 用 _parse_lines 提取第一行（人设描述）
         ol_lines = _parse_lines(ol_data)
         one_line = ol_lines[0] if len(ol_lines) > 0 else ""
-        if len(one_line) > 20 or len(one_line) < 3:
+        # 放宽校验：2-25 字，减少误杀
+        if len(one_line) < 2 or len(one_line) > 25:
             one_line = ""
 
         # 从原始 AI 输出中提取第二行标签（不用 _parse_lines，因为它会 strip 掉数字/中文）
         raw_text = str(ol_data).strip() if ol_data else ""
         raw_lines = raw_text.split("\n")
-        # 取第二行原始文本
         emoji_raw = raw_lines[1].strip() if len(raw_lines) > 1 else ""
-        # 去除可能的格式前缀（"第二行：" 等）
         emoji_raw = re.sub(r'^第[一二三四五六七八九十\d]+[行行][：:]\s*', '', emoji_raw)
         emoji_raw = emoji_raw.strip()
 
         # 尝试匹配标签 → emoji
         emoji_style = _match_emoji_by_label(emoji_raw)
         if emoji_style:
+            # emoji 匹配成功，但 one_line 可能仍然为空 → 重试 one_line
+            if not one_line and ol_attempt == 0:
+                ol_prompt_user = ol_prompt_user + (
+                    f"\n\n（⚠️ 上次你的第一行描述\"{ol_lines[0][:30] if ol_lines else ''}\"格式不对。"
+                    f"请输出 8-18 字的一句话描述，不要超出。）"
+                )
+                continue
             break
 
         # 兼容旧版：AI 输出了纯数字编号
         if emoji_raw in EMOJI_CHOICES:
             emoji_style = EMOJI_CHOICES[emoji_raw]
+            if not one_line and ol_attempt == 0:
+                ol_prompt_user = ol_prompt_user + "\n\n（⚠️ 第一行描述格式不对，请输出 8-18 字。）"
+                continue
             break
 
         # 不合法：标签未匹配 + 不是有效编号 → 重试
         if ol_attempt == 0:
-            ol_prompt_user = ol_prompt_user + (
-                f"\n\n（⚠️ 上次你第二行输出了\"{emoji_raw[:30]}\"，不是有效标签。"
-                f"请只复制上述列表中的一个标签词，如\"乐天派\"、\"夜猫子\"。）"
-            )
+            retry_hint = "（⚠️ 上次你第二行输出了\"" + emoji_raw[:30] + "\"，不是有效标签。请只复制上述列表中的一个标签词，如\"乐天派\"、\"夜猫子\"。）"
+            if not one_line:
+                retry_hint += "\n（同时第一行描述请控制在 8-18 字。）"
+            ol_prompt_user = ol_prompt_user + "\n\n" + retry_hint
             continue
         else:
-            # 两次都失败，保持空字符串，交由调用方 Python 兜底
             emoji_style = ""
             break
 
     if ol_data is None:
         failed_steps.append("oneline_portrait")
+
+    # v0.6.4: one_line 兜底 — 从已有数据拼一个，避免展示"——"
+    if not one_line:
+        role = role or ""
+        pers = personality[:2] if personality else []
+        if role and pers:
+            one_line = f"一个{pers[0]}的{role}"
+        elif pers:
+            one_line = f"一个{pers[0]}的群友"
+        elif role:
+            one_line = f"群里的{role}"
 
     # 拼装
     portrait = {
@@ -833,7 +852,8 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
         ]
         emotion_details = "\n".join(emotion_details_lines)
         emotion_timeline = [
-            {"date": ma["month"], "mood": ma["mood"], "mood_emoji": ""}
+            {"date": ma["month"], "mood": ma["mood"],
+             "mood_emoji": MOOD_MAP.get(ma["mood"], "😐")}
             for ma in monthly_analyses
         ]
     else:

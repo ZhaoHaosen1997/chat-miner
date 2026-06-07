@@ -104,17 +104,20 @@ def strip_mentions(content: str, member_names: set[str]) -> str:
 
 # ---- 统计函数 ----
 
-def compute_activity_stats(messages: list[dict], wxid: str) -> dict:
+def compute_activity_stats(messages: list[dict], wxid: str = "",
+                           sender_msgs: list[dict] = None) -> dict:
     """计算成员的活跃统计
 
     Args:
-        messages: 全部消息列表
-        wxid: 目标成员的 wxid
+        messages: 全部消息列表（sender_msgs 为空时使用）
+        wxid: 目标成员的 wxid（sender_msgs 为空时用于过滤）
+        sender_msgs: 预过滤的成员消息列表，提供则跳过过滤
 
     Returns:
         {total_days_active, avg_daily_msgs, peak_hour, hourly_heatmap, monthly_trend}
     """
-    sender_msgs = [m for m in messages if m.get("wxid") == wxid]
+    if sender_msgs is None:
+        sender_msgs = [m for m in messages if m.get("wxid") == wxid]
 
     # 按天 + 按小时统计
     day_hours = defaultdict(lambda: defaultdict(int))
@@ -166,15 +169,18 @@ def compute_activity_stats(messages: list[dict], wxid: str) -> dict:
 
 
 def compute_language_stats(messages: list[dict], wxid: str,
-                            member_names: set[str] = None) -> dict:
+                            member_names: set[str] = None,
+                            sender_msgs: list[dict] = None) -> dict:
     """计算成员的语言特征
 
     Args:
         messages: 全部消息列表
         wxid: 目标成员 wxid
         member_names: 群成员名字集合（用于过滤 @mention）
+        sender_msgs: 预过滤的成员消息列表，提供则跳过过滤
     """
-    sender_msgs = [m for m in messages if m.get("wxid") == wxid]
+    if sender_msgs is None:
+        sender_msgs = [m for m in messages if m.get("wxid") == wxid]
     # 只用纯文本消息，排除引用（引用内容是别人的话）
     text_msgs = [m for m in sender_msgs
                  if (m.get("content") or "").strip() and m.get("type") in ("文本消息",)]
@@ -527,22 +533,24 @@ def _detect_member_daily_mood(msgs: list[dict]) -> tuple[str, str]:
     return top_mood, emoji
 
 
-def compute_member_emotion_timeline(messages: list[dict], wxid: str) -> list[dict]:
+def compute_member_emotion_timeline(messages: list[dict], wxid: str = "",
+                                    sender_msgs: list[dict] = None) -> list[dict]:
     """计算成员个人的每日情绪时间线
 
     Args:
         messages: 全部消息列表
         wxid: 目标成员 wxid
+        sender_msgs: 预过滤的成员消息列表，提供则跳过过滤
 
     Returns:
         [{date, mood, mood_emoji}] 按日期升序
     """
     from collections import defaultdict
+    if sender_msgs is None:
+        sender_msgs = [m for m in messages if m.get("wxid") == wxid]
     # 按天聚合成员消息
     day_msgs = defaultdict(list)
-    for m in messages:
-        if m.get("wxid") != wxid:
-            continue
+    for m in sender_msgs:
         ft = m.get("formattedTime", "")
         if len(ft) >= 10:
             date = ft[:10]
@@ -606,9 +614,10 @@ def compute_message_style(language: dict, activity: dict) -> dict:
     }
 
 
-def compute_recent_status(messages: list[dict], wxid: str,
+def compute_recent_status(messages: list[dict], wxid: str = "",
                           member_names: set[str] = None,
-                          recent_days: int = 30) -> dict:
+                          recent_days: int = 30,
+                          sender_msgs: list[dict] = None) -> dict:
     """计算成员最近状态的快照（最近 N 天）
 
     Returns:
@@ -620,10 +629,11 @@ def compute_recent_status(messages: list[dict], wxid: str,
     now = datetime.now()
     cutoff_date = (now - timedelta(days=recent_days)).strftime("%Y-%m-%d")
 
+    if sender_msgs is None:
+        sender_msgs = [m for m in messages if m.get("wxid") == wxid]
+
     recent_msgs = []
-    for m in messages:
-        if m.get("wxid") != wxid:
-            continue
+    for m in sender_msgs:
         ft = m.get("formattedTime", "")
         if len(ft) >= 10 and ft[:10] >= cutoff_date:
             recent_msgs.append(m)

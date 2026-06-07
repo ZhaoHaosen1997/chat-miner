@@ -23,6 +23,7 @@ const stats = ref(null)
 const history = ref(null)
 const archaeology = ref(null)
 const loading = ref(true)
+const statsLoading = ref(false)  // 统计数据独立加载，不阻塞页面
 const error = ref('')
 const activeTab = ref('overview')  // overview | activity | language | social | history
 const analyzing = ref(false)
@@ -39,22 +40,27 @@ const tabs = [
 async function load() {
   if (!currentGroup.value || !props.memberId) return
   loading.value = true
+  statsLoading.value = true
   error.value = ''
   try {
-    const [p, s, h, a] = await Promise.all([
+    // 第一阶段：快速加载核心数据（portrait + history + archaeology）
+    const [p, h, a] = await Promise.all([
       getPortrait(currentGroup.value.id, props.memberId),
-      getPortraitStats(currentGroup.value.id, props.memberId).catch(() => null),
       getPortraitHistory(currentGroup.value.id, props.memberId).catch(() => null),
       getArchaeology(currentGroup.value.id, props.memberId).catch(() => null),
     ])
     portrait.value = p
-    stats.value = s
     history.value = h
     archaeology.value = a
+    loading.value = false  // 页面已可用
+
+    // 第二阶段：后台加载统计数据（计算密集，可能较慢）
+    stats.value = await getPortraitStats(currentGroup.value.id, props.memberId).catch(() => null)
   } catch (e) {
     error.value = e.message
-  } finally {
     loading.value = false
+  } finally {
+    statsLoading.value = false
   }
 }
 
@@ -285,6 +291,11 @@ const currentVersion = computed(() => {
               <span class="text-purple-500 font-medium">月度趋势：</span>{{ portrait.portrait.monthly_synthesis }}
             </p>
           </div>
+        </div>
+
+        <!-- v0.6.4 统计数据加载中 -->
+        <div v-if="statsLoading" class="card p-3 bg-slate-50 flex items-center gap-2 text-xs text-slate-400">
+          <Loader2 class="w-3 h-3 animate-spin" /> 正在加载统计数据...
         </div>
 
         <!-- v0.6.4 最近状态 -->

@@ -229,46 +229,60 @@ async def api_portrait_history(group_id: int, member_id: int):
 
 @router.get("/portrait/{member_id}/stats")
 async def api_portrait_stats(group_id: int, member_id: int):
-    """获取成员的 Python 统计数据（活跃/语言/关系/情绪/风格）"""
+    """获取成员的 Python 统计数据
+
+    优化：大部分数据在画像生成时已计算并存入 portrait JSON，
+    此处只读缓存，仅 recent_status 和 emotion_timeline 需要实时计算。
+    """
+    portrait_row = get_portrait(group_id, member_id)
+    if not portrait_row:
+        raise HTTPException(404, detail="该成员尚无画像")
+
+    try:
+        portrait_json = json.loads(portrait_row["portrait_json"])
+    except (json.JSONDecodeError, TypeError):
+        portrait_json = {}
+
+    # 从缓存读取
+    activity = portrait_json.get("activity_stats", {})
+    language = portrait_json.get("language_stats", {})
+    social_relations = portrait_json.get("social_relations", [])
+    message_style = portrait_json.get("message_style", {})
+    topic_role = portrait_json.get("topic_role", {})
+    highlight_quotes = portrait_json.get("highlight_quotes", [])
+    signature_emoji = portrait_json.get("signature_emoji", "")
+
+    # 使用深度画像中的月度情绪数据作为 timeline
+    from services.pipelines import MOOD_MAP
+    emotion = portrait_json.get("emotion_profile", {}).get("timeline", [])
+    if not emotion:
+        # 回退：从 monthly_analyses 构建
+        deep_monthly = portrait_json.get("monthly_analyses", [])
+        if not deep_monthly:
+            deep_monthly = portrait_json.get("emotion_profile", {}).get("monthly_analyses", [])
+        emotion = [
+            {"date": m.get("month", ""), "mood": m.get("mood", ""),
+             "mood_emoji": MOOD_MAP.get(m.get("mood", ""), "😐")}
+            for m in deep_monthly
+        ]
+    # 补全旧数据可能缺失的 emoji
+    for e in emotion:
+        if not e.get("mood_emoji"):
+            e["mood_emoji"] = MOOD_MAP.get(e.get("mood", ""), "😐")
+
+    # 仅 realtime 数据需要实时计算（轻量，只查最近30天）
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
-    if not chat or not member:
-        raise HTTPException(404, detail="数据未找到")
-
-    from services.stats_engine import (
-        compute_activity_stats, compute_language_stats,
-        compute_social_relations, compute_member_emotion_timeline,
-        compute_message_style, compute_recent_status, compute_topic_role,
-        compute_highlight_quotes,
-    )
-
-    wxid = member["wxid"]
-    messages = chat.messages
-    sender_name = member["display_name"] or member["nickname"]
-
-    member_names = set()
-    all_wxids = set()
-    for s in chat.senders:
-        name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
-        if name and len(name) >= 2:
-            member_names.add(name)
-        swxid = s.get("wxid", "")
-        if swxid:
-            all_wxids.add(swxid)
-
-    activity = compute_activity_stats(messages, wxid)
-    language = compute_language_stats(messages, wxid, member_names)
-    relations = compute_social_relations(messages, wxid, chat.get_sender_name, chat.get_name_by_wxid)
-    # v0.6.4: 使用成员自己的情绪数据，替代群级别的 compute_emotion_timeline
-    emotion = compute_member_emotion_timeline(messages, wxid)
-    message_style = compute_message_style(language, activity)
-    recent_status = compute_recent_status(messages, wxid, member_names)
-    topic_role = compute_topic_role(messages, wxid, all_wxids)
-    highlight_quotes = compute_highlight_quotes(group_id, wxid, sender_name, messages)
-
-    # 个人标志性表情
-    top_emojis = language.get("top_emojis", [])
-    signature_emoji = top_emojis[0]["emoji"] if top_emojis else ""
+    recent_status = {}
+    if chat and member:
+        member_names = set()
+        for s in chat.senders:
+            name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
+            if name and len(name) >= 2:
+                member_names.add(name)
+        from services.stats_engine import compute_recent_status
+        sender_msgs = [m for m in chat.messages if m.get("wxid") == member["wxid"]]
+        recent_status = compute_recent_status([], member_names=member_names, sender_msgs=sender_msgs)
 
     return {
         "code": 200,
@@ -276,7 +290,7 @@ async def api_portrait_stats(group_id: int, member_id: int):
         "data": {
             "activity": activity,
             "language": language,
-            "social_relations": relations,
+            "social_relations": social_relations,
             "emotion_timeline": emotion,
             "message_style": message_style,
             "recent_status": recent_status,
@@ -335,12 +349,16 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         task.steps.clear()
 
     # ---- Step 1: 基础画像 Pipeline（性格/角色/兴趣/口头禅/一句话） ----
-    # 构建 member_names（增量和全量都需要）
+    # 构建 member_names + all_wxids（增量和全量都需要）
     member_names = set()
+    all_wxids = set()
     for s in chat.senders:
         name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
         if name and len(name) >= 2:
             member_names.add(name)
+        swxid = s.get("wxid", "")
+        if swxid:
+            all_wxids.add(swxid)
 
     # 完整运行基础 pipeline
     task.update("inference", "基础画像分析中...")
@@ -421,7 +439,22 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         "hourly_heatmap": activity["hourly_heatmap"],
         "monthly_trend": activity["monthly_trend"],
     }
+    portrait_data["language_stats"] = language  # 全量存储，供前端展示
     portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
+
+    # v0.6.4: 一次性计算可缓存数据，避免每次打开页面重算
+    from services.stats_engine import (
+        compute_message_style, compute_topic_role,
+        compute_highlight_quotes,
+    )
+    portrait_data["message_style"] = compute_message_style(language, activity)
+    portrait_data["topic_role"] = compute_topic_role(chat.messages, wxid, all_wxids)
+    portrait_data["highlight_quotes"] = compute_highlight_quotes(
+        group_id, wxid, sender_name, all_msgs
+    )
+    portrait_data["signature_emoji"] = (
+        language.get("top_emojis", [{}])[0].get("emoji", "") if language.get("top_emojis") else ""
+    )
     # ---- 趣味功能 (v0.5.1) ----
     task.update("inference", "趣味分析中...")
     from services.stats_engine import compute_fun_title_basis
