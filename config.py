@@ -33,6 +33,13 @@ class Config:
     GPU_LOCK_RETRY_INTERVAL = int(os.getenv("GPU_LOCK_RETRY_INTERVAL", "5"))
     GPU_LOCK_MAX_RETRIES = int(os.getenv("GPU_LOCK_MAX_RETRIES", "24"))
 
+    # DeepSeek 在线模型（用于周报/月报的深度推理）
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner")
+    DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "90"))
+
     # 画像刷新阈值
     PORTRAIT_REFRESH_DAYS = int(os.getenv("PORTRAIT_REFRESH_DAYS", "7"))
 

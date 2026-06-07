@@ -115,3 +115,25 @@ export const analyzeAll = async (gid) => {
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
 }
+
+// --- 周报/月报 ---
+export const getPeriods = (gid, type = 'weekly') =>
+  request(`/groups/${gid}/periods?type=${type}`)
+export const getWeeklyReport = (gid, periodKey) =>
+  request(`/groups/${gid}/weekly/${periodKey}`)
+export const getMonthlyReport = (gid, periodKey) =>
+  request(`/groups/${gid}/monthly/${periodKey}`)
+export const generateWeekly = async (gid, periodKey = '') => {
+  const params = periodKey ? `?period_key=${periodKey}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/weekly/generate${params}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
+export const generateMonthly = async (gid, periodKey = '') => {
+  const params = periodKey ? `?period_key=${periodKey}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/monthly/generate${params}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}

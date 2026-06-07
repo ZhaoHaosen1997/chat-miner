@@ -8,6 +8,7 @@ from config import config
 from services.stats import compute_global_stats, compute_group_stats
 from services.analyzer import check_ollama_health
 from services.gpu_lock import check_gpu_free, get_lock_owner
+from services.online_model import check_deepseek_health
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,9 @@ router = APIRouter(prefix="/api", tags=["统计"])
 
 @router.get("/health")
 async def api_health():
-    """健康检查 + Ollama 连通性 + GPU 锁状态"""
+    """健康检查 + Ollama 连通性 + GPU 锁状态 + DeepSeek 连通性"""
     ollama = await check_ollama_health()
+    deepseek = await check_deepseek_health()
 
     # GPU 锁状态
     gpu_status = {"enabled": config.GPU_LOCK_ENABLED, "lock_url": config.GPU_LOCK_URL}
@@ -33,6 +35,7 @@ async def api_health():
         "data": {
             "status": "ok",
             "ollama": ollama,
+            "deepseek": deepseek,
             "gpu_lock": gpu_status,
         },
     }

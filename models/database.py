@@ -162,6 +162,23 @@ def init_db():
             error_summary TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS periodic_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            report_type TEXT NOT NULL,
+            period_key TEXT NOT NULL,
+            date_start TEXT NOT NULL,
+            date_end TEXT NOT NULL,
+            day_count INTEGER DEFAULT 0,
+            total_messages INTEGER DEFAULT 0,
+            active_members INTEGER DEFAULT 0,
+            report_json TEXT NOT NULL,
+            model_used TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, report_type, period_key),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
@@ -408,6 +425,22 @@ def get_daily_report(group_id: int, date: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_daily_reports_batch(group_id: int, dates: list[str]) -> list[dict]:
+    """批量获取多天的报告（单次连接，避免逐条打开阻塞事件循环）"""
+    if not dates:
+        return []
+    conn = get_conn()
+    placeholders = ",".join("?" * len(dates))
+    rows = conn.execute(
+        f"""SELECT * FROM daily_reports
+            WHERE group_id=? AND date IN ({placeholders})
+            ORDER BY date""",
+        (group_id, *dates)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_analyzed_dates(group_id: int) -> list[str]:
     """获取已分析的日期列表"""
     conn = get_conn()
@@ -604,3 +637,72 @@ def get_task_record(task_id: str) -> dict | None:
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ==================== 周期报告（周报/月报）CRUD ====================
+
+def save_periodic_report(group_id: int, report_type: str, period_key: str,
+                          date_start: str, date_end: str, day_count: int,
+                          total_messages: int, active_members: int,
+                          report_json: str, model_used: str = ""):
+    """保存周报/月报（INSERT OR REPLACE）"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT OR REPLACE INTO periodic_reports
+           (group_id, report_type, period_key, date_start, date_end,
+            day_count, total_messages, active_members, report_json, model_used)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (group_id, report_type, period_key, date_start, date_end,
+         day_count, total_messages, active_members, report_json, model_used)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_periodic_report(group_id: int, report_type: str,
+                        period_key: str) -> dict | None:
+    """获取单个周期报告"""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT * FROM periodic_reports
+           WHERE group_id=? AND report_type=? AND period_key=?""",
+        (group_id, report_type, period_key)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_periodic_reports(group_id: int, report_type: str = "") -> list[dict]:
+    """列出群的所有周期报告，按 period_key 倒序"""
+    conn = get_conn()
+    if report_type:
+        rows = conn.execute(
+            """SELECT * FROM periodic_reports
+               WHERE group_id=? AND report_type=?
+               ORDER BY period_key DESC""",
+            (group_id, report_type)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM periodic_reports
+               WHERE group_id=?
+               ORDER BY period_key DESC""",
+            (group_id,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_periodic_report(group_id: int, report_type: str,
+                           period_key: str) -> bool:
+    """删除周期报告，返回是否成功删除"""
+    conn = get_conn()
+    cur = conn.execute(
+        """DELETE FROM periodic_reports
+           WHERE group_id=? AND report_type=? AND period_key=?""",
+        (group_id, report_type, period_key)
+    )
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
