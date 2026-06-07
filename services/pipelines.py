@@ -76,8 +76,8 @@ FUN_RELATION_PROMPTS = {
 
 PORTRAIT_PROMPTS = {
     "persona": {
-        "system": "你是一个人物分析工具。只输出三行纯文字，不要加\"第一行：\"等前缀，不要解释。标签要具体、有区分度，避免用\"幽默\"\"话痨\"\"沙雕\"这种放谁身上都行的词。",
-        "user": "{chat}\n\n以上是 {name} 的发言。输出三行纯文字（不要加任何前缀）：\n第一行：2-3个性格标签，逗号分隔。要精准，可选：较真/随和/社恐/自来熟/刀子嘴/老好人/玻璃心/佛系/急性子/细节控/强迫症/摆烂王/卷王/乐子人/吃货/愤青/文艺/实用主义\n第二行：一个词的说话风格，如：豪爽/温柔/毒舌/理性/活泼/老成/阴阳怪气/一本正经/骚话连篇/惜字如金/直球/拐弯抹角/杠精/捧场王/冷场王\n第三行：一个群内角色，从以下选：气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/破防boy/摆烂王者",
+        "system": "你是一个人物分析工具。只输出三行纯文字，不要加前缀、不要解释。标签要有区分度——\"幽默\"\"话痨\"\"沙雕\"几乎适用于所有人，只有确实突出时才用。",
+        "user": "{chat}\n\n以上是 {name} 的发言。输出三行纯文字：\n第一行：2-3个性格标签，逗号分隔。选最能区分ta的，参考：较真/随和/社恐/自来熟/刀子嘴/老好人/玻璃心/佛系/急性子/细节控/强迫症/摆烂王/卷王/乐子人/吃货/愤青/文艺/实用主义\n第二行：一个词的说话风格，参考：豪爽/温柔/毒舌/理性/活泼/老成/阴阳怪气/一本正经/骚话连篇/惜字如金/直球/拐弯抹角/杠精/捧场王/冷场王\n第三行：一个群内角色，从以下选：气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/破防boy/摆烂王者\n\n只输出三行，不要抄示例：",
     },
     "interests": {
         "system": "你是一个兴趣分析工具。只输出两行纯文字，不要加\"第一行：\"等前缀，不要输出任何其他内容。",
@@ -88,8 +88,8 @@ PORTRAIT_PROMPTS = {
         "user": "{chat}\n\n以上是 {name} 的发言。ta 有口头禅或习惯用语吗？\n- 如果有，直接写出那句口头禅（不要加引号或解释）\n- 如果没有明显口头禅，只回答：无\n示例：笑死\n你的输出：",
     },
     "oneline_portrait": {
-        "system": "你是一个人物素描工具。只输出两行纯文字，不要加任何前缀和引号。第一行是人设描述，第二行是两个emoji。",
-        "user": "{chat}\n\n以上是 {name} 的发言。参照以下格式，只输出两行：\n爱吐槽但热心的老大哥\n🤡🔥\n\n更多第一行参考：每天分享早餐的奶茶品鉴师 / 一开口就歪楼的飙车党 / 深夜emo完早上装没事的戏精\n\n你的两行输出（不要加前缀）：",
+        "system": "你是一个人物素描工具。只输出两行纯文字，不要加前缀和引号。第一行人设描述，第二行emoji编号。",
+        "user": "{chat}\n\n以上是 {name} 的发言。分析ta最突出的特征，输出两行：\n\n第一行：15字内人设描述。不要写\"热心的老大哥\"\"爱吐槽的xxx\"这种泛泛的模板。要抓ta最特别的一个点。\n\n第二行：选一个最匹配的编号（只写数字）：\n1乐天派  2整活王  3暖心  4暴脾气  5老学究  6派对咖  7emo怪  8沙雕\n9吃瓜群众 10摸鱼达人 11摆烂王 12卷王 13老司机 14玻璃心 15凡尔赛\n16社死选手 17真香定律 18画饼大师 19CPU专家 20外星人\n\n只输出两行，不要抄示例：",
     },
 }
 
@@ -211,6 +211,14 @@ def _parse_kw(raw) -> list[str]:
         result.append(k)
     return result[:5] if result else ["群聊"]
 
+
+# 画像 emoji 编号映射（AI 输出编号，代码查表转 emoji）
+EMOJI_CHOICES = {
+    "1": "😄✨", "2": "😈💀", "3": "🥰🌸", "4": "😤💢", "5": "🧐📚",
+    "6": "🎉🎊", "7": "😢💧", "8": "🤪👽", "9": "🍉☕", "10": "🎣🛋️",
+    "11": "🫠💤", "12": "💪🔥", "13": "🚗💨", "14": "💔😭", "15": "👑✨",
+    "16": "💀😱", "17": "🍚🙏", "18": "🫓🤥", "19": "🔥🧠", "20": "👽🤯",
+}
 
 MOOD_MAP = {
     "欢乐":"😄","温馨":"🥰","严肃":"🧐","吐槽":"😤","平淡":"😐","热闹":"🎉","伤感":"😢","沙雕":"🤪",
@@ -554,12 +562,30 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         failed_steps.append("phrase")
 
     # 4. 一句话+emoji（两行文本）
-    ol_data = await _run_sub(task, "一句话素描", 4, total,
-                              PORTRAIT_PROMPTS["oneline_portrait"]["system"],
-                              f"{prompt_user}{PORTRAIT_PROMPTS['oneline_portrait']['user'].replace('{name}', sender_name)}")
-    ol_lines = _parse_lines(ol_data)
-    one_line = ol_lines[0] if len(ol_lines) > 0 else ""
-    emoji_style = ol_lines[1] if len(ol_lines) > 1 else "👤"
+    # 一句话素描（AI 输出不合法时重试一次）
+    ol_data = None
+    one_line = ""
+    emoji_style = "👤"
+    ol_prompt_user = f"{prompt_user}{PORTRAIT_PROMPTS['oneline_portrait']['user'].replace('{name}', sender_name)}"
+    for ol_attempt in range(2):
+        ol_data = await _run_sub(task, "一句话素描", 4, total,
+                                  PORTRAIT_PROMPTS["oneline_portrait"]["system"],
+                                  ol_prompt_user)
+        ol_lines = _parse_lines(ol_data)
+        one_line = ol_lines[0] if len(ol_lines) > 0 else ""
+        if len(one_line) > 20 or len(one_line) < 3:
+            one_line = ""
+        emoji_raw = ol_lines[1].strip() if len(ol_lines) > 1 else ""
+        # 检查合法性：含中文、不是有效编号 → 不合法
+        if re.search(r'[一-鿿]', emoji_raw) or (emoji_raw not in EMOJI_CHOICES and len(emoji_raw) > 4):
+            if ol_attempt == 0:
+                ol_prompt_user = ol_prompt_user + f"\n\n（⚠️ 上次你第二行输出了\"{emoji_raw[:20]}\"，不是有效编号。只输出1-20中的一个数字。）"
+                continue
+            else:
+                emoji_style = "👤"
+        else:
+            emoji_style = EMOJI_CHOICES.get(emoji_raw, emoji_raw if 1 <= len(emoji_raw) <= 4 else "👤")
+        break
     if ol_data is None:
         failed_steps.append("oneline_portrait")
 

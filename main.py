@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于本地 Ollama AI",
-    version="0.6.2",
+    version="0.6.3",
     lifespan=lifespan,
 )
 
