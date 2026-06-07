@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from config import config
 from models.database import (
     get_group, get_portraits, get_portrait, log_analysis,
-    get_member,
+    get_member, get_members,
     get_portrait_versions, get_latest_portrait_version,
     save_member_portrait, save_portrait_version,
 )
