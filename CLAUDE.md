@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Chat-Miner is a WeChat group chat analysis tool. Users upload exported chat JSON files, and a local Ollama AI model (qwen2.5:14b) generates daily reports and member portraits. Vue3 SPA frontend served on port 8856.
 
-**Version**: 0.5.1 (deployed to WSL DebianDev)
+**Version**: 0.6.4 (deployed to WSL DebianDev)
 
 ## WSL 生产部署
 
@@ -25,15 +25,23 @@ WSL 发行版: DebianDev
 Python: venv 在项目目录下 venv/
 服务名: chat-miner.service
 
-# 部署更新（只更新代码，不动数据）
-cd /mnt/c/mycode/chat-miner
-tar --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
-    --exclude='__pycache__' --exclude='data' --exclude='logs' --exclude='venv' \
-    --exclude='.env' -czf /mnt/c/mycode/chat-miner-deploy.tar.gz .
-wsl -d DebianDev -- tar -xzf /mnt/c/mycode/chat-miner-deploy.tar.gz \
-    -C /home/zhaohaosen/applications/chat-miner/
-wsl -d DebianDev -- sh -c "cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build"
-wsl -d DebianDev -- sudo systemctl restart chat-miner
+# 推荐：rsync 增量部署（快且安全，只传变更文件）
+wsl -d DebianDev -- sh -c "rsync -av --delete \
+  --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
+  --exclude='__pycache__' --exclude='data' --exclude='logs' --exclude='venv' \
+  --exclude='.env' --exclude='docs' --exclude='*.tar.gz' \
+  /mnt/c/mycode/chat-miner/ /home/zhaohaosen/applications/chat-miner/ && \
+  cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && \
+  sudo systemctl restart chat-miner && echo 'Deploy OK'"
+
+# 备用：tar 打包部署（兼容旧方式）
+# cd /mnt/c/mycode/chat-miner
+# tar --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
+#     --exclude='__pycache__' --exclude='data' --exclude='logs' --exclude='venv' \
+#     --exclude='.env' --exclude='docs' -czf /tmp/chat-miner-deploy.tar.gz .
+# wsl -d DebianDev -- sh -c "tar -xzf /mnt/c/mycode/chat-miner-deploy.tar.gz \
+#     -C /home/zhaohaosen/applications/chat-miner/ && cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && sudo systemctl restart chat-miner"
+# rm -f /tmp/chat-miner-deploy.tar.gz
 
 # 服务管理
 sudo systemctl status chat-miner   # 查看状态

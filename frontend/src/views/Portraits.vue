@@ -141,7 +141,27 @@ const networkLayout = computed(() => {
   return { nodes: positioned, links, svgSize: 440 }
 })
 
-// 计算最后刷新距今几天
+// 格式化最后刷新时间为精确时间戳
+function formatLastUpdated(dateStr) {
+  if (!dateStr) return '未知'
+  const then = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now - then
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+
+  if (diffHours < 1) return '刚刚'
+  if (diffHours < 24) return `${diffHours}小时前`
+
+  // 超过24小时显示完整日期时间
+  const y = then.getFullYear()
+  const m = String(then.getMonth() + 1).padStart(2, '0')
+  const d = String(then.getDate()).padStart(2, '0')
+  const hh = String(then.getHours()).padStart(2, '0')
+  const mm = String(then.getMinutes()).padStart(2, '0')
+  const ss = String(then.getSeconds()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`
+}
+
 function daysSince(dateStr) {
   if (!dateStr) return 999
   const then = new Date(dateStr)
@@ -242,10 +262,11 @@ const unanalyzedCount = computed(() =>
           </div>
         </div>
 
-        <!-- 最后刷新时间 -->
+        <!-- 最后刷新时间（v0.6.4: 精确到时分秒） -->
         <div v-if="p.last_updated" class="flex items-center gap-1 mb-2 text-[10px]" :class="isStale(p.last_updated) ? 'text-amber-500' : 'text-slate-400'">
           <Clock class="w-3 h-3" />
-          {{ isStale(p.last_updated) ? `${daysSince(p.last_updated)}天前 · 建议刷新` : daysSince(p.last_updated) === 0 ? '今天' : `${daysSince(p.last_updated)}天前` }}
+          {{ formatLastUpdated(p.last_updated) }}
+          <span v-if="isStale(p.last_updated)" class="text-amber-500 font-medium">· 建议刷新</span>
         </div>
 
         <!-- 一句话人设 -->

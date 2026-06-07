@@ -76,20 +76,20 @@ FUN_RELATION_PROMPTS = {
 
 PORTRAIT_PROMPTS = {
     "persona": {
-        "system": "你是一个人物分析工具。只输出三行纯文字，不要加前缀、不要解释。标签要有区分度——\"幽默\"\"话痨\"\"沙雕\"几乎适用于所有人，只有确实突出时才用。",
-        "user": "{chat}\n\n以上是 {name} 的发言。输出三行纯文字：\n第一行：2-3个性格标签，逗号分隔。选最能区分ta的，参考：较真/随和/社恐/自来熟/刀子嘴/老好人/玻璃心/佛系/急性子/细节控/强迫症/摆烂王/卷王/乐子人/吃货/愤青/文艺/实用主义\n第二行：一个词的说话风格，参考：豪爽/温柔/毒舌/理性/活泼/老成/阴阳怪气/一本正经/骚话连篇/惜字如金/直球/拐弯抹角/杠精/捧场王/冷场王\n第三行：一个群内角色，从以下选：气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/破防boy/摆烂王者\n\n只输出三行，不要抄示例：",
+        "system": "你是一个综艺人物分析工具。只输出三行纯文字，不要加前缀、不要解释。标签要有区分度——\"幽默\"\"话痨\"\"沙雕\"几乎适用于所有人，只有确实突出时才用。要像给朋友贴标签一样有趣精准。",
+        "user": "{chat}\n\n以上是 {name} 的发言。输出三行纯文字：\n\n第一行：2-3个性格标签，逗号分隔。选最能区分ta的，参考（可自由发挥）：较真 随和 社恐 自来熟 刀子嘴 老好人 玻璃心 佛系 急性子 细节控 强迫症 摆烂王 卷王 乐子人 吃货 愤青 文艺 实用主义 养生达人 宠物博主 吃瓜能手 彩虹屁专家\n\n第二行：一个词的说话风格，参考（可自由发挥）：豪爽 温柔 毒舌 理性 活泼 老成 阴阳怪气 一本正经 骚话连篇 惜字如金 直球 拐弯抹角 杠精 捧场王 冷场王 凡尔赛口吻 领导腔 相声演员 戏精附体\n\n第三行：一个群内角色，从以下选：气氛组 和事佬 话题制造机 话题终结者 吃瓜群众 潜水大佬 毒舌评论员 科普达人 摸鱼冠军 卷王 凡尔赛大师 画饼专家 真香选手 社死担当 破防boy 摆烂王者 开车司机 红包侠\n\n只输出三行纯文字：",
     },
     "interests": {
         "system": "你是一个兴趣分析工具。只输出两行纯文字，不要加\"第一行：\"等前缀，不要输出任何其他内容。",
         "user": "{chat}\n\n以上是 {name} 的发言。输出两行纯文字：\n第一行：关注话题/兴趣，逗号分隔3-5个，如：游戏,美食,科技,篮球,投资\n第二行：活跃时段，如：夜猫子22:00-02:00 / 上班摸鱼9:00-18:00 / 周末活跃\n示例：\n游戏,美食,科技,篮球\n夜猫子22:00-02:00",
     },
     "phrase": {
-        "system": "你是一个口头禅检测工具。只回答口头禅或\"无\"，不要输出任何其他内容。",
-        "user": "{chat}\n\n以上是 {name} 的发言。ta 有口头禅或习惯用语吗？\n- 如果有，直接写出那句口头禅（不要加引号或解释）\n- 如果没有明显口头禅，只回答：无\n示例：笑死\n你的输出：",
+        "system": "你是一个口头禅检测工具。只输出口头禅，逗号分隔，或\"无\"。不要输出任何其他内容。",
+        "user": "{chat}\n\n以上是 {name} 的发言。ta 有口头禅或习惯用语吗？\n- 如果有，输出 1-3 个口头禅，逗号分隔（如：笑死,哈哈哈,我去）\n- 如果没有明显口头禅，只回答：无\n你的输出：",
     },
     "oneline_portrait": {
-        "system": "你是一个人物素描工具。只输出两行纯文字，不要加前缀和引号。第一行人设描述，第二行emoji编号。",
-        "user": "{chat}\n\n以上是 {name} 的发言。分析ta最突出的特征，输出两行：\n\n第一行：15字内人设描述。不要写\"热心的老大哥\"\"爱吐槽的xxx\"这种泛泛的模板。要抓ta最特别的一个点。\n\n第二行：选一个最匹配的编号（只写数字）：\n1乐天派  2整活王  3暖心  4暴脾气  5老学究  6派对咖  7emo怪  8沙雕\n9吃瓜群众 10摸鱼达人 11摆烂王 12卷王 13老司机 14玻璃心 15凡尔赛\n16社死选手 17真香定律 18画饼大师 19CPU专家 20外星人\n\n只输出两行，不要抄示例：",
+        "system": "你是一个人物素描工具。只输出两行纯文字，不要加前缀和引号。第一行人设描述，第二行标签词。",
+        "user": "{chat}\n\n以上是 {name} 的发言。分析ta最突出的特征，输出两行：\n\n第一行：15字内人设描述。不要写\"热心的老大哥\"\"爱吐槽的xxx\"这种泛泛的模板。要抓ta最特别的一个点。\n\n第二行：选一个最匹配的标签词（只复制一个词，不要加数字和解释）：\n乐天派 整活王 暖心 暴脾气 老学究 派对咖 emo怪 沙雕\n吃瓜群众 摸鱼达人 摆烂王 卷王 老司机 玻璃心 凡尔赛\n社死选手 真香定律 画饼大师 CPU专家 外星人\n夜猫子 咖啡续命 游戏宅 美食家 潜水冠军 捧场王 毒舌 话痨 文艺青年 运动达人 追剧狂魔\n\n只输出两行，不要抄示例：",
     },
 }
 
@@ -212,13 +212,82 @@ def _parse_kw(raw) -> list[str]:
     return result[:5] if result else ["群聊"]
 
 
-# 画像 emoji 编号映射（AI 输出编号，代码查表转 emoji）
+# 画像 emoji 标签映射（AI 输出标签词，Python 查表转 emoji）
+# 比纯数字编号更鲁棒：14B 模型复制中文标签远比输出数字编号可靠
+EMOJI_LABEL_MAP = {
+    "乐天派": "😄✨", "整活王": "😈💀", "暖心": "🥰🌸", "暴脾气": "😤💢", "老学究": "🧐📚",
+    "派对咖": "🎉🎊", "emo怪": "😢💧", "沙雕": "🤪👽", "吃瓜群众": "🍉☕", "摸鱼达人": "🎣🛋️",
+    "摆烂王": "🫠💤", "卷王": "💪🔥", "老司机": "🚗💨", "玻璃心": "💔😭", "凡尔赛": "👑✨",
+    "社死选手": "💀😱", "真香定律": "🍚🙏", "画饼大师": "🫓🤥", "CPU专家": "🔥🧠", "外星人": "👽🤯",
+    # v0.6.4 新增
+    "夜猫子": "🦉🌙", "咖啡续命": "☕😮‍💨", "游戏宅": "🎮🕹️", "美食家": "🍜🤤",
+    "潜水冠军": "🤿💤", "捧场王": "👏🎉", "毒舌": "🐍☠️", "话痨": "🦜💬",
+    "文艺青年": "🎨📖", "运动达人": "⚽🏃", "追剧狂魔": "📺🍿",
+}
+
+# 兼容旧版编号映射（AI 偶尔仍然输出数字）
 EMOJI_CHOICES = {
     "1": "😄✨", "2": "😈💀", "3": "🥰🌸", "4": "😤💢", "5": "🧐📚",
     "6": "🎉🎊", "7": "😢💧", "8": "🤪👽", "9": "🍉☕", "10": "🎣🛋️",
     "11": "🫠💤", "12": "💪🔥", "13": "🚗💨", "14": "💔😭", "15": "👑✨",
     "16": "💀😱", "17": "🍚🙏", "18": "🫓🤥", "19": "🔥🧠", "20": "👽🤯",
 }
+
+def _match_emoji_by_label(label_text: str) -> str:
+    """根据 AI 输出的标签文本匹配 emoji，支持精确匹配 + 模糊匹配"""
+    if not label_text:
+        return ""
+    label = label_text.strip()
+    # 1. 精确匹配
+    if label in EMOJI_LABEL_MAP:
+        return EMOJI_LABEL_MAP[label]
+    # 2. 子串匹配（如 AI 输出"乐天派一枚" → 匹配"乐天派"）
+    for key, emoji in EMOJI_LABEL_MAP.items():
+        if key in label or label in key:
+            return emoji
+    return ""
+
+def _auto_select_emoji(top_emojis: list[dict], peak_hour: int,
+                       avg_msg_len: float, avg_daily: float) -> str:
+    """纯 Python 兜底：根据成员实际数据自动选择画像 emoji
+    完全不依赖 AI，保证每个成员都有区分度的 emoji
+
+    Args:
+        top_emojis: compute_language_stats 返回的 top_emojis 列表
+        peak_hour: 最活跃小时 (0-23)
+        avg_msg_len: 平均消息长度
+        avg_daily: 日均发言数
+    """
+    # 1. 根据最常用表情判定
+    emoji_texts = " ".join(e["emoji"] for e in (top_emojis or [])[:5])
+    if any(e in emoji_texts for e in ["偷笑", "捂脸", "呲牙", "憨笑", "大笑"]):
+        return "😄✨"  # 乐天派
+    if any(e in emoji_texts for e in ["强", "抱拳", "OK", "好的", "赞"]):
+        return "👏🎉"  # 捧场王
+    if any(e in emoji_texts for e in ["裂开", "苦涩", "流泪", "大哭", "心碎"]):
+        return "😢💧"  # emo怪
+    if any(e in emoji_texts for e in ["狗头", "机智", "斜眼", "坏笑", "阴险"]):
+        return "🐍☠️"  # 毒舌
+    if any(e in emoji_texts for e in ["红包", "發", "恭喜", "发财"]):
+        return "🎉🎊"  # 派对咖
+
+    # 2. 根据活跃时段判定
+    if 23 <= peak_hour or peak_hour <= 5:
+        return "🦉🌙"  # 夜猫子
+    if 6 <= peak_hour <= 8:
+        return "☕😮‍💨"  # 咖啡续命
+    if 9 <= peak_hour <= 17:
+        return "🎣🛋️"  # 摸鱼达人
+
+    # 3. 根据发言特征判定
+    if avg_daily <= 2:
+        return "🤿💤"  # 潜水冠军
+    if avg_daily >= 30:
+        return "🦜💬"  # 话痨
+    if avg_msg_len >= 50:
+        return "🧐📚"  # 老学究
+
+    return "🍉☕"  # 吃瓜群众（通用兜底，比其他默认更有个性）
 
 MOOD_MAP = {
     "欢乐":"😄","温馨":"🥰","严肃":"🧐","吐槽":"😤","平淡":"😐","热闹":"🎉","伤感":"😢","沙雕":"🤪",
@@ -552,40 +621,67 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     if i_data is None:
         failed_steps.append("interests")
 
-    # 3. 口头禅（一个词或"无"）
+    # 3. 口头禅（v0.6.4: 支持多条，逗号分隔）
     ph_data = await _run_sub(task, "检测口头禅", 3, total,
                               PORTRAIT_PROMPTS["phrase"]["system"],
                               f"{prompt_user}{PORTRAIT_PROMPTS['phrase']['user'].replace('{name}', sender_name)}")
     ph_text = str(ph_data or "").strip()
-    signature_phrase = None if "无" in ph_text or not ph_text else ph_text[:50]
+    if "无" in ph_text or not ph_text or _is_ai_apology(ph_text):
+        signature_phrases = []
+    else:
+        # 逗号或顿号分隔，每条最多 20 字，最多 3 条
+        ph_list = re.split(r"[,，、]+", ph_text)
+        signature_phrases = [p.strip()[:20] for p in ph_list if p.strip()][:3]
     if ph_data is None:
         failed_steps.append("phrase")
 
     # 4. 一句话+emoji（两行文本）
-    # 一句话素描（AI 输出不合法时重试一次）
+    # v0.6.4: AI 输出标签词 → Python 查表转 emoji，比数字编号更鲁棒
     ol_data = None
     one_line = ""
-    emoji_style = "👤"
+    emoji_style = ""  # 空字符串表示待填充，调用方可传入 stats 兜底
     ol_prompt_user = f"{prompt_user}{PORTRAIT_PROMPTS['oneline_portrait']['user'].replace('{name}', sender_name)}"
     for ol_attempt in range(2):
         ol_data = await _run_sub(task, "一句话素描", 4, total,
                                   PORTRAIT_PROMPTS["oneline_portrait"]["system"],
                                   ol_prompt_user)
+        # 用 _parse_lines 提取第一行（人设描述）
         ol_lines = _parse_lines(ol_data)
         one_line = ol_lines[0] if len(ol_lines) > 0 else ""
         if len(one_line) > 20 or len(one_line) < 3:
             one_line = ""
-        emoji_raw = ol_lines[1].strip() if len(ol_lines) > 1 else ""
-        # 检查合法性：含中文、不是有效编号 → 不合法
-        if re.search(r'[一-鿿]', emoji_raw) or (emoji_raw not in EMOJI_CHOICES and len(emoji_raw) > 4):
-            if ol_attempt == 0:
-                ol_prompt_user = ol_prompt_user + f"\n\n（⚠️ 上次你第二行输出了\"{emoji_raw[:20]}\"，不是有效编号。只输出1-20中的一个数字。）"
-                continue
-            else:
-                emoji_style = "👤"
+
+        # 从原始 AI 输出中提取第二行标签（不用 _parse_lines，因为它会 strip 掉数字/中文）
+        raw_text = str(ol_data).strip() if ol_data else ""
+        raw_lines = raw_text.split("\n")
+        # 取第二行原始文本
+        emoji_raw = raw_lines[1].strip() if len(raw_lines) > 1 else ""
+        # 去除可能的格式前缀（"第二行：" 等）
+        emoji_raw = re.sub(r'^第[一二三四五六七八九十\d]+[行行][：:]\s*', '', emoji_raw)
+        emoji_raw = emoji_raw.strip()
+
+        # 尝试匹配标签 → emoji
+        emoji_style = _match_emoji_by_label(emoji_raw)
+        if emoji_style:
+            break
+
+        # 兼容旧版：AI 输出了纯数字编号
+        if emoji_raw in EMOJI_CHOICES:
+            emoji_style = EMOJI_CHOICES[emoji_raw]
+            break
+
+        # 不合法：标签未匹配 + 不是有效编号 → 重试
+        if ol_attempt == 0:
+            ol_prompt_user = ol_prompt_user + (
+                f"\n\n（⚠️ 上次你第二行输出了\"{emoji_raw[:30]}\"，不是有效标签。"
+                f"请只复制上述列表中的一个标签词，如\"乐天派\"、\"夜猫子\"。）"
+            )
+            continue
         else:
-            emoji_style = EMOJI_CHOICES.get(emoji_raw, emoji_raw if 1 <= len(emoji_raw) <= 4 else "👤")
-        break
+            # 两次都失败，保持空字符串，交由调用方 Python 兜底
+            emoji_style = ""
+            break
+
     if ol_data is None:
         failed_steps.append("oneline_portrait")
 
@@ -596,7 +692,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         "role": role,
         "interests": interests[:5],
         "active_hours": active_hours,
-        "signature_phrase": signature_phrase,
+        "signature_phrase": signature_phrases[0] if signature_phrases else None,  # 向后兼容
+        "signature_phrases": signature_phrases,  # v0.6.4: 多条口头禅
         "one_line": one_line[:30],
         "emoji_style": emoji_style[:10],
     }

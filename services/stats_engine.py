@@ -473,3 +473,351 @@ def compute_fun_title_basis(activity: dict, language: dict,
         "category": chosen[0],
         "data_summary": "；".join(data_lines),
     }
+
+
+# ============================================================
+# v0.6.4 新增统计函数
+# ============================================================
+
+# 情绪关键词/表情 → mood 映射（用于个人情绪识别）
+_MEMBER_EMOTION_PATTERNS = [
+    (["偷笑", "呲牙", "憨笑", "大笑", "坏笑", "捂脸", "机智", "耶", "庆祝",
+      "哈哈", "笑死", "笑死我了", "哈哈哈哈哈", "xs", "xswl", "233", "乐"], "欢乐"),
+    (["流泪", "大哭", "心碎", "裂开", "苦涩", "委屈", "难过",
+      "哭了", "好难", "崩溃", "emo", "烦", "郁闷", "呜呜"], "伤感"),
+    (["强", "抱拳", "OK", "好的", "赞", "鼓掌", "玫瑰", "爱心",
+      "辛苦了", "谢谢", "感谢", "nice", "牛", "牛逼"], "温馨"),
+    (["发怒", "炸弹", "刀", "鄙视", "弱", "便便",
+      "tm", "特么", "妈的", "滚", "草", "操", "sb"], "吐槽"),
+    (["吃瓜", "嗑瓜子", "前排", "围观"], "吃瓜"),
+    (["裂开", "破防", "蚌埠住了", "绷不住", "麻了", "破防了"], "破防"),
+    (["红包", "發", "恭喜发财", "手气", "运气王"], "热闹"),
+    (["狗头", "机智", "斜眼", "坏笑", "阴险", "doge"], "沙雕"),
+    (["咖啡", "困", "累", "加班", "摸鱼", "划水"], "摸鱼"),
+    (["流汗", "无语", "汗", "离谱", "离谱他妈"], "离谱"),
+]
+
+
+def _detect_member_daily_mood(msgs: list[dict]) -> tuple[str, str]:
+    """根据成员当天发言判断个人情绪（关键词+表情密度）
+
+    Returns:
+        (mood_label, mood_emoji) 如 ("欢乐", "😄")
+    """
+    from services.pipelines import MOOD_MAP
+    if not msgs:
+        return "平淡", "😐"
+
+    mood_scores = {}
+    for pattern_keywords, mood in _MEMBER_EMOTION_PATTERNS:
+        score = 0
+        for m in msgs:
+            content = (m.get("content") or "").strip()
+            for kw in pattern_keywords:
+                if kw in content:
+                    score += 1
+        if score > 0:
+            mood_scores[mood] = score
+
+    if not mood_scores:
+        return "平淡", "😐"
+
+    top_mood = max(mood_scores, key=mood_scores.get)
+    emoji = MOOD_MAP.get(top_mood, "😐")
+    return top_mood, emoji
+
+
+def compute_member_emotion_timeline(messages: list[dict], wxid: str) -> list[dict]:
+    """计算成员个人的每日情绪时间线
+
+    Args:
+        messages: 全部消息列表
+        wxid: 目标成员 wxid
+
+    Returns:
+        [{date, mood, mood_emoji}] 按日期升序
+    """
+    from collections import defaultdict
+    # 按天聚合成员消息
+    day_msgs = defaultdict(list)
+    for m in messages:
+        if m.get("wxid") != wxid:
+            continue
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 10:
+            date = ft[:10]
+            day_msgs[date].append(m)
+
+    timeline = []
+    for date in sorted(day_msgs.keys()):
+        mood, emoji = _detect_member_daily_mood(day_msgs[date])
+        timeline.append({"date": date, "mood": mood, "mood_emoji": emoji})
+
+    return timeline
+
+
+def compute_message_style(language: dict, activity: dict) -> dict:
+    """纯 Python 计算消息风格标签（零 AI 成本）
+
+    Returns:
+        {avg_len, style_label, reply_style, emoji_style_label}
+    """
+    avg_len = language.get("avg_msg_len", 0)
+    avg_daily = activity.get("avg_daily_msgs", 0)
+    emoji_count = language.get("total_emoji_count", 0)
+    text_count = language.get("total_text_msgs", 1)
+
+    # 消息长度风格
+    if avg_len <= 5:
+        style_label = "短小精悍型"
+    elif avg_len <= 15:
+        style_label = "言简意赅型"
+    elif avg_len <= 40:
+        style_label = "娓娓道来型"
+    else:
+        style_label = "长篇大论型"
+
+    # emoji 使用风格
+    emoji_ratio = emoji_count / max(text_count, 1)
+    if emoji_ratio >= 0.8:
+        emoji_style_label = "表情包轰炸型"
+    elif emoji_ratio >= 0.3:
+        emoji_style_label = "表情活跃型"
+    elif emoji_count <= 5 and text_count >= 50:
+        emoji_style_label = "纯文字型"
+    else:
+        emoji_style_label = "适度表情型"
+
+    # 活跃节奏标签
+    if avg_daily >= 20:
+        reply_style = "高频互动型"
+    elif avg_daily >= 5:
+        reply_style = "张弛有度型"
+    elif avg_daily >= 1:
+        reply_style = "随缘冒泡型"
+    else:
+        reply_style = "深海潜水型"
+
+    return {
+        "avg_len": avg_len,
+        "style_label": style_label,
+        "emoji_style_label": emoji_style_label,
+        "reply_style": reply_style,
+    }
+
+
+def compute_recent_status(messages: list[dict], wxid: str,
+                          member_names: set[str] = None,
+                          recent_days: int = 30) -> dict:
+    """计算成员最近状态的快照（最近 N 天）
+
+    Returns:
+        {active_trend, recent_topics, recent_mood, recent_msg_count, recent_days_active}
+    """
+    from collections import defaultdict, Counter
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    cutoff_date = (now - timedelta(days=recent_days)).strftime("%Y-%m-%d")
+
+    recent_msgs = []
+    for m in messages:
+        if m.get("wxid") != wxid:
+            continue
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 10 and ft[:10] >= cutoff_date:
+            recent_msgs.append(m)
+
+    if not recent_msgs:
+        return {
+            "active_trend": "📴",
+            "trend_label": "最近没有发言",
+            "recent_topics": [],
+            "recent_mood": "未知",
+            "recent_mood_emoji": "😶",
+            "recent_msg_count": 0,
+            "recent_days_active": 0,
+        }
+
+    # 按天统计
+    day_counts = defaultdict(int)
+    for m in recent_msgs:
+        ft = m.get("formattedTime", "")
+        date = ft[:10]
+        day_counts[date] += 1
+
+    recent_days_active = len(day_counts)
+    recent_msg_count = len(recent_msgs)
+
+    # 活跃趋势：对比前半个月和后半个月
+    mid_point = sorted(day_counts.keys())[len(day_counts) // 2] if len(day_counts) > 2 else ""
+    if mid_point and len(day_counts) >= 6:
+        first_half = sum(c for d, c in day_counts.items() if d < mid_point)
+        second_half = sum(c for d, c in day_counts.items() if d >= mid_point)
+        if second_half > first_half * 1.3:
+            active_trend = "📈"
+            trend_label = "近期越来越活跃"
+        elif first_half > second_half * 1.3:
+            active_trend = "📉"
+            trend_label = "近期活跃度下降"
+        else:
+            active_trend = "📊"
+            trend_label = "活跃度保持稳定"
+    else:
+        active_trend = "📊"
+        trend_label = "最近开始活跃" if recent_days_active >= 3 else "偶尔冒泡"
+
+    # 最近情绪
+    recent_mood, recent_mood_emoji = _detect_member_daily_mood(recent_msgs)
+
+    # 最近高频词（简单提取）
+    if member_names is None:
+        member_names = set()
+    dynamic_stop = _build_dynamic_stop_words(member_names)
+    word_counter = Counter()
+    for m in recent_msgs:
+        content = strip_mentions((m.get("content") or "").strip(), member_names)
+        clean = WECHAT_EMOJI_PATTERN.sub(
+            lambda m2: '' if m2.group(0)[1:-1] in _META_TOKENS else m2.group(0)[1:-1],
+            content
+        )
+        chunks = re.findall(r'[一-鿿]{2,4}', clean)
+        for chunk in chunks:
+            if chunk not in dynamic_stop:
+                word_counter[chunk] += 1
+
+    recent_topics = [w for w, _ in word_counter.most_common(5)]
+
+    return {
+        "active_trend": active_trend,
+        "trend_label": trend_label,
+        "recent_topics": recent_topics,
+        "recent_mood": recent_mood,
+        "recent_mood_emoji": recent_mood_emoji,
+        "recent_msg_count": recent_msg_count,
+        "recent_days_active": recent_days_active,
+    }
+
+
+def compute_topic_role(messages: list[dict], wxid: str,
+                       all_wxids: set[str]) -> dict:
+    """计算成员的话题角色
+
+    Returns:
+        {role_label, topic_initiation_rate, avg_reply_count}
+    """
+    from collections import defaultdict
+
+    # 按天分组，判断每天谁第一个发言（话题发起者）
+    day_first_speaker = defaultdict(str)
+    day_msg_count_by_member = defaultdict(lambda: defaultdict(int))
+
+    for m in messages:
+        ft = m.get("formattedTime", "")
+        if len(ft) < 10:
+            continue
+        date = ft[:10]
+        mwxid = m.get("wxid", "")
+        if not mwxid:
+            continue
+        day_msg_count_by_member[date][mwxid] += 1
+        if not day_first_speaker.get(date):
+            # 不是系统消息才算
+            if m.get("type") != "系统消息":
+                day_first_speaker[date] = mwxid
+
+    if not day_first_speaker:
+        return {"role_label": "神秘群友", "topic_initiation_rate": 0, "avg_reply_count": 0}
+
+    # 话题发起率
+    total_days = len(day_first_speaker)
+    initiated_days = sum(1 for d, w in day_first_speaker.items() if w == wxid)
+    initiation_rate = round(initiated_days / total_days, 2) if total_days > 0 else 0
+
+    # 被回复率估算（该成员发言后 5 分钟内其他人的发言次数）
+    reply_count = 0
+    msg_count = 0
+    sender_msgs = sorted(
+        [m for m in messages if m.get("wxid") == wxid],
+        key=lambda x: x.get("createTime", 0)
+    )
+    for sm in sender_msgs:
+        ts = sm.get("createTime", 0)
+        if not ts:
+            continue
+        msg_count += 1
+        for m in messages:
+            if m.get("wxid") != wxid and m.get("wxid"):
+                mts = m.get("createTime", 0)
+                if mts and 0 < mts - ts <= 300:
+                    reply_count += 1
+                    break
+
+    avg_reply = round(reply_count / max(msg_count, 1), 2)
+
+    if initiation_rate >= 0.3:
+        role_label = "话题发起者 🔥"
+    elif avg_reply >= 0.4:
+        role_label = "话题中心 💬"
+    elif msg_count > 0 and reply_count < msg_count * 0.1:
+        role_label = "话题终结者 🛑"
+    elif initiation_rate >= 0.1:
+        role_label = "跟风达人 🌊"
+    else:
+        role_label = "安静听众 👂"
+
+    return {
+        "role_label": role_label,
+        "topic_initiation_rate": initiation_rate,
+        "avg_reply_count": avg_reply,
+    }
+
+
+def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
+                             messages: list[dict]) -> list[dict]:
+    """从 daily_reports 的 funny_quotes 中提取该成员的精彩发言
+
+    Returns:
+        [{date, content, context}] 最多 3 条
+    """
+    import json
+    from models.database import get_daily_report, get_analyzed_dates
+
+    quotes = []
+    dates = get_analyzed_dates(group_id)
+    for date in sorted(dates, reverse=True):
+        report = get_daily_report(group_id, date)
+        if not report or not report.get("report_json"):
+            continue
+        try:
+            rj = json.loads(report["report_json"])
+            funny_quotes = rj.get("funny_quotes", [])
+            for q in funny_quotes:
+                speaker = q.get("speaker", "")
+                # 模糊匹配发言人（AI 可能用简称或昵称）
+                if speaker in member_name or member_name in speaker:
+                    quotes.append({
+                        "date": date,
+                        "content": q.get("quote", "")[:100],
+                        "comment": q.get("comment", ""),
+                    })
+                    if len(quotes) >= 3:
+                        return quotes
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # 如果没有找到，从该成员的消息中挑最长的一条作为亮点
+    if not quotes and messages:
+        text_msgs = [m for m in messages
+                     if m.get("wxid") == wxid
+                     and m.get("type") == "文本消息"
+                     and len((m.get("content") or "").strip()) >= 10]
+        if text_msgs:
+            longest = max(text_msgs, key=lambda m: len((m.get("content") or "").strip()))
+            quotes.append({
+                "date": longest.get("formattedTime", "")[:10],
+                "content": (longest.get("content") or "").strip()[:100],
+                "comment": "",
+            })
+
+    return quotes

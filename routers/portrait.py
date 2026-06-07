@@ -229,7 +229,7 @@ async def api_portrait_history(group_id: int, member_id: int):
 
 @router.get("/portrait/{member_id}/stats")
 async def api_portrait_stats(group_id: int, member_id: int):
-    """获取成员的 Python 统计数据（活跃/语言/关系）"""
+    """获取成员的 Python 统计数据（活跃/语言/关系/情绪/风格）"""
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
     if not chat or not member:
@@ -237,22 +237,38 @@ async def api_portrait_stats(group_id: int, member_id: int):
 
     from services.stats_engine import (
         compute_activity_stats, compute_language_stats,
-        compute_social_relations, compute_emotion_timeline,
+        compute_social_relations, compute_member_emotion_timeline,
+        compute_message_style, compute_recent_status, compute_topic_role,
+        compute_highlight_quotes,
     )
 
     wxid = member["wxid"]
     messages = chat.messages
+    sender_name = member["display_name"] or member["nickname"]
 
     member_names = set()
+    all_wxids = set()
     for s in chat.senders:
         name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
         if name and len(name) >= 2:
             member_names.add(name)
+        swxid = s.get("wxid", "")
+        if swxid:
+            all_wxids.add(swxid)
 
     activity = compute_activity_stats(messages, wxid)
     language = compute_language_stats(messages, wxid, member_names)
     relations = compute_social_relations(messages, wxid, chat.get_sender_name, chat.get_name_by_wxid)
-    emotion = compute_emotion_timeline(group_id)
+    # v0.6.4: 使用成员自己的情绪数据，替代群级别的 compute_emotion_timeline
+    emotion = compute_member_emotion_timeline(messages, wxid)
+    message_style = compute_message_style(language, activity)
+    recent_status = compute_recent_status(messages, wxid, member_names)
+    topic_role = compute_topic_role(messages, wxid, all_wxids)
+    highlight_quotes = compute_highlight_quotes(group_id, wxid, sender_name, messages)
+
+    # 个人标志性表情
+    top_emojis = language.get("top_emojis", [])
+    signature_emoji = top_emojis[0]["emoji"] if top_emojis else ""
 
     return {
         "code": 200,
@@ -262,6 +278,11 @@ async def api_portrait_stats(group_id: int, member_id: int):
             "language": language,
             "social_relations": relations,
             "emotion_timeline": emotion,
+            "message_style": message_style,
+            "recent_status": recent_status,
+            "topic_role": topic_role,
+            "highlight_quotes": highlight_quotes,
+            "signature_emoji": signature_emoji,
         },
     }
 
@@ -357,6 +378,17 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         chat.messages, wxid, sender_name, chat.get_sender_name, chat.get_name_by_wxid
     )
     stats_summary = format_stats_for_ai(activity, language, social_relations, [])
+
+    # v0.6.4: 如果 AI emoji 为空，用 Python 根据实际数据自动选择（兜底）
+    if not portrait_data.get("emoji_style"):
+        from services.pipelines import _auto_select_emoji
+        portrait_data["emoji_style"] = _auto_select_emoji(
+            top_emojis=language.get("top_emojis", []),
+            peak_hour=activity.get("peak_hour", 12),
+            avg_msg_len=language.get("avg_msg_len", 0),
+            avg_daily=activity.get("avg_daily_msgs", 0),
+        )
+        logger.info(f"{sender_name}: AI emoji 未匹配，Python 自动选择 {portrait_data['emoji_style']}")
 
     # ---- Step 3: 深度画像 Pipeline（情绪/语言洞察/月度趋势） ----
     if task:

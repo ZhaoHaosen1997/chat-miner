@@ -9,7 +9,7 @@ import {
   ArrowLeft, Loader2, Sparkles, RefreshCw, User,
   MessageSquare, Clock, Tag, TrendingUp,
   ChevronRight, Hash, Smile, BarChart3, Users2,
-  Search, MessageCircle,
+  Search, MessageCircle, Activity, Zap, Quote,
 } from 'lucide-vue-next'
 
 const props = defineProps({ memberId: String })
@@ -243,7 +243,14 @@ const currentVersion = computed(() => {
           </div>
         </div>
 
-        <div v-if="portrait.portrait?.signature_phrase" class="card p-4">
+        <div v-if="portrait.portrait?.signature_phrases?.length" class="card p-4">
+          <div class="text-xs text-slate-400 mb-1">口头禅</div>
+          <div class="flex gap-2 flex-wrap">
+            <span v-for="(ph, i) in portrait.portrait.signature_phrases" :key="i"
+                  class="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-full text-sm italic">"{{ ph }}"</span>
+          </div>
+        </div>
+        <div v-else-if="portrait.portrait?.signature_phrase" class="card p-4">
           <div class="text-xs text-slate-400 mb-1">口头禅</div>
           <div class="text-sm text-slate-600 italic">"{{ portrait.portrait.signature_phrase }}"</div>
         </div>
@@ -280,10 +287,77 @@ const currentVersion = computed(() => {
           </div>
         </div>
 
+        <!-- v0.6.4 最近状态 -->
+        <div v-if="stats?.recent_status?.recent_msg_count > 0" class="card p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
+          <div class="text-xs text-emerald-400 mb-1 flex items-center gap-1">
+            <Activity class="w-3 h-3" /> 最近30天状态
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-lg">{{ stats.recent_status.active_trend }}</span>
+            <div>
+              <p class="text-sm font-medium text-slate-700">{{ stats.recent_status.trend_label }}</p>
+              <p class="text-xs text-slate-500 mt-0.5">
+                发言 {{ stats.recent_status.recent_msg_count }} 条 · 活跃 {{ stats.recent_status.recent_days_active }} 天
+                <span v-if="stats.recent_status.recent_mood"> · 情绪偏<span :title="stats.recent_status.recent_mood">{{ stats.recent_status.recent_mood_emoji }} {{ stats.recent_status.recent_mood }}</span></span>
+              </p>
+              <div v-if="stats.recent_status.recent_topics?.length" class="flex gap-1 mt-1 flex-wrap">
+                <span v-for="t in stats.recent_status.recent_topics" :key="t"
+                      class="px-1.5 py-0.5 bg-white/60 text-emerald-600 rounded text-[11px]">{{ t }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- v0.6.4 消息风格 + 话题角色 + 标志性表情 -->
+        <div class="grid grid-cols-2 gap-3">
+          <div v-if="stats?.message_style" class="card p-4">
+            <div class="text-xs text-slate-400 mb-1 flex items-center gap-1">
+              <MessageSquare class="w-3 h-3" /> 消息风格
+            </div>
+            <div class="text-sm font-medium text-slate-700">{{ stats.message_style.style_label }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ stats.message_style.emoji_style_label }} · {{ stats.message_style.reply_style }}</div>
+          </div>
+          <div v-if="stats?.topic_role?.role_label" class="card p-4">
+            <div class="text-xs text-slate-400 mb-1 flex items-center gap-1">
+              <Zap class="w-3 h-3" /> 话题角色
+            </div>
+            <div class="text-sm font-medium text-slate-700">{{ stats.topic_role.role_label }}</div>
+            <div class="text-xs text-slate-400 mt-1">
+              话题发起率 {{ (stats.topic_role.topic_initiation_rate * 100).toFixed(0) }}%
+            </div>
+          </div>
+        </div>
+
+        <!-- v0.6.4 个人标志性表情 -->
+        <div v-if="stats?.signature_emoji" class="card p-4">
+          <div class="text-xs text-slate-400 mb-1 flex items-center gap-1">
+            <Smile class="w-3 h-3" /> 标志性表情
+          </div>
+          <span class="text-2xl">{{ stats.signature_emoji }}</span>
+          <span class="text-xs text-slate-400 ml-2">—— 这个人最常用的表情</span>
+        </div>
+
+        <!-- v0.6.4 高光语录 -->
+        <div v-if="stats?.highlight_quotes?.length" class="card p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border-yellow-100">
+          <div class="text-xs text-yellow-500 mb-2 flex items-center gap-1">
+            <Quote class="w-3 h-3" /> 高光语录
+          </div>
+          <div class="space-y-2">
+            <div v-for="(q, i) in stats.highlight_quotes" :key="i"
+                 class="bg-white/60 rounded-lg px-3 py-2">
+              <p class="text-sm text-slate-600 italic">"{{ q.content }}"</p>
+              <div class="flex items-center justify-between mt-1">
+                <span class="text-[10px] text-slate-400">{{ q.date }}</span>
+                <span v-if="q.comment" class="text-[10px] text-amber-500">{{ q.comment }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 情绪时间线 -->
         <div v-if="stats?.emotion_timeline?.length" class="card p-4">
           <h4 class="text-sm font-medium text-slate-600 mb-3 flex items-center gap-1.5">
-            <TrendingUp class="w-3.5 h-3.5" /> 每日情绪变化
+            <TrendingUp class="w-3.5 h-3.5" /> 个人情绪轨迹
           </h4>
           <div class="flex flex-wrap gap-[2px]">
             <span
