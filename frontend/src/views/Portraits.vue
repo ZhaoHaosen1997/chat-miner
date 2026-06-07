@@ -38,7 +38,7 @@ async function refreshOne(memberId) {
   if (refreshing.value === memberId || activeTaskId.value) return
   refreshing.value = memberId
   try {
-    const result = await analyzePortrait(currentGroup.value.id, memberId, 10)
+    const result = await analyzePortrait(currentGroup.value.id, memberId)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }

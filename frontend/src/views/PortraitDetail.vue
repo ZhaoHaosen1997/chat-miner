@@ -62,7 +62,7 @@ async function doAnalyze() {
   if (analyzing.value || activeTaskId.value) return
   analyzing.value = true
   try {
-    const result = await analyzePortrait(currentGroup.value.id, props.memberId, hasPortrait.value ? 10 : 0)
+    const result = await analyzePortrait(currentGroup.value.id, props.memberId)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -183,7 +183,7 @@ const currentVersion = computed(() => {
               ]"
             >
               <RefreshCw :class="['w-3.5 h-3.5', analyzing && 'animate-spin']" />
-              {{ analyzing ? '分析中...' : hasPortrait ? '增量刷新(10天)' : '生成画像' }}
+              {{ analyzing ? '分析中...' : hasPortrait ? '刷新画像' : '生成画像' }}
             </button>
           </div>
         </div>
