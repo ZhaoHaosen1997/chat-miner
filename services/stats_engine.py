@@ -939,3 +939,69 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
             })
 
     return quotes
+
+
+def detect_bursting_keywords(messages: list[dict],
+                              prev_messages: list[dict],
+                              member_names: set[str] = None,
+                              min_growth: float = 2.0,
+                              min_count: int = 10) -> list[dict]:
+    """检测词频突变（新梗发现）
+
+    对比本月与上月的词频，找出增长显著的词。
+
+    Args:
+        messages: 本月消息列表
+        prev_messages: 上月消息列表
+        member_names: 群成员名字集合（用于构建停用词）
+        min_growth: 最小增长率（默认 2.0 = 200%）
+        min_count: 本月最少出现次数（避免低频噪音）
+
+    Returns:
+        [{word, this_count, prev_count, growth_rate}] 按增长率降序，最多 15 个
+    """
+    from collections import Counter
+
+    if member_names is None:
+        member_names = set()
+    dynamic_stop = _build_dynamic_stop_words(member_names)
+
+    def _extract_words(msgs: list[dict]) -> Counter:
+        counter = Counter()
+        for m in msgs:
+            content = strip_mentions((m.get("content") or "").strip(), member_names)
+            clean = WECHAT_EMOJI_PATTERN.sub(
+                lambda m2: '' if m2.group(0)[1:-1] in _META_TOKENS else m2.group(0)[1:-1],
+                content
+            )
+            chunks = re.findall(r'[一-鿿]{2,4}', clean)
+            for chunk in chunks:
+                if chunk not in dynamic_stop and len(chunk) >= 2:
+                    counter[chunk] += 1
+        return counter
+
+    this_words = _extract_words(messages)
+    prev_words = _extract_words(prev_messages)
+
+    bursting = []
+    for word, this_count in this_words.items():
+        if this_count < min_count:
+            continue
+        prev_count = prev_words.get(word, 0)
+        if prev_count == 0:
+            if this_count >= min_count * 2:
+                growth = float('inf')
+                bursting.append({
+                    "word": word, "this_count": this_count,
+                    "prev_count": 0, "growth_rate": growth,
+                })
+        else:
+            growth = this_count / prev_count
+            if growth >= min_growth:
+                bursting.append({
+                    "word": word, "this_count": this_count,
+                    "prev_count": prev_count, "growth_rate": round(growth, 1),
+                })
+
+    bursting.sort(key=lambda x: x["growth_rate"], reverse=True)
+    return bursting[:15]

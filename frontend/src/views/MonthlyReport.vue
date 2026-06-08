@@ -2,7 +2,7 @@
 import { ref, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMonthlyReport, generateMonthly, getPeriods } from '../api/index.js'
-import { ArrowLeft, ArrowRight, Sparkles, Loader2, Hash, TrendingUp, Calendar, MessageSquare, Users } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Sparkles, Loader2, Hash, TrendingUp, Calendar, MessageSquare, Users, Brain, GitBranch, Telescope, Activity, Film } from 'lucide-vue-next'
 
 const props = defineProps({ monthId: String })
 const router = useRouter()
@@ -126,17 +126,84 @@ function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
         </div>
       </div>
 
+      <!-- v0.7.2: 群聊人格鉴定 — 醒目全宽 -->
+      <div v-if="report.group_personality?.type_label" class="rounded-2xl p-6 mb-6 text-white text-center shadow-lg" style="background: linear-gradient(135deg, #7c3aed, #a855f7, #6366f1)">
+        <div class="flex items-center justify-center gap-2 mb-3">
+          <Brain class="w-5 h-5 text-white/80" />
+          <span class="text-xs font-medium text-white/80 uppercase tracking-wider">群聊人格鉴定</span>
+        </div>
+        <p class="text-2xl font-bold mb-2">{{ report.group_personality.type_label }}</p>
+        <p class="text-sm text-white/80 max-w-lg mx-auto leading-relaxed">{{ report.group_personality.type_explanation }}</p>
+        <div v-if="report.group_personality.core_traits?.length" class="flex justify-center gap-2 mt-3">
+          <span v-for="t in report.group_personality.core_traits" :key="t"
+                class="px-3 py-1 bg-white/20 rounded-full text-xs font-medium">{{ t }}</span>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 space-y-6">
-          <!-- 月度综述 -->
-          <div v-if="report.overview" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
+          <!-- v0.7.2: 话题演变 -->
+          <div v-if="report.topic_evolution" class="card p-5">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <GitBranch class="w-4 h-4 text-indigo-400" /> 话题演变图鉴
+            </h3>
+            <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{{ report.topic_evolution }}</p>
+          </div>
+
+          <!-- v0.7.2: 梗文化考古 -->
+          <div v-if="report.meme_archaeology" class="card p-5 bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-100">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <Telescope class="w-4 h-4 text-amber-500" /> 梗文化考古
+            </h3>
+            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.meme_archaeology }}</p>
+          </div>
+
+          <!-- v0.7.2: 社群健康度 -->
+          <div v-if="report.community_health" class="card p-5">
+            <h3 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+              <Activity class="w-4 h-4 text-emerald-400" /> 社群健康度报告
+            </h3>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="p-3 rounded-xl bg-slate-50 text-center">
+                <div class="text-2xl mb-1">{{ '🔥'.repeat(report.community_health.active_score || 0) }}</div>
+                <div class="text-xs font-medium text-slate-600">活跃指数</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.active_comment }}</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 text-center">
+                <div class="text-2xl mb-1">{{ '💡'.repeat(report.community_health.density_score || 0) }}</div>
+                <div class="text-xs font-medium text-slate-600">信息密度</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.density_comment }}</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 text-center">
+                <div class="text-2xl mb-1">{{ '☮️'.repeat(report.community_health.harmony_score || 0) }}</div>
+                <div class="text-xs font-medium text-slate-600">和谐指数</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.harmony_comment }}</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 text-center">
+                <div class="text-2xl mb-1">{{ '🦉'.repeat(report.community_health.nightowl_score || 0) }}</div>
+                <div class="text-xs font-medium text-slate-600">夜猫子指数</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.nightowl_comment }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- v0.7.2: 电影预告片 -->
+          <div v-if="report.next_month_trailer" class="card p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0f172a, #1e293b)">
+            <h3 class="font-semibold mb-2 flex items-center gap-2 text-amber-400">
+              <Film class="w-4 h-4" /> 下月预告
+            </h3>
+            <p class="text-sm text-slate-200 leading-relaxed italic">"{{ report.next_month_trailer }}"</p>
+          </div>
+
+          <!-- 月度综述（旧版兼容） -->
+          <div v-if="report.overview && !report.topic_evolution" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-indigo-400" /> 月度综述
             </h3>
             <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.overview }}</p>
           </div>
 
-          <!-- 社群氛围诊断 -->
+          <!-- 社群氛围诊断（旧版兼容） -->
           <div v-if="report.atmosphere_diagnosis" class="card p-5">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <TrendingUp class="w-4 h-4 text-purple-400" /> 社群氛围诊断
@@ -144,7 +211,7 @@ function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
             <p class="text-sm text-slate-600 leading-relaxed">{{ report.atmosphere_diagnosis }}</p>
           </div>
 
-          <!-- 群友聚光灯 -->
+          <!-- 群友聚光灯（旧版兼容） -->
           <div v-if="report.member_spotlight" class="card p-5 bg-gradient-to-r from-amber-50 to-orange-50 border-amber-100">
             <h3 class="font-semibold text-slate-700 mb-2 flex items-center gap-2">
               <Users class="w-4 h-4 text-amber-400" /> 群友聚光灯
@@ -152,15 +219,41 @@ function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
             <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.member_spotlight }}</p>
           </div>
 
-          <!-- 下月展望 -->
-          <div v-if="report.next_month_preview" class="card p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
+          <!-- 下月展望（旧版兼容） -->
+          <div v-if="report.next_month_preview && !report.next_month_trailer" class="card p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
             <p class="text-sm text-emerald-700 font-medium">🔮 {{ report.next_month_preview }}</p>
           </div>
         </div>
 
         <!-- 侧栏 -->
         <div class="space-y-4">
-          <!-- 热门话题 -->
+          <!-- v0.7.2: 发言排行 -->
+          <div v-if="report.top_speakers?.length" class="card p-4">
+            <h3 class="font-semibold text-slate-700 mb-2 text-sm flex items-center gap-1.5">
+              <MessageSquare class="w-3.5 h-3.5 text-indigo-400" /> 发言排行
+            </h3>
+            <div class="space-y-1.5">
+              <div v-for="(s, i) in report.top_speakers.slice(0, 5)" :key="i"
+                   class="flex items-center justify-between text-xs">
+                <span class="text-slate-600">{{ s.alias }}</span>
+                <span class="font-medium text-slate-500">{{ s.count }}条</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- v0.7.2: 其他统计 -->
+          <div v-if="report.night_owls?.length" class="card p-4 bg-indigo-50/30 border-indigo-100">
+            <div class="text-xs text-slate-400 mb-1">🦉 深夜守群人</div>
+            <div v-for="(n, i) in report.night_owls.slice(0, 3)" :key="i"
+                 class="text-xs text-slate-600">{{ n.alias }} · {{ n.peak }}</div>
+          </div>
+          <div v-if="report.emoji_kings?.length" class="card p-4">
+            <div class="text-xs text-slate-400 mb-1">😂 表情包爱好者</div>
+            <div v-for="(e, i) in report.emoji_kings.slice(0, 3)" :key="i"
+                 class="text-xs text-slate-600">{{ e.alias }} {{ (e.emojis || []).join(' ') }}</div>
+          </div>
+
+          <!-- 热门话题（旧版兼容） -->
           <div v-if="report.top_topics?.length" class="card p-4">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm">
               <Hash class="w-3.5 h-3.5 text-indigo-400" /> 本月热议 TOP 5

@@ -632,8 +632,153 @@ MONTHLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本月（{dat
   "next_month_preview": "下月展望（40-60字）"
 }}"""
 
+MONTHLY_SYSTEM_PROMPT = """你是一个群聊分析师，负责写群聊月报。风格要求：
+- 深刻有洞察，但也轻松有趣
+- 能发现月度趋势和社群变迁
+- 不要套话、不要模板化
+- 用中文，长度控制在要求范围内"""
 
-def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> str:
+MONTHLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本月（{date_start} ~ {date_end}）的月报。
+
+【基本信息】
+本月有 {day_count} 天有聊天记录，共 {total_messages} 条消息，日均活跃约 {avg_members} 人。
+{weekly_context}
+
+【每日情绪轨迹】
+{mood_lines}
+
+【热门话题 TOP 5】
+{topics_text}
+
+【关键词云】
+{keywords_text}
+
+【上月对比】
+{prev_month_summary}
+
+请用 JSON 格式输出以下内容（勿输出其他内容）：
+{{
+  "overview": "月度综述（250-300字），本月大事记，话题趋势演变",
+  "atmosphere_diagnosis": "社群氛围诊断（100-150字），本月群氛围特征及对比上月的变化",
+  "member_spotlight": "群友聚光灯（100-150字），2-3位本月最值得关注的成员及原因",
+  "next_month_preview": "下月展望（40-60字）"
+}}"""
+
+# -- v0.7.2 新版月报 prompt --
+MONTHLY_SYSTEM_PROMPT_V2 = """你是一个人类学家+社群分析师+电影预告片编剧的混合体。
+
+你的任务：
+1. 像人类学家研究部落一样，给这个群做一个"群格鉴定"
+2. 像财经分析师一样，追踪本月话题的涨跌趋势
+3. 像考古学家一样，发现新诞生的内部梗
+4. 像影评人一样，用电影预告片的语气写下月展望
+
+风格要求：
+- 深刻、有趣、有洞察
+- 群友名字已被替换为代号，不要质疑代号的含义
+- 用中文，控制各段落长度"""
+
+MONTHLY_USER_PROMPT_V2 = """来看看这群人这个月都发生了些什么——
+
+【周期】{date_start} ~ {date_end}，{day_count} 天有聊天，共 {total_messages} 条消息，{active_members} 人参与
+
+【本月群聊数据画像】
+- 发言 TOP 5：{top_speakers}
+- 深夜活跃分子：{night_owls}
+- 潜水观察名单：{lurkers}
+- 表情包爱好者：{emoji_kings}
+
+【每周话题快照】（用于分析话题演变）
+{weekly_snapshots}
+
+【词频突变检测】（可能是新梗！）
+{bursting_words}
+
+【本月聊天精华】（匿名化采样）
+{sampled_chat}
+
+【上月对比摘要】
+{prev_month_summary}
+
+请用 JSON 格式输出以下内容（勿输出其他内容）：
+{{
+  "group_personality": {{
+    "type_label": "群聊人格类型标签（8字内），模仿MBTI风格，如'INTJ-A 技术辩论型'",
+    "type_explanation": "类型解读（100-150字），解释为什么是这个类型",
+    "core_traits": ["特质1", "特质2", "特质3"]
+  }},
+  "topic_evolution": "月度话题演变（150-200字）：分析本月话题从月初到月末如何演变，发现话题谱系",
+  "meme_archaeology": "梗文化考古（100-150字）：根据词频突变数据，推断本月新诞生的内部梗及其起源",
+  "community_health": {{
+    "active_score": 3,
+    "density_score": 3,
+    "harmony_score": 4,
+    "nightowl_score": 2,
+    "active_comment": "活跃指数评语（15字内）",
+    "density_comment": "信息密度评语（15字内）",
+    "harmony_comment": "和谐指数评语（15字内）",
+    "nightowl_comment": "夜猫子指数评语（15字内）"
+  }},
+  "next_month_trailer": "下月预告（60-80字）：用电影预告片风格写，要有片名。示例：'即将上映：《六月·deadline的复仇》。主演：全体群友。预告：大量救命、绷不住了、终于上线了即将播出。敬请期待。'",
+  "overview": "月度综述（250-300字），本月大事记",
+  "atmosphere_diagnosis": "社群氛围诊断（100-150字）",
+  "member_spotlight": "群友聚光灯（100-150字），2-3位本月最值得关注的成员"
+}}
+
+注意：community_health 四个分数是 1-5 的整数。topic_evolution 要结合每周快照分析变化。meme_archaeology 基于词频突变数据，不要凭空编造。"""
+
+
+def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
+                              prev_month_summary: str, weekly_context: str,
+                              bursting_words: str) -> str:
+    """构建 v0.7.2 新版月报 prompt"""
+    stats = raw_data.get("stats", {})
+    sampled = raw_data.get("sampled_msgs", [])
+
+    top_speakers = ", ".join(
+        f"{m['alias']}({m['count']}条)" for m in stats.get("top_speakers", [])[:5]
+    ) or "暂无数据"
+    night_owls = ", ".join(
+        f"{m['alias']}({m['peak']})" for m in stats.get("night_owls", [])[:3]
+    ) or "暂无"
+    lurkers = ", ".join(
+        f"{m['alias']}({m['days']}天{m['msgs']}条)" for m in stats.get("lurkers", [])[:3]
+    ) or "暂无"
+    emoji_kings = ", ".join(
+        f"{m['alias']}({' '.join(m['emojis'][:3])})" for m in stats.get("emoji_kings", [])[:3]
+    ) or "暂无"
+
+    # 按天聚合聊天精华（月报每天限5条控制上下文）
+    chat_parts = []
+    for day in sampled:
+        highlights = day.get("highlights", [])
+        if not highlights:
+            continue
+        lines = [f"\n[{day['date']} ({day['count']}条消息)]"]
+        for h in highlights[:5]:
+            lines.append(f"{h.get('speaker','?')} ({h.get('time','')}): {h.get('content','')}")
+        chat_parts.append("\n".join(lines))
+    sampled_chat = "\n".join(chat_parts) if chat_parts else "暂无聊天样本"
+
+    return MONTHLY_USER_PROMPT_V2.format(
+        date_start=date_start,
+        date_end=date_end,
+        day_count=stats.get("active_days", 0),
+        total_messages=stats.get("total_messages", 0),
+        active_members=stats.get("active_members", 0),
+        top_speakers=top_speakers,
+        night_owls=night_owls,
+        lurkers=lurkers,
+        emoji_kings=emoji_kings,
+        weekly_snapshots=weekly_context,
+        bursting_words=bursting_words,
+        sampled_chat=sampled_chat,
+        prev_month_summary=prev_month_summary,
+    )
+
+
+def _build_monthly_prompt(aggregated: dict, date_start: str, date_end: str,
+                          prev_month_summary: str, weekly_context: str) -> str:
     """构建 v0.7.2 新版周报 prompt（基于原始数据+匿名化采样）"""
     stats = raw_data.get("stats", {})
     sampled = raw_data.get("sampled_msgs", [])
@@ -752,10 +897,12 @@ def _build_monthly_prompt(aggregated: dict, date_start: str, date_end: str,
 
 async def _ai_generate(system_prompt: str, user_prompt: str,
                        model: str = "", json_mode: bool = True,
-                       temperature: float = 0.8, max_tokens: int = 4096) -> dict:
+                       temperature: float = 0.8, max_tokens: int = 4096,
+                       thinking: bool = False) -> dict:
     """调用 DeepSeek V4 Flash 生成，失败时降级到本地 Ollama
 
     v0.7.2: 默认 temperature 0.8（创意输出），max_tokens 4096。
+    月报开启 thinking=True 获得更深推理。
     """
     # 优先用 DeepSeek V4 Flash
     result = await call_deepseek_chat(
@@ -764,6 +911,7 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
         temperature=temperature,
         json_mode=json_mode,
         max_tokens=max_tokens,
+        thinking=thinking,
     )
     if result["success"] and result["data"]:
         return result
@@ -917,7 +1065,7 @@ async def generate_weekly_report(
     if use_new_pipeline:
         # 新版 prompt
         if task:
-            task.update("inference", "DeepSeek V4 Flash 生成周报（新管道）...")
+            task.update("inference", "DeepSeek 生成周报中...")
 
         user_prompt = _build_weekly_prompt_v2(raw_data, date_start, date_end)
         ai_result = await _ai_generate(
@@ -984,7 +1132,7 @@ async def generate_weekly_report(
         aggregated = _aggregate_daily_reports(group_id, analyzed_week_dates)
 
         if task:
-            task.update("inference", "DeepSeek 生成周报中（降级模式）...")
+            task.update("inference", "DeepSeek 生成周报中...")
 
         user_prompt = _build_weekly_prompt(aggregated, date_start, date_end)
         ai_result = await _ai_generate(WEEKLY_SYSTEM_PROMPT, user_prompt, json_mode=True)
@@ -1078,31 +1226,29 @@ async def generate_monthly_report(
     year, month = int(parts[0]), int(parts[1])
     date_start, date_end = month_dates(year, month)
 
-    # 收集该月所有已分析的日期
+    # 收集该月所有日期
+    from routers.groups import get_chat_cache
+    chat = get_chat_cache(group_id)
+    all_dates = set(chat.all_dates()) if chat else set()
     analyzed_dates = get_analyzed_dates(group_id)
+
     month_dates_list = []
     sd = datetime.strptime(date_start, "%Y-%m-%d")
     ed = datetime.strptime(date_end, "%Y-%m-%d")
     d = sd
     while d <= ed:
         ds = d.strftime("%Y-%m-%d")
-        if ds in analyzed_dates:
+        if ds in all_dates:
             month_dates_list.append(ds)
         d += timedelta(days=1)
 
     if len(month_dates_list) < 10:
         return {
             "success": False, "data": None,
-            "error": f"该月仅有 {len(month_dates_list)} 天日报数据（最少需要 10 天）",
+            "error": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 10 天）",
         }
 
-    if task:
-        task.update("inference", f"聚合 {len(month_dates_list)} 天日报数据...")
-
-    # Python 聚合
-    aggregated = _aggregate_daily_reports(group_id, month_dates_list)
-
-    # 收集该月内的周报
+    # 收集该月内的周报摘要
     weekly_context = ""
     week_keys = set()
     for ds in month_dates_list:
@@ -1114,11 +1260,12 @@ async def generate_monthly_report(
         if wr:
             try:
                 wrj = json.loads(wr["report_json"])
-                weekly_parts.append(f"第{wk.split('-W')[1]}周: {wrj.get('overview', '')[:80]}")
+                overview = wrj.get('week_headline', '') or wrj.get('overview', '')
+                weekly_parts.append(f"第{wk.split('-W')[1]}周: {overview[:80]}")
             except (json.JSONDecodeError, TypeError):
                 pass
     if weekly_parts:
-        weekly_context = "【已有周报摘要】\n" + "\n".join(weekly_parts)
+        weekly_context = "\n".join(weekly_parts)
 
     # 上月对比摘要
     prev_month_summary = "暂无上月数据"
@@ -1138,54 +1285,196 @@ async def generate_monthly_report(
         except (json.JSONDecodeError, TypeError):
             pass
 
-    if task:
-        task.update("inference", "DeepSeek 生成月报中...")
+    # ---- v0.7.2 新管道：Python统计 + 匿名化采样 ----
+    use_new_pipeline = False
+    raw_data = {}
+    bursting_words = "暂无词频突变数据"
+    if chat and len(chat.messages) > 0:
+        if task:
+            task.update("inference", f"提取 {len(month_dates_list)} 天原始数据...")
+        raw_data = _extract_period_raw_data(chat, month_dates_list, group_id, samples_per_day=5)
+        total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
+        if total_msgs >= 100:
+            use_new_pipeline = True
+            # 词频突变检测
+            try:
+                # 获取上月消息
+                prev_month_dates = []
+                pd_sd = sd - timedelta(days=28)  # 粗略上月
+                pd_ed = sd - timedelta(days=1)
+                pd = pd_sd
+                while pd <= pd_ed:
+                    pds = pd.strftime("%Y-%m-%d")
+                    if pds in all_dates:
+                        prev_month_dates.append(pds)
+                    pd += timedelta(days=1)
+                prev_msgs = []
+                if prev_month_dates and chat:
+                    for pds in prev_month_dates:
+                        day_msgs = chat.chunk_by_date().get(pds, [])
+                        prev_msgs.extend([m for m in day_msgs
+                                         if m.get("type") in ("文本消息", "引用消息")
+                                         and (m.get("content") or "").strip()])
+                if prev_msgs:
+                    # 收集本月所有文本消息
+                    this_msgs = []
+                    for ds in month_dates_list:
+                        day_msgs = chat.chunk_by_date().get(ds, [])
+                        this_msgs.extend([m for m in day_msgs
+                                         if m.get("type") in ("文本消息", "引用消息")
+                                         and (m.get("content") or "").strip()])
+                    member_name_set = set()
+                    for s in chat.senders:
+                        name = s.get("displayName", "") or s.get("nickname", "")
+                        if name:
+                            member_name_set.add(name)
+                    from services.stats_engine import detect_bursting_keywords
+                    bursting = detect_bursting_keywords(this_msgs, prev_msgs, member_name_set)
+                    if bursting:
+                        bursting_parts = []
+                        for b in bursting[:10]:
+                            rate = f"↑{b['growth_rate']}x" if b['growth_rate'] != float('inf') else "🆕全新"
+                            bursting_parts.append(
+                                f"{b['word']}(本月{b['this_count']}次,上月{b['prev_count']}次,{rate})"
+                            )
+                        bursting_words = "、".join(bursting_parts)
+                        logger.info(f"词频突变检测: {len(bursting)} 个候选词")
+            except Exception as e:
+                logger.warning(f"词频突变检测失败: {e}")
 
-    # AI 生成（月报用 deepseek-reasoner 获得更深推理）
-    user_prompt = _build_monthly_prompt(
-        aggregated, date_start, date_end, prev_month_summary, weekly_context
-    )
-    ai_result = await _ai_generate(
-        MONTHLY_SYSTEM_PROMPT, user_prompt,
-        model=config.DEEPSEEK_REASONER_MODEL,
-        json_mode=True,
-    )
+    if use_new_pipeline:
+        if task:
+            task.update("inference", "DeepSeek 生成月报中...")
 
-    if not ai_result["success"]:
-        return {
-            "success": False, "data": None,
-            "error": f"AI 生成失败: {ai_result.get('error', '未知错误')}",
+        user_prompt = _build_monthly_prompt_v2(
+            raw_data, date_start, date_end, prev_month_summary, weekly_context, bursting_words
+        )
+        ai_result = await _ai_generate(
+            MONTHLY_SYSTEM_PROMPT_V2, user_prompt,
+            temperature=config.MONTHLY_TEMPERATURE,
+            json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_MONTHLY,
+            thinking=True,
+        )
+
+        if not ai_result["success"]:
+            return {
+                "success": False, "data": None,
+                "error": f"AI 生成失败: {ai_result.get('error', '未知错误')}",
+            }
+
+        ai_data = _parse_ai_json(ai_result["data"])
+        stats = raw_data.get("stats", {})
+
+        # 反向映射
+        alias_map = raw_data.get("alias_map", {})
+        if alias_map:
+            reverse_map = {v: k for k, v in alias_map.items()}
+            ai_data = _de_anonymize_ai_output(ai_data, reverse_map)
+            _de_anonymize_stats(stats, reverse_map)
+
+        # 组装新版报告
+        personality = ai_data.get("group_personality", {}) or {}
+        health = ai_data.get("community_health", {}) or {}
+        report = {
+            "period_key": period_key,
+            "date_start": date_start,
+            "date_end": date_end,
+            "day_count": len(month_dates_list),
+            "total_messages": stats.get("total_messages", 0),
+            "active_members_avg": stats.get("active_members", 0),
+            # v0.7.2 新增
+            "group_personality": {
+                "type_label": personality.get("type_label", ""),
+                "type_explanation": personality.get("type_explanation", ""),
+                "core_traits": personality.get("core_traits", []),
+            },
+            "topic_evolution": ai_data.get("topic_evolution", ""),
+            "meme_archaeology": ai_data.get("meme_archaeology", ""),
+            "community_health": {
+                "active_score": health.get("active_score", 3),
+                "density_score": health.get("density_score", 3),
+                "harmony_score": health.get("harmony_score", 4),
+                "nightowl_score": health.get("nightowl_score", 2),
+                "active_comment": health.get("active_comment", ""),
+                "density_comment": health.get("density_comment", ""),
+                "harmony_comment": health.get("harmony_comment", ""),
+                "nightowl_comment": health.get("nightowl_comment", ""),
+            },
+            "next_month_trailer": ai_data.get("next_month_trailer", ""),
+            # 保留兼容
+            "overview": ai_data.get("overview", ""),
+            "atmosphere_diagnosis": ai_data.get("atmosphere_diagnosis", ""),
+            "member_spotlight": ai_data.get("member_spotlight", ""),
+            "next_month_preview": ai_data.get("next_month_trailer", ""),
+            # Python 统计
+            "top_speakers": stats.get("top_speakers", []),
+            "night_owls": stats.get("night_owls", []),
+            "lurkers": stats.get("lurkers", []),
+            "emoji_kings": stats.get("emoji_kings", []),
+            "_version": "0.7.2",
+        }
+    else:
+        # ---- 降级：旧日报聚合管道 ----
+        analyzed_month_dates = [d for d in month_dates_list if d in analyzed_dates]
+        if len(analyzed_month_dates) < 10:
+            return {
+                "success": False, "data": None,
+                "error": f"该月仅有 {len(analyzed_month_dates)} 天日报数据（最少需要 10 天）",
+            }
+
+        if task:
+            task.update("inference", f"聚合 {len(analyzed_month_dates)} 天日报数据（降级）...")
+
+        aggregated = _aggregate_daily_reports(group_id, analyzed_month_dates)
+
+        if task:
+            task.update("inference", "DeepSeek 生成月报中...")
+
+        user_prompt = _build_monthly_prompt(
+            aggregated, date_start, date_end, prev_month_summary, weekly_context
+        )
+        ai_result = await _ai_generate(
+            MONTHLY_SYSTEM_PROMPT, user_prompt,
+            model=config.DEEPSEEK_REASONER_MODEL,
+            json_mode=True,
+        )
+
+        if not ai_result["success"]:
+            return {
+                "success": False, "data": None,
+                "error": f"AI 生成失败: {ai_result.get('error', '未知错误')}",
+            }
+
+        ai_data = _parse_ai_json(ai_result["data"])
+
+        report = {
+            "period_key": period_key,
+            "date_start": date_start,
+            "date_end": date_end,
+            "day_count": len(analyzed_month_dates),
+            "total_messages": aggregated["total_messages"],
+            "active_members_avg": aggregated["active_members_avg"],
+            "overview": ai_data.get("overview", ""),
+            "atmosphere_diagnosis": ai_data.get("atmosphere_diagnosis", ""),
+            "member_spotlight": ai_data.get("member_spotlight", ""),
+            "next_month_preview": ai_data.get("next_month_preview", ""),
+            "top_topics": aggregated["top_topics"],
+            "top_keywords": aggregated["top_keywords"],
+            "mood_timeline": aggregated["mood_timeline"],
+            "highlight_quotes": aggregated["highlight_quotes"],
+            "hottest_day": aggregated["hottest_day"],
+            "coldest_day": aggregated["coldest_day"],
+            "_version": "legacy",
         }
 
-    ai_data = _parse_ai_json(ai_result["data"])
-
-    # 组装最终报告
-    report = {
-        "period_key": period_key,
-        "date_start": date_start,
-        "date_end": date_end,
-        "day_count": len(month_dates_list),
-        "total_messages": aggregated["total_messages"],
-        "active_members_avg": aggregated["active_members_avg"],
-        "overview": ai_data.get("overview", ""),
-        "atmosphere_diagnosis": ai_data.get("atmosphere_diagnosis", ""),
-        "member_spotlight": ai_data.get("member_spotlight", ""),
-        "next_month_preview": ai_data.get("next_month_preview", ""),
-        "top_topics": aggregated["top_topics"],
-        "top_keywords": aggregated["top_keywords"],
-        "mood_timeline": aggregated["mood_timeline"],
-        "highlight_quotes": aggregated["highlight_quotes"],
-        "hottest_day": aggregated["hottest_day"],
-        "coldest_day": aggregated["coldest_day"],
-    }
-
+    # ---- 保存 + 返回 ----
     model_used = ai_result.get("model", config.DEEPSEEK_REASONER_MODEL)
     save_periodic_report(
         group_id=group_id, report_type="monthly", period_key=period_key,
         date_start=date_start, date_end=date_end,
-        day_count=len(month_dates_list),
-        total_messages=aggregated["total_messages"],
-        active_members=aggregated["active_members_avg"],
+        day_count=report.get("day_count", len(month_dates_list)),
+        total_messages=report.get("total_messages", 0),
+        active_members=report.get("active_members_avg", 0),
         report_json=json.dumps(report, ensure_ascii=False),
         model_used=model_used,
     )
