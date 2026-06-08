@@ -514,11 +514,12 @@ async def api_get_weekly(group_id: int, period_key: str):
 
 
 @router.post("/weekly/generate")
-async def api_generate_weekly(group_id: int, period_key: str = ""):
+async def api_generate_weekly(group_id: int, period_key: str = "", force: bool = False):
     """生成周报（异步任务，默认生成最新可用的自然周）
 
     Args:
         period_key: 可选，指定要生成的周（如 '2026-W23'），不传则生成最新可用的周
+        force: 强制重新生成，跳过缓存
     """
     from services.weekly_report import compute_available_periods, generate_weekly_report
 
@@ -546,10 +547,10 @@ async def api_generate_weekly(group_id: int, period_key: str = ""):
     # 创建异步任务
     task = task_manager.create("generate_weekly", group_id,
                                {"period_key": period_key})
-    task.update("pending", f"开始生成周报 {period_key}...")
+    task.update("pending", f"开始{'重新' if force else ''}生成周报 {period_key}...")
 
     async def _run():
-        result = await generate_weekly_report(group_id, period_key, task)
+        result = await generate_weekly_report(group_id, period_key, task, force=force)
         if result["success"]:
             task.update("done", f"周报 {period_key} 生成完成")
             task.finish(success=True)
@@ -601,11 +602,12 @@ async def api_get_monthly(group_id: int, period_key: str):
 
 
 @router.post("/monthly/generate")
-async def api_generate_monthly(group_id: int, period_key: str = ""):
+async def api_generate_monthly(group_id: int, period_key: str = "", force: bool = False):
     """生成月报（异步任务，默认生成最新可用的自然月）
 
     Args:
         period_key: 可选，指定要生成的月（如 '2026-06'），不传则生成最新可用的月
+        force: 强制重新生成，跳过缓存
     """
     from services.weekly_report import compute_available_periods, generate_monthly_report
 
@@ -631,10 +633,10 @@ async def api_generate_monthly(group_id: int, period_key: str = ""):
 
     task = task_manager.create("generate_monthly", group_id,
                                {"period_key": period_key})
-    task.update("pending", f"开始生成月报 {period_key}...")
+    task.update("pending", f"开始{'重新' if force else ''}生成月报 {period_key}...")
 
     async def _run():
-        result = await generate_monthly_report(group_id, period_key, task)
+        result = await generate_monthly_report(group_id, period_key, task, force=force)
         if result["success"]:
             task.update("done", f"月报 {period_key} 生成完成")
             task.finish(success=True)

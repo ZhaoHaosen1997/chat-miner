@@ -34,11 +34,18 @@ class Config:
     GPU_LOCK_MAX_RETRIES = int(os.getenv("GPU_LOCK_MAX_RETRIES", "24"))
 
     # DeepSeek 在线模型（用于周报/月报的深度推理）
+    # v0.7.2: 统一升级为 deepseek-v4-flash，通过 thinking 参数控制推理深度
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
-    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-    DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner")
-    DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "90"))
+    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "deepseek-v4-flash")
+    DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
+    # 周报/月报温度参数（V4 Flash 默认 1.0，降低获得更稳定输出）
+    WEEKLY_TEMPERATURE = float(os.getenv("WEEKLY_TEMPERATURE", "0.8"))
+    MONTHLY_TEMPERATURE = float(os.getenv("MONTHLY_TEMPERATURE", "0.6"))
+    # V4 Flash 最大输出 token（周报/月报内容丰富，需更大输出空间）
+    DEEPSEEK_MAX_TOKENS_WEEKLY = int(os.getenv("DEEPSEEK_MAX_TOKENS_WEEKLY", "4096"))
+    DEEPSEEK_MAX_TOKENS_MONTHLY = int(os.getenv("DEEPSEEK_MAX_TOKENS_MONTHLY", "8192"))
 
     # 画像刷新阈值
     PORTRAIT_REFRESH_DAYS = int(os.getenv("PORTRAIT_REFRESH_DAYS", "7"))

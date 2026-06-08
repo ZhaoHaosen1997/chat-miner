@@ -2,6 +2,8 @@
 群管理 API：列表、创建、上传（新建群）、导入（追加到已有群）、删除
 """
 import json
+import os
+import pickle
 import logging
 import shutil
 from pathlib import Path
@@ -105,6 +107,46 @@ async def api_upload_group(file: UploadFile = File(...)):
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
     except Exception as e:
         raise HTTPException(500, detail=f"文件处理失败: {e}")
+
+    # 检查是否已存在同 wxid 的群 → 不创建重复群，返回已有群
+    # 如需追加新数据，应使用 "导入到已有群" 功能
+    existing_groups = list_groups()
+    existing = next((g for g in existing_groups if g.get("wxid") == chat.group_wxid), None)
+    if existing:
+        logger.info(f"检测到已存在同 wxid 的群: {existing['name']} (id={existing['id']})")
+        existing_path = Path(existing["file_path"]) if existing.get("file_path") else None
+        # 如果已有群的 JSON 文件丢失了（如被误删），用新上传的补上
+        if existing_path and not existing_path.exists():
+            logger.info(f"已有群 JSON 缺失，用新上传文件恢复: {existing_path}")
+            existing_path.parent.mkdir(parents=True, exist_ok=True)
+            # 把新文件移到已有群的数据目录
+            new_dest = existing_path.parent / file_path.name
+            shutil.move(str(file_path), str(new_dest))
+            # 如果目录不同，清理原来的临时目录
+            if group_dir != existing_path.parent:
+                shutil.rmtree(group_dir, ignore_errors=True)
+            # 重新解析（因为路径变了）
+            recovered_chat = ParsedChat(new_dest).load()
+            _chat_cache[existing["id"]] = recovered_chat
+            logger.info(f"JSON 已恢复: {new_dest}, 缓存已更新")
+        else:
+            # 已有群的 JSON 完好，清理新上传的临时文件
+            try:
+                os.remove(file_path)
+                if group_dir != existing_path.parent:
+                    shutil.rmtree(group_dir, ignore_errors=True)
+            except Exception:
+                pass
+        return {
+            "code": 200,
+            "message": f"该群已存在（{existing['name']}）",
+            "data": {
+                "group_id": existing["id"],
+                "name": existing["name"],
+                "display_name": existing.get("display_name", existing["name"]),
+                "duplicate": True,
+            },
+        }
 
     # 写入数据库
     date_start, date_end = chat.get_date_range()
@@ -343,12 +385,21 @@ async def api_delete_group(group_id: int):
     if not group:
         raise HTTPException(404, detail="群不存在")
 
-    # 删除文件
+    # 删除文件（仅当该目录不被其他群共享时）
     if group.get("file_path"):
         file_path = Path(group["file_path"])
         parent_dir = file_path.parent
         if parent_dir.exists():
-            shutil.rmtree(parent_dir, ignore_errors=True)
+            # 检查是否有其他群也引用此目录
+            all_groups = list_groups()
+            other_refs = [g for g in all_groups
+                         if g["id"] != group_id
+                         and g.get("file_path")
+                         and Path(g["file_path"]).parent == parent_dir]
+            if other_refs:
+                logger.warning(f"目录 {parent_dir} 被其他群 ({[g['name'] for g in other_refs]}) 共享，跳过删除")
+            else:
+                shutil.rmtree(parent_dir, ignore_errors=True)
 
     # 删除数据库记录（CASCADE 自动清理关联数据）
     delete_group(group_id)

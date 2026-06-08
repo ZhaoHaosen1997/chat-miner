@@ -37,25 +37,33 @@ async def call_deepseek_chat(
     system_prompt: str,
     user_prompt: str,
     model: str = "",
-    temperature: float = 0.3,
+    temperature: float = 0.8,
     timeout: int = 0,
     json_mode: bool = False,
+    thinking: bool = False,
+    max_tokens: int = 0,
 ) -> dict:
-    """调用 DeepSeek Chat API
+    """调用 DeepSeek V4 Flash API
+
+    v0.7.2: 统一使用 deepseek-v4-flash，通过 thinking 参数控制推理深度。
+    V4 Flash 全模式支持 temperature、json_mode、thinking。
 
     Args:
         system_prompt: 系统提示词
         user_prompt: 用户提示词
-        model: 模型名（默认 deepseek-chat，月报可用 deepseek-reasoner）
-        temperature: 温度参数（0-1，越低越确定）
+        model: 模型名（默认 deepseek-v4-flash）
+        temperature: 温度参数（0-2，V4 Flash 默认 1.0）
         timeout: 超时秒数（默认使用配置值）
-        json_mode: 是否要求 JSON 格式输出（仅 deepseek-chat 支持）
+        json_mode: 是否要求 JSON 格式输出
+        thinking: 是否启用深度推理模式（月报推荐开启）
+        max_tokens: 最大输出 token 数（默认 4096）
 
     Returns:
         {"success": bool, "data": str, "error": str, "model": str, "duration_ms": int}
     """
     model = model or config.DEEPSEEK_MODEL
     timeout = timeout or config.DEEPSEEK_TIMEOUT
+    max_tokens = max_tokens or 4096
 
     if not config.DEEPSEEK_API_KEY:
         return {
@@ -75,15 +83,13 @@ async def call_deepseek_chat(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "top_p": 0.9,
-        "max_tokens": 2048,
+        "top_p": 0.95,
+        "max_tokens": max_tokens,
     }
 
-    # deepseek-reasoner 不支持 temperature 和 json_mode
-    if "reasoner" in model:
-        payload.pop("temperature", None)
-        payload.pop("top_p", None)
-        json_mode = False
+    # V4 Flash thinking 模式：启用深度推理
+    if thinking:
+        payload["thinking"] = {"type": "enabled"}
 
     if json_mode:
         payload["response_format"] = {"type": "json_object"}

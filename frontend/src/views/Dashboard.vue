@@ -35,20 +35,24 @@ const trending = ref(null)
 const showUpload = ref(false)
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
+// 防止快速切群时的竞态条件
+let _loadVersion = 0
+
 // 周报/月报（按需加载，不在 polling 时调用）
 const weeklyPeriods = ref([])
 const monthlyPeriods = ref([])
 const periodsLoading = ref(false)
 const periodsLoaded = ref(false)
-const showPeriods = ref(false)
+const showPeriods = ref(true)   // 默认展开
 const generatingPeriod = ref('')  // 正在生成的 period_key
 
 async function loadAll(silent = false) {
   if (!currentGroup.value) return
   if (!silent) loading.value = true
   const gid = currentGroup.value.id
+  const version = ++_loadVersion
   try {
-    const [s, d, r, p, h, t] = await Promise.all([
+    const results = await Promise.allSettled([
       getGroupStats(gid),
       getDates(gid),
       getRecentReports(gid, 14),
@@ -56,17 +60,22 @@ async function loadAll(silent = false) {
       getTaskHistory(gid, 8),
       getTrending(gid, 7),
     ])
+    if (version !== _loadVersion) return
+    const [s, d, r, p, h, t] = results.map(r => r.status === 'fulfilled' ? r.value : null)
+    // 数组字段失败时保持 []，避免模板中 .length / v-for 报错
     stats.value = s
-    dates.value = d
-    recentReports.value = r
-    portraits.value = p
-    taskHistory.value = h
-    trending.value = t
+    dates.value = Array.isArray(d) ? d : []
+    recentReports.value = Array.isArray(r) ? r : []
+    portraits.value = Array.isArray(p) ? p : []
+    taskHistory.value = Array.isArray(h) ? h : []
+    trending.value = t  // 对象，null 是合法的
   } catch (e) { console.error(e) }
-  finally { loading.value = false }
+  finally {
+    if (version === _loadVersion) loading.value = false
+  }
 }
 
-watch(currentGroup, () => { monthOffset.value = 0; loadAll() }, { immediate: true })
+watch(currentGroup, () => { monthOffset.value = 0; loadAll(); loadPeriods() }, { immediate: true })
 
 // 监听全局任务完成
 watch(activeTaskId, (newVal, oldVal) => {
@@ -244,11 +253,11 @@ function togglePeriods() {
 }
 
 // 生成周报
-async function doGenerateWeekly(periodKey) {
+async function doGenerateWeekly(periodKey, force = false) {
   if (generatingPeriod.value || activeTaskId.value) return
   generatingPeriod.value = periodKey
   try {
-    const result = await generateWeekly(currentGroup.value.id, periodKey)
+    const result = await generateWeekly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -256,11 +265,11 @@ async function doGenerateWeekly(periodKey) {
 }
 
 // 生成月报
-async function doGenerateMonthly(periodKey) {
+async function doGenerateMonthly(periodKey, force = false) {
   if (generatingPeriod.value || activeTaskId.value) return
   generatingPeriod.value = periodKey
   try {
-    const result = await generateMonthly(currentGroup.value.id, periodKey)
+    const result = await generateMonthly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -544,7 +553,15 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                   >
                     <span class="font-mono text-slate-500 w-16 flex-shrink-0">{{ p.period_key }}</span>
                     <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                    <span v-if="p.status === 'generated'" class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded">已生成</span>
+                    <template v-if="p.status === 'generated'">
+                      <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded cursor-pointer" @click.stop="goWeekly(p.period_key)">已生成</span>
+                      <button
+                        @click.stop="doGenerateWeekly(p.period_key, true)"
+                        :disabled="!!generatingPeriod || !!activeTaskId"
+                        class="text-[10px] bg-amber-100 text-amber-600 px-1 rounded hover:bg-amber-200 disabled:opacity-50"
+                        title="重新生成"
+                      >↻</button>
+                    </template>
                     <button
                       v-else-if="p.status === 'ready'"
                       @click.stop="doGenerateWeekly(p.period_key)"
@@ -569,7 +586,15 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                   >
                     <span class="font-mono text-slate-500 w-16 flex-shrink-0">{{ p.period_key }}</span>
                     <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                    <span v-if="p.status === 'generated'" class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded">已生成</span>
+                    <template v-if="p.status === 'generated'">
+                      <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded cursor-pointer" @click.stop="goMonthly(p.period_key)">已生成</span>
+                      <button
+                        @click.stop="doGenerateMonthly(p.period_key, true)"
+                        :disabled="!!generatingPeriod || !!activeTaskId"
+                        class="text-[10px] bg-amber-100 text-amber-600 px-1 rounded hover:bg-amber-200 disabled:opacity-50"
+                        title="重新生成"
+                      >↻</button>
+                    </template>
                     <button
                       v-else-if="p.status === 'ready'"
                       @click.stop="doGenerateMonthly(p.period_key)"

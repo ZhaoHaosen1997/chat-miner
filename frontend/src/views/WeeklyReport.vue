@@ -2,7 +2,7 @@
 import { ref, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWeeklyReport, generateWeekly, getPeriods } from '../api/index.js'
-import { ArrowLeft, ArrowRight, ArrowRightToLine, ArrowLeftToLine, Sparkles, Loader2, Hash, TrendingUp, Quote, Calendar, MessageSquare, Users } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, ArrowRightToLine, ArrowLeftToLine, Sparkles, Loader2, Hash, TrendingUp, Quote, Calendar, MessageSquare, Users, Newspaper, Flame, Trophy, BookOpen } from 'lucide-vue-next'
 
 const props = defineProps({ weekId: String })
 const router = useRouter()
@@ -141,10 +141,63 @@ function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
         </div>
       </div>
 
+      <!-- v0.7.2: 群聊头条 — 醒目全宽展示 -->
+      <div v-if="report.week_headline" class="rounded-2xl p-6 mb-6 text-white text-center shadow-lg" style="background: linear-gradient(135deg, #f43f5e, #d946ef, #f97316)">
+        <div class="flex items-center justify-center gap-2 mb-3">
+          <Newspaper class="w-5 h-5 text-white/80" />
+          <span class="text-xs font-medium text-white/80 uppercase tracking-wider">本周群聊头条</span>
+        </div>
+        <p class="text-lg md:text-xl font-bold leading-snug">{{ report.week_headline }}</p>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 space-y-6">
-          <!-- AI 综述 -->
-          <div v-if="report.overview" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
+          <!-- v0.7.2: AI 锐评 -->
+          <div v-if="report.ai_roast" class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #1e293b, #334155)">
+            <h3 class="font-semibold mb-3 flex items-center gap-2 text-amber-300">
+              <Flame class="w-4 h-4" /> AI 锐评
+            </h3>
+            <p class="text-sm leading-relaxed text-slate-100 whitespace-pre-line">{{ report.ai_roast }}</p>
+          </div>
+
+          <!-- v0.7.2: 本周群聊故事 -->
+          <div v-if="report.week_narrative" class="card p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-100">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <BookOpen class="w-4 h-4 text-blue-400" /> 本周群聊故事
+            </h3>
+            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.week_narrative }}</p>
+          </div>
+
+          <!-- v0.7.2: 本周奖项 -->
+          <div v-if="report.weekly_awards?.length" class="card p-5">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <Trophy class="w-4 h-4 text-amber-400" /> 本周群聊奖项
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div
+                v-for="(award, i) in report.weekly_awards"
+                :key="i"
+                class="p-3 rounded-xl border transition-all hover:shadow-sm"
+                :class="[
+                  i === 0 ? 'bg-amber-50 border-amber-200' :
+                  i === 1 ? 'bg-slate-50 border-slate-200' :
+                  'bg-slate-50/50 border-slate-100',
+                ]"
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-lg">{{ award.emoji || '🏆' }}</span>
+                  <span class="text-sm font-semibold text-slate-700">{{ award.award_name }}</span>
+                </div>
+                <p class="text-xs text-slate-500">
+                  <span class="font-medium text-indigo-600">{{ award.winner }}</span>
+                  — {{ award.reason }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI 综述（旧版兼容） -->
+          <div v-if="report.overview && !report.week_headline" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-indigo-400" /> 本周综述
             </h3>
@@ -168,7 +221,7 @@ function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
             <p class="text-sm text-slate-600 leading-relaxed">{{ report.mood_rollercoaster }}</p>
           </div>
 
-          <!-- 名场面回顾 -->
+          <!-- 名场面回顾（旧版兼容） -->
           <div v-if="report.highlight_quotes?.length" class="card p-5">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <Quote class="w-4 h-4 text-amber-400" /> 名场面回顾
@@ -202,7 +255,42 @@ function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
 
         <!-- 侧栏 -->
         <div class="space-y-4">
-          <!-- 热门话题 -->
+          <!-- v0.7.2: 发言排行 -->
+          <div v-if="report.top_speakers?.length" class="card p-4">
+            <h3 class="font-semibold text-slate-700 mb-2 text-sm flex items-center gap-1.5">
+              <MessageSquare class="w-3.5 h-3.5 text-indigo-400" /> 发言排行
+            </h3>
+            <div class="space-y-1.5">
+              <div v-for="(s, i) in report.top_speakers.slice(0, 5)" :key="i"
+                   class="flex items-center justify-between text-xs">
+                <span class="text-slate-600">{{ s.alias }}</span>
+                <span class="font-medium text-slate-500">{{ s.count }}条</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- v0.7.2: 深夜活跃 -->
+          <div v-if="report.night_owls?.length" class="card p-4 bg-indigo-50/30 border-indigo-100">
+            <div class="text-xs text-slate-400 mb-1">🦉 深夜守群人</div>
+            <div v-for="(n, i) in report.night_owls.slice(0, 3)" :key="i"
+                 class="text-xs text-slate-600">{{ n.alias }} · {{ n.peak }}</div>
+          </div>
+
+          <!-- v0.7.2: 潜水观察 -->
+          <div v-if="report.lurkers?.length" class="card p-4">
+            <div class="text-xs text-slate-400 mb-1">🤿 潜水观察名单</div>
+            <div v-for="(l, i) in report.lurkers.slice(0, 3)" :key="i"
+                 class="text-xs text-slate-600">{{ l.alias }} · {{ l.days }}天{{ l.msgs }}条</div>
+          </div>
+
+          <!-- v0.7.2: 表情包大户 -->
+          <div v-if="report.emoji_kings?.length" class="card p-4">
+            <div class="text-xs text-slate-400 mb-1">😂 表情包爱好者</div>
+            <div v-for="(e, i) in report.emoji_kings.slice(0, 3)" :key="i"
+                 class="text-xs text-slate-600">{{ e.alias }} {{ (e.emojis || []).join(' ') }}</div>
+          </div>
+
+          <!-- 热门话题（旧版兼容） -->
           <div v-if="report.top_topics?.length" class="card p-4">
             <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm">
               <Hash class="w-3.5 h-3.5 text-indigo-400" /> 话题热度 TOP 5
