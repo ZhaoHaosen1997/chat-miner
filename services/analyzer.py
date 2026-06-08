@@ -211,6 +211,7 @@ async def call_ollama_chat(
         "options": {
             "temperature": 0.1,  # 极低温度让输出更稳定，适合小模型格式化输出
             "top_p": 0.9,
+            "num_predict": 1024,  # 限制输出 token 数，防止 thinking 模型思考过长撑爆上下文
         },
     }
 

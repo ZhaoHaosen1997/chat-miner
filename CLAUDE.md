@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Chat-Miner is a WeChat group chat analysis tool. Users upload exported chat JSON files, and a local Ollama AI model (qwen2.5:14b) generates daily reports and member portraits. DeepSeek API can be configured for weekly/monthly deep reasoning reports. Vue3 SPA frontend served on port 8856.
 
-**Version**: 0.7.0 (deployed to WSL DebianDev)
+**Version**: 0.7.1 (deployed to WSL DebianDev)
 
 ## WSL 生产部署
 

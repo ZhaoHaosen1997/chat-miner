@@ -2,7 +2,7 @@
 
 基于本地 Ollama AI 的微信群聊分析工具。上传导出的聊天记录 JSON，自动生成每日报告、群友画像、情绪追踪和趣味内容。
 
-> **当前版本**: v0.7.0  
+> **当前版本**: v0.7.1  
 > **技术栈**: FastAPI + SQLite + Vue3 + TailwindCSS + Ollama + DeepSeek API
 
 ---
@@ -108,6 +108,85 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8856
 
 ---
 
+## 本地模型选型指南 🧠
+
+Chat-Miner 依赖两个 AI 角色：**本地 Ollama 模型**（日报/画像）和可选的**云端模型**（周报/月报）。选对模型直接影响体验。
+
+### 日报/画像：本地模型要求
+
+本地模型负责从原始聊天中提取结构化信息。经过大量测试，推荐如下：
+
+| 模型 | 参数量 | 最低显存 | 推荐场景 | 备注 |
+|------|--------|----------|----------|------|
+| `qwen2.5:14b` ⭐ | 14B | 8GB | **主力推荐** | 本项目开发测试用，输出稳定 |
+| `qwen2.5:7b` | 7B | 4GB | 显存紧张 | 偶尔输出格式不稳定，需要 retry |
+| `qwen2.5:32b` | 32B | 20GB | 追求质量 | 推理速度慢（5-10s/次），但更准 |
+| `qwen3:14b` | 14B | 8GB | 可尝试 | 注意：qwen3 默认开启 thinking，会大幅增加推理时间 |
+
+> ⚠️ **关键坑**：`qwen3` 系列默认开启思考模式（thinking/CoT），模型会先生成大量思考 token 再输出答案。这会导致：
+> 1. 推理时间翻倍甚至更久
+> 2. 思考内容撑爆上下文窗口（默认 2048 tokens），输出截断
+>
+> 如果一定要用 qwen3，建议在 Ollama 创建自定义 Modelfile 关闭 thinking：
+> ```
+> FROM qwen3:14b
+> PARAMETER num_predict 1024
+> ```
+> 本项目已内置 `num_predict: 1024` 限制输出 token 数，对 qwen3 等 thinking 模型有保护作用。
+
+### 周报/月报：云端模型（可选）
+
+周报/月报需要跨天推理和叙事生成，本地 14B 力不从心。推荐配置 DeepSeek API：
+
+| 模型 | 用途 | 特点 |
+|------|------|------|
+| `deepseek-chat` / `deepseek-v4-flash` | 周报 | 速度快、便宜、中文理解好 |
+| `deepseek-reasoner` | 月报 | 深度推理，但更慢更贵 |
+
+如果不想配置云端 API，周报/月报会自动降级到本地模型，效果会打折扣但不影响使用。
+
+### Ollama 安装与模型拉取
+
+```bash
+# 安装 Ollama（Linux / WSL）
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 拉取推荐模型
+ollama pull qwen2.5:14b
+
+# 验证
+ollama list
+```
+
+### 常见踩坑
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| 推理巨慢（>30s/次） | 模型跑在 CPU 上 | 确认 Ollama 检测到 GPU：`ollama ps` 或用 `nvidia-smi` 看显存占用 |
+| 输出格式错乱/JSON 解析失败 | 模型太小（7B 以下） | 换 14B+ 模型，模型太小跟不住指令 |
+| WSL 中 Ollama 连不上 | WSL 默认 localhost 不通 | 用 Windows 宿主 IP 或 `host.docker.internal` 替代 `localhost` |
+| 显存被其他应用占满 | ComfyUI/Stable Diffusion 等 | 已内置 GPU 分布式锁（依赖 Dashboard 8850 端口），无锁服务时自动降级 |
+| 分析到一半卡住 | 模型被 Ollama 自动卸载 | 已设置 `keep_alive: 300`（5 分钟常驻），模型 14B+ 加上消息多时可能超时 |
+| Windows 安装 Ollama 后 GPU 不可用 | NVIDIA 驱动 / CUDA 版本不匹配 | 更新显卡驱动到最新，Ollama 需要 CUDA 12+ 的驱动 |
+| 第一次加载模型很慢 | 模型需要从磁盘加载到显存 | 正常现象，后续调用速度快。已设置 keep_alive 减少反复加载 |
+
+### 纯 CPU 运行
+
+没有 GPU 也可以用，但需要耐心：
+
+```bash
+# 选一个 7B 以下的模型
+ollama pull qwen2.5:3b
+
+# .env 中修改
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_TIMEOUT=300
+```
+
+> 3B 模型输出质量明显下降，仅适合体验流程，不建议生产使用。
+
+---
+
 ## 输入格式
 
 上传微信聊天记录导出的 JSON 文件，格式如下：
@@ -153,11 +232,13 @@ chat-miner/
 │   ├── portrait.py           # 画像生成服务
 │   ├── social.py             # AI 关系判断
 │   ├── gpu_lock.py           # GPU 分布式锁
+│   ├── online_model.py       # DeepSeek API 在线模型 (v0.7)
+│   ├── weekly_report.py      # 周报/月报生成引擎 (v0.7)
 │   └── task_manager.py       # 异步任务管理 + SSE 进度
 ├── routers/
 │   ├── groups.py             # 群管理 API
 │   ├── portrait.py           # 画像 API
-│   ├── report.py             # 日报 API
+│   ├── report.py             # 日报 API + 周报/月报 API
 │   ├── stats.py              # 统计 API
 │   └── tasks.py              # 任务进度 API
 ├── frontend/
@@ -165,6 +246,8 @@ chat-miner/
 │       ├── views/
 │       │   ├── Dashboard.vue       # 仪表盘
 │       │   ├── DailyReport.vue     # 日报详情
+│       │   ├── WeeklyReport.vue    # 周报详情 (v0.7)
+│       │   ├── MonthlyReport.vue   # 月报详情 (v0.7)
 │       │   ├── Portraits.vue       # 画像卡片列表 + 关系图
 │       │   └── PortraitDetail.vue  # 画像详情
 │       └── components/

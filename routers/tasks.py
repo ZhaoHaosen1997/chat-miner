@@ -53,6 +53,14 @@ async def api_task_stream(task_id: str):
     )
 
 
+@router.get("/active")
+async def api_active_tasks():
+    """获取所有正在运行的任务（用于页面刷新后恢复进度追踪）"""
+    all_tasks = task_manager.list_tasks()
+    active = [t for t in all_tasks if t["status"] not in ("done", "failed", "cancelled")]
+    return {"code": 200, "message": "获取成功", "data": active}
+
+
 @router.delete("/{task_id}")
 async def api_cancel_task(task_id: str):
     """取消正在执行的任务"""

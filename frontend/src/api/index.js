@@ -102,6 +102,9 @@ export const analyzeAllPortraits = async (gid) => {
   return data.data
 }
 
+// --- 任务 ---
+export const getActiveTasks = () => request('/tasks/active')
+
 // --- 统计 ---
 export const getGroupStats = (gid) => request(`/groups/${gid}/stats`)
 export const getGlobalStats = () => request('/stats/global')

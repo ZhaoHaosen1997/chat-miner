@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
 import { MessageCircle, Users, LayoutDashboard, Loader2 } from 'lucide-vue-next'
+import { listGroups } from '../api/index.js'
 
 const props = defineProps({ currentGroup: Object })
 const emit = defineEmits(['group-change'])
@@ -11,6 +12,7 @@ const emit = defineEmits(['group-change'])
 const router = useRouter()
 const route = useRoute()
 const showUpload = ref(false)
+const importLoading = ref(false)
 const activeTaskId = inject('activeTaskId', ref(''))
 
 const navItems = [
@@ -22,10 +24,25 @@ function navTo(path) {
   router.push(path)
 }
 
-function onUploaded(group) {
-  emit('group-change', group)
+async function onUploaded(data) {
   showUpload.value = false
-  router.push('/')
+  // 导入新群：重新加载群列表，选中新导入的群并跳转
+  importLoading.value = true
+  try {
+    const groups = await listGroups()
+    const newGroup = groups.find(g => g.id === data.group_id)
+    if (newGroup) {
+      emit('group-change', newGroup)
+      router.push('/')
+    } else {
+      // 找回 first group
+      if (groups.length > 0) {
+        emit('group-change', groups[0])
+        router.push('/')
+      }
+    }
+  } catch (e) { console.error(e) }
+  finally { importLoading.value = false }
 }
 </script>
 
@@ -89,6 +106,14 @@ function onUploaded(group) {
       <!-- 已选群 -->
       <slot v-else />
     </main>
+
+    <!-- 导入中遮罩 -->
+    <div v-if="importLoading" class="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+      <div class="bg-white rounded-xl shadow-xl px-8 py-6 text-center">
+        <Loader2 class="w-8 h-8 animate-spin text-indigo-400 mx-auto mb-3" />
+        <p class="text-sm text-slate-600">导入完成，加载中...</p>
+      </div>
+    </div>
 
     <!-- 上传弹窗 -->
     <UploadModal

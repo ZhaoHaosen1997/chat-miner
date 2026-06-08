@@ -1,7 +1,8 @@
 <script setup>
-import { ref, provide } from 'vue'
+import { ref, provide, onMounted } from 'vue'
 import Layout from './components/Layout.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
+import { getActiveTasks } from './api/index.js'
 
 const currentGroup = ref(null)
 const refreshKey = ref(0)
@@ -9,6 +10,17 @@ const refreshKey = ref(0)
 // 全局任务管理
 const activeTaskId = ref('')
 const taskHistory = ref([])  // [{taskId, groupName, type, status, finishedAt}]
+
+// 页面刷新后恢复对进行中任务的追踪
+onMounted(async () => {
+  try {
+    const active = await getActiveTasks()
+    if (active.length > 0) {
+      // 取最新一个进行中的任务
+      activeTaskId.value = active[0].task_id
+    }
+  } catch (e) { /* ignore network errors */ }
+})
 
 provide('currentGroup', currentGroup)
 provide('triggerRefresh', () => refreshKey.value++)
