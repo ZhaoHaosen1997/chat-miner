@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
+import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMonthlyReport, generateMonthly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, Hash, TrendingUp, Calendar, MessageSquare, Users, Brain, GitBranch, Telescope, Activity, Film } from 'lucide-vue-next'
@@ -83,6 +83,26 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
+
+// 根据人格类型选择主题色
+const personalityThemes = [
+  { keys: ['辩论','技术','理性','逻辑'], bg: 'linear-gradient(135deg, rgba(30,64,175,0.5), rgba(37,99,235,0.3))', accent: '#60a5fa', label: 'text-blue-200', tag: 'bg-blue-500/20 text-blue-200' },
+  { keys: ['吃瓜','社交','八卦','娱乐'], bg: 'linear-gradient(135deg, rgba(217,119,6,0.5), rgba(245,158,11,0.3))', accent: '#fbbf24', label: 'text-amber-200', tag: 'bg-amber-500/20 text-amber-200' },
+  { keys: ['摸鱼','摆烂','佛系','养生'], bg: 'linear-gradient(135deg, rgba(8,145,178,0.5), rgba(6,182,212,0.3))', accent: '#22d3ee', label: 'text-cyan-200', tag: 'bg-cyan-500/20 text-cyan-200' },
+  { keys: ['沙雕','搞笑','欢乐','段子'], bg: 'linear-gradient(135deg, rgba(217,70,239,0.5), rgba(168,85,247,0.3))', accent: '#c084fc', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
+  { keys: ['内卷','奋斗','努力'], bg: 'linear-gradient(135deg, rgba(220,38,38,0.5), rgba(239,68,68,0.3))', accent: '#f87171', label: 'text-red-200', tag: 'bg-red-500/20 text-red-200' },
+  { keys: ['温馨','治愈','温暖'], bg: 'linear-gradient(135deg, rgba(249,115,22,0.5), rgba(251,146,60,0.3))', accent: '#fb923c', label: 'text-orange-200', tag: 'bg-orange-500/20 text-orange-200' },
+  { keys: ['抽象','离谱','魔幻'], bg: 'linear-gradient(135deg, rgba(124,58,237,0.5), rgba(139,92,246,0.3))', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
+]
+const defaultPersonality = { bg: 'linear-gradient(135deg, rgba(124,58,237,0.4), rgba(99,102,241,0.3))', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' }
+
+const personalityColors = computed(() => {
+  const label = report.value?.group_personality?.type_label || ''
+  for (const theme of personalityThemes) {
+    if (theme.keys.some(k => label.includes(k))) return theme
+  }
+  return defaultPersonality
+})
 </script>
 
 <template>
@@ -113,192 +133,86 @@ function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
       <p class="text-red-400">加载失败：{{ error }}</p>
     </div>
 
-    <template v-else-if="report">
+    <!-- 报告内容 v0.7.3: 电影风深色主题 -->
+    <div v-else-if="report" class="rounded-2xl overflow-hidden" style="background: linear-gradient(180deg, #0f172a 0%, #1e293b 40%, #1a1a2e 100%)">
       <!-- 头部 -->
-      <div class="card p-6 mb-6 text-center">
-        <div class="text-4xl mb-2">📅</div>
-        <h2 class="text-xl font-bold text-slate-800 mb-1">{{ monthLabel }} · 群聊月报</h2>
-        <p class="text-sm text-slate-400 mb-2">{{ report.date_start }} ~ {{ report.date_end }}</p>
-        <div class="flex items-center justify-center gap-4 text-sm text-slate-500">
-          <span>📅 {{ report.day_count }}天有数据</span>
-          <span>💬 {{ report.total_messages?.toLocaleString() }}条消息</span>
-          <span>👥 日均 {{ report.active_members_avg }}人活跃</span>
+      <div class="text-center py-10 px-6">
+        <div class="text-5xl mb-3">🎬</div>
+        <h2 class="text-2xl font-bold text-white mb-1">{{ monthLabel }} · 群聊月报</h2>
+        <p class="text-sm text-slate-400">{{ report.date_start }} ~ {{ report.date_end }}</p>
+        <div class="flex items-center justify-center gap-5 mt-2 text-xs text-slate-500">
+          <span>📅 {{ report.day_count }}天</span>
+          <span>💬 {{ report.total_messages?.toLocaleString() }}条</span>
+          <span>👥 {{ report.active_members_avg }}人</span>
         </div>
       </div>
 
-      <!-- v0.7.2: 群聊人格鉴定 — 醒目全宽 -->
-      <div v-if="report.group_personality?.type_label" class="rounded-2xl p-6 mb-6 text-white text-center shadow-lg" style="background: linear-gradient(135deg, #7c3aed, #a855f7, #6366f1)">
-        <div class="flex items-center justify-center gap-2 mb-3">
-          <Brain class="w-5 h-5 text-white/80" />
-          <span class="text-xs font-medium text-white/80 uppercase tracking-wider">群聊人格鉴定</span>
-        </div>
-        <p class="text-2xl font-bold mb-2">{{ report.group_personality.type_label }}</p>
-        <p class="text-sm text-white/80 max-w-lg mx-auto leading-relaxed">{{ report.group_personality.type_explanation }}</p>
-        <div v-if="report.group_personality.core_traits?.length" class="flex justify-center gap-2 mt-3">
-          <span v-for="t in report.group_personality.core_traits" :key="t"
-                class="px-3 py-1 bg-white/20 rounded-full text-xs font-medium">{{ t }}</span>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 space-y-6">
-          <!-- v0.7.2: 话题演变 -->
-          <div v-if="report.topic_evolution" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <GitBranch class="w-4 h-4 text-indigo-400" /> 话题演变图鉴
-            </h3>
-            <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{{ report.topic_evolution }}</p>
-          </div>
-
-          <!-- v0.7.2: 梗文化考古 -->
-          <div v-if="report.meme_archaeology" class="card p-5 bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-100">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Telescope class="w-4 h-4 text-amber-500" /> 梗文化考古
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.meme_archaeology }}</p>
-          </div>
-
-          <!-- v0.7.2: 社群健康度 -->
-          <div v-if="report.community_health" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
-              <Activity class="w-4 h-4 text-emerald-400" /> 社群健康度报告
-            </h3>
-            <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 rounded-xl bg-slate-50 text-center">
-                <div class="text-2xl mb-1">{{ '🔥'.repeat(report.community_health.active_score || 0) }}</div>
-                <div class="text-xs font-medium text-slate-600">活跃指数</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.active_comment }}</div>
-              </div>
-              <div class="p-3 rounded-xl bg-slate-50 text-center">
-                <div class="text-2xl mb-1">{{ '💡'.repeat(report.community_health.density_score || 0) }}</div>
-                <div class="text-xs font-medium text-slate-600">信息密度</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.density_comment }}</div>
-              </div>
-              <div class="p-3 rounded-xl bg-slate-50 text-center">
-                <div class="text-2xl mb-1">{{ '☮️'.repeat(report.community_health.harmony_score || 0) }}</div>
-                <div class="text-xs font-medium text-slate-600">和谐指数</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.harmony_comment }}</div>
-              </div>
-              <div class="p-3 rounded-xl bg-slate-50 text-center">
-                <div class="text-2xl mb-1">{{ '🦉'.repeat(report.community_health.nightowl_score || 0) }}</div>
-                <div class="text-xs font-medium text-slate-600">夜猫子指数</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">{{ report.community_health.nightowl_comment }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- v0.7.2: 电影预告片 -->
-          <div v-if="report.next_month_trailer" class="card p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0f172a, #1e293b)">
-            <h3 class="font-semibold mb-2 flex items-center gap-2 text-amber-400">
-              <Film class="w-4 h-4" /> 下月预告
-            </h3>
-            <p class="text-sm text-slate-200 leading-relaxed italic">"{{ report.next_month_trailer }}"</p>
-          </div>
-
-          <!-- 月度综述（旧版兼容） -->
-          <div v-if="report.overview && !report.topic_evolution" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Sparkles class="w-4 h-4 text-indigo-400" /> 月度综述
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.overview }}</p>
-          </div>
-
-          <!-- 社群氛围诊断（旧版兼容） -->
-          <div v-if="report.atmosphere_diagnosis" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <TrendingUp class="w-4 h-4 text-purple-400" /> 社群氛围诊断
-            </h3>
-            <p class="text-sm text-slate-600 leading-relaxed">{{ report.atmosphere_diagnosis }}</p>
-          </div>
-
-          <!-- 群友聚光灯（旧版兼容） -->
-          <div v-if="report.member_spotlight" class="card p-5 bg-gradient-to-r from-amber-50 to-orange-50 border-amber-100">
-            <h3 class="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-              <Users class="w-4 h-4 text-amber-400" /> 群友聚光灯
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.member_spotlight }}</p>
-          </div>
-
-          <!-- 下月展望（旧版兼容） -->
-          <div v-if="report.next_month_preview && !report.next_month_trailer" class="card p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
-            <p class="text-sm text-emerald-700 font-medium">🔮 {{ report.next_month_preview }}</p>
+      <div class="px-5 pb-10 space-y-6 max-w-3xl mx-auto">
+        <!-- Hero: 群聊人格鉴定（类型自适应配色） -->
+        <div v-if="report.group_personality?.type_label" class="text-center py-8 px-6 rounded-2xl" :style="{ background: personalityColors.bg }">
+          <p class="text-xs font-medium uppercase tracking-widest mb-4" :class="personalityColors.label">🧬 群聊人格鉴定</p>
+          <p class="text-3xl font-black text-white mb-3">{{ report.group_personality.type_label }}</p>
+          <p class="text-sm text-slate-300 max-w-md mx-auto leading-relaxed mb-4">{{ report.group_personality.type_explanation }}</p>
+          <div v-if="report.group_personality.core_traits?.length" class="flex justify-center gap-2">
+            <span v-for="t in report.group_personality.core_traits" :key="t"
+                  class="px-3 py-1.5 rounded-full text-xs font-medium" :class="personalityColors.tag">{{ t }}</span>
           </div>
         </div>
 
-        <!-- 侧栏 -->
-        <div class="space-y-4">
-          <!-- v0.7.2: 发言排行 -->
-          <div v-if="report.top_speakers?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm flex items-center gap-1.5">
-              <MessageSquare class="w-3.5 h-3.5 text-indigo-400" /> 发言排行
-            </h3>
-            <div class="space-y-1.5">
-              <div v-for="(s, i) in report.top_speakers.slice(0, 5)" :key="i"
-                   class="flex items-center justify-between text-xs">
-                <span class="text-slate-600">{{ s.alias }}</span>
-                <span class="font-medium text-slate-500">{{ s.count }}条</span>
+        <!-- 数据快照 横排 -->
+        <div v-if="report.top_speakers?.length" class="flex flex-wrap justify-center gap-4 text-xs text-slate-400">
+          <span v-if="report.top_speakers?.length">💬 TOP: <span class="text-slate-300">{{ report.top_speakers.slice(0,3).map(s=>s.alias).join('、') }}</span></span>
+          <span v-if="report.night_owls?.length">🦉 {{ report.night_owls.map(n=>n.alias).join('、') }}</span>
+          <span v-if="report.emoji_kings?.length">😂 {{ report.emoji_kings.map(e=>e.alias).join('、') }}</span>
+        </div>
+
+        <!-- 话题演变 + 健康度 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div v-if="report.topic_evolution" class="rounded-2xl p-5 bg-white/5 border border-white/10">
+            <h3 class="font-semibold text-white mb-3 flex items-center gap-2 text-sm"><GitBranch class="w-4 h-4 text-indigo-400" /> 话题演变图鉴</h3>
+            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{{ report.topic_evolution }}</p>
+          </div>
+          <div v-if="report.community_health" class="rounded-2xl p-5 bg-white/5 border border-white/10">
+            <h3 class="font-semibold text-white mb-4 flex items-center gap-2 text-sm"><Activity class="w-4 h-4 text-emerald-400" /> 社群健康度</h3>
+            <div class="grid grid-cols-2 gap-2">
+              <div v-for="item in [
+                {label:'活跃指数', score:report.community_health.active_score, emoji:'🔥', comment:report.community_health.active_comment},
+                {label:'信息密度', score:report.community_health.density_score, emoji:'💡', comment:report.community_health.density_comment},
+                {label:'和谐指数', score:report.community_health.harmony_score, emoji:'☮️', comment:report.community_health.harmony_comment},
+                {label:'夜猫子', score:report.community_health.nightowl_score, emoji:'🦉', comment:report.community_health.nightowl_comment},
+              ]" :key="item.label" class="p-2 rounded-xl bg-white/5 text-center">
+                <div class="text-lg mb-0.5">{{ item.emoji.repeat(item.score || 0) }}</div>
+                <div class="text-[11px] text-slate-400">{{ item.label }}</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">{{ item.comment }}</div>
               </div>
             </div>
           </div>
+        </div>
 
-          <!-- v0.7.2: 其他统计 -->
-          <div v-if="report.night_owls?.length" class="card p-4 bg-indigo-50/30 border-indigo-100">
-            <div class="text-xs text-slate-400 mb-1">🦉 深夜守群人</div>
-            <div v-for="(n, i) in report.night_owls.slice(0, 3)" :key="i"
-                 class="text-xs text-slate-600">{{ n.alias }} · {{ n.peak }}</div>
-          </div>
-          <div v-if="report.emoji_kings?.length" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">😂 表情包爱好者</div>
-            <div v-for="(e, i) in report.emoji_kings.slice(0, 3)" :key="i"
-                 class="text-xs text-slate-600">{{ e.alias }} {{ (e.emojis || []).join(' ') }}</div>
-          </div>
+        <!-- 梗文化考古 -->
+        <div v-if="report.meme_archaeology" class="rounded-2xl p-6 border border-amber-500/20" style="background: linear-gradient(135deg, rgba(217,119,6,0.1), rgba(245,158,11,0.08))">
+          <h3 class="font-semibold text-amber-400 mb-3 flex items-center gap-2 text-sm"><Telescope class="w-4 h-4" /> 梗文化考古</h3>
+          <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{{ report.meme_archaeology }}</p>
+        </div>
 
-          <!-- 热门话题（旧版兼容） -->
-          <div v-if="report.top_topics?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm">
-              <Hash class="w-3.5 h-3.5 text-indigo-400" /> 本月热议 TOP 5
-            </h3>
-            <div class="space-y-2">
-              <div v-for="(t, i) in report.top_topics.slice(0, 5)" :key="i" class="flex items-center gap-2">
-                <span :class="[
-                  'w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0',
-                  i === 0 ? 'bg-red-500 text-white' :
-                  i === 1 ? 'bg-orange-400 text-white' :
-                  i === 2 ? 'bg-amber-400 text-white' :
-                  'bg-slate-200 text-slate-500',
-                ]">{{ i + 1 }}</span>
-                <span class="text-sm text-slate-600 flex-1 truncate">{{ t.text }}</span>
-                <span class="text-xs text-slate-400">{{ t.heat }}</span>
-              </div>
-            </div>
-          </div>
+        <!-- 电影预告片 -->
+        <div v-if="report.next_month_trailer" class="rounded-2xl p-8 text-center border-2 border-dashed border-amber-500/30" style="background: linear-gradient(135deg, rgba(0,0,0,0.4), rgba(30,41,59,0.3))">
+          <p class="text-xs text-amber-400/60 uppercase tracking-widest mb-4">🎬 下月预告</p>
+          <p class="text-lg text-amber-200 font-medium italic leading-relaxed">"{{ report.next_month_trailer }}"</p>
+        </div>
 
-          <!-- 关键词 -->
-          <div v-if="report.top_keywords?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm">关键词</h3>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="kw in report.top_keywords.slice(0, 8)" :key="kw.text"
-                    class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs">{{ kw.text }}</span>
-            </div>
-          </div>
-
-          <!-- 情绪时间线 -->
-          <div v-if="report.mood_timeline?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm">每日情绪</h3>
-            <div class="flex flex-wrap gap-[2px]">
-              <span v-for="e in report.mood_timeline" :key="e.date"
-                    :title="`${e.date} ${e.mood}`"
-                    class="text-sm leading-none cursor-default hover:scale-125 transition-transform"
-              >{{ e.mood_emoji || '💬' }}</span>
-            </div>
-          </div>
-
-          <!-- 最热/最冷 -->
-          <div v-if="report.hottest_day" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">最热闹的一天</div>
-            <div class="text-sm font-medium text-slate-700">{{ report.hottest_day.date }}</div>
-            <div class="text-xs text-slate-400">{{ report.hottest_day.msg_count }}条 · {{ report.hottest_day.mood_emoji }} {{ report.hottest_day.one_line }}</div>
-          </div>
+        <!-- 旧版兼容内容 -->
+        <div v-if="report.overview" class="rounded-2xl p-5 bg-white/5 border border-white/10">
+          <h3 class="font-semibold text-white mb-3 flex items-center gap-2 text-sm"><Sparkles class="w-4 h-4 text-indigo-400" /> 月度综述</h3>
+          <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{{ report.overview }}</p>
+        </div>
+        <div v-if="report.atmosphere_diagnosis" class="rounded-2xl p-5 bg-white/5 border border-white/10">
+          <h3 class="font-semibold text-white mb-3 flex items-center gap-2 text-sm"><TrendingUp class="w-4 h-4 text-purple-400" /> 社群氛围诊断</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">{{ report.atmosphere_diagnosis }}</p>
+        </div>
+        <div v-if="report.member_spotlight" class="rounded-2xl p-5 border border-amber-500/20" style="background: linear-gradient(135deg, rgba(217,119,6,0.1), rgba(245,158,11,0.05))">
+          <h3 class="font-semibold text-amber-400 mb-2 flex items-center gap-2 text-sm"><Users class="w-4 h-4" /> 群友聚光灯</h3>
+          <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{{ report.member_spotlight }}</p>
         </div>
       </div>
 
@@ -315,6 +229,6 @@ function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
         </button>
         <span v-else class="text-sm text-slate-300">已是最新月</span>
       </div>
-    </template>
+    </div>
   </div>
 </template>

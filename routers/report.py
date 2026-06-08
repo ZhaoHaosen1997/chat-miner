@@ -550,13 +550,17 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
     task.update("pending", f"开始{'重新' if force else ''}生成周报 {period_key}...")
 
     async def _run():
-        result = await generate_weekly_report(group_id, period_key, task, force=force)
-        if result["success"]:
-            task.update("done", f"周报 {period_key} 生成完成")
-            task.finish(success=True)
-        else:
-            task.finish(success=False,
-                        error={"type": "weekly_failed", "detail": result.get("error", "")})
+        try:
+            result = await generate_weekly_report(group_id, period_key, task, force=force)
+            if result["success"]:
+                task.update("done", f"周报 {period_key} 生成完成")
+                task.finish(success=True)
+            else:
+                task.finish(success=False,
+                            error={"type": "weekly_failed", "detail": result.get("error", "")})
+        except Exception as e:
+            logger.error(f"周报生成异常: {e}")
+            task.finish(success=False, error={"type": "unknown", "detail": str(e)})
 
     asyncio.create_task(_run())
 
@@ -636,13 +640,17 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
     task.update("pending", f"开始{'重新' if force else ''}生成月报 {period_key}...")
 
     async def _run():
-        result = await generate_monthly_report(group_id, period_key, task, force=force)
-        if result["success"]:
-            task.update("done", f"月报 {period_key} 生成完成")
-            task.finish(success=True)
-        else:
-            task.finish(success=False,
-                        error={"type": "monthly_failed", "detail": result.get("error", "")})
+        try:
+            result = await generate_monthly_report(group_id, period_key, task, force=force)
+            if result["success"]:
+                task.update("done", f"月报 {period_key} 生成完成")
+                task.finish(success=True)
+            else:
+                task.finish(success=False,
+                            error={"type": "monthly_failed", "detail": result.get("error", "")})
+        except Exception as e:
+            logger.error(f"月报生成异常: {e}")
+            task.finish(success=False, error={"type": "unknown", "detail": str(e)})
 
     asyncio.create_task(_run())
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
+import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWeeklyReport, generateWeekly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, ArrowRightToLine, ArrowLeftToLine, Sparkles, Loader2, Hash, TrendingUp, Quote, Calendar, MessageSquare, Users, Newspaper, Flame, Trophy, BookOpen } from 'lucide-vue-next'
@@ -92,6 +92,29 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
+
+// 根据情绪氛围选择头条颜色
+const moodColors = {
+  '欢乐': { bg: 'linear-gradient(135deg, #dc2626, #ea580c, #f59e0b)', badge: 'bg-red-500/20 text-red-200' },
+  '热闹': { bg: 'linear-gradient(135deg, #e11d48, #f43f5e, #fb7185)', badge: 'bg-rose-500/20 text-rose-200' },
+  '沙雕': { bg: 'linear-gradient(135deg, #d946ef, #a855f7, #6366f1)', badge: 'bg-purple-500/20 text-purple-200' },
+  '温馨': { bg: 'linear-gradient(135deg, #f97316, #fb923c, #fbbf24)', badge: 'bg-orange-500/20 text-orange-200' },
+  '吐槽': { bg: 'linear-gradient(135deg, #475569, #334155, #1e293b)', badge: 'bg-slate-500/20 text-slate-200' },
+  '吃瓜': { bg: 'linear-gradient(135deg, #ca8a04, #eab308, #facc15)', badge: 'bg-yellow-500/20 text-yellow-200' },
+  '摸鱼': { bg: 'linear-gradient(135deg, #0891b2, #06b6d4, #22d3ee)', badge: 'bg-cyan-500/20 text-cyan-200' },
+  '伤感': { bg: 'linear-gradient(135deg, #6366f1, #818cf8, #a5b4fc)', badge: 'bg-indigo-500/20 text-indigo-200' },
+  '破防': { bg: 'linear-gradient(135deg, #be123c, #e11d48, #fb7185)', badge: 'bg-rose-600/20 text-rose-200' },
+  '离谱': { bg: 'linear-gradient(135deg, #7c3aed, #8b5cf6, #c084fc)', badge: 'bg-purple-600/20 text-purple-200' },
+  '平淡': { bg: 'linear-gradient(135deg, #334155, #475569, #64748b)', badge: 'bg-slate-600/20 text-slate-200' },
+}
+const defaultMood = { bg: 'linear-gradient(135deg, #dc2626, #ea580c, #f59e0b)', badge: 'bg-red-500/20 text-red-200' }
+
+const headlineColors = computed(() => {
+  if (!report.value?.mood_ranking?.length) return defaultMood
+  // 取出现最多的情绪
+  const top = report.value.mood_ranking[0]
+  return moodColors[top.mood] || defaultMood
+})
 </script>
 
 <template>
@@ -125,228 +148,124 @@ function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
       <p class="text-red-400">加载失败：{{ error }}</p>
     </div>
 
-    <!-- 报告内容 -->
+    <!-- 报告内容 v0.7.3: Bento Grid 杂志布局 -->
     <template v-else-if="report">
       <!-- 头部 -->
-      <div class="card p-6 mb-6 text-center">
-        <div class="text-3xl mb-2">📊</div>
-        <h2 class="text-xl font-bold text-slate-800 mb-1">
-          第 {{ props.weekId }} 周 · 群聊周报
-        </h2>
-        <p class="text-sm text-slate-400 mb-2">{{ report.date_start }} 周一 ~ {{ report.date_end }} 周日</p>
-        <div class="flex items-center justify-center gap-4 text-sm text-slate-500">
-          <span>📅 {{ report.day_count }}天有数据</span>
-          <span>💬 {{ report.total_messages?.toLocaleString() }}条消息</span>
-          <span>👥 日均 {{ report.active_members_avg }}人活跃</span>
+      <div class="text-center mb-8">
+        <div class="text-4xl mb-2">📰</div>
+        <h2 class="text-2xl font-bold text-slate-800 mb-1">群聊周报</h2>
+        <p class="text-sm text-slate-400">{{ report.date_start }} 周一 ~ {{ report.date_end }} 周日</p>
+        <div class="flex items-center justify-center gap-5 mt-2 text-xs text-slate-400">
+          <span>📅 {{ report.day_count }}天</span>
+          <span>💬 {{ report.total_messages?.toLocaleString() }}条</span>
+          <span>👥 {{ report.active_members_avg }}人</span>
         </div>
       </div>
 
-      <!-- v0.7.2: 群聊头条 — 醒目全宽展示 -->
-      <div v-if="report.week_headline" class="rounded-2xl p-6 mb-6 text-white text-center shadow-lg" style="background: linear-gradient(135deg, #f43f5e, #d946ef, #f97316)">
-        <div class="flex items-center justify-center gap-2 mb-3">
-          <Newspaper class="w-5 h-5 text-white/80" />
-          <span class="text-xs font-medium text-white/80 uppercase tracking-wider">本周群聊头条</span>
-        </div>
-        <p class="text-lg md:text-xl font-bold leading-snug">{{ report.week_headline }}</p>
+      <!-- Hero: 群聊头条（情绪自适应配色） -->
+      <div v-if="report.week_headline" class="rounded-2xl p-8 mb-8 text-white text-center shadow-xl" :style="{ background: headlineColors.bg }">
+        <p class="text-xs font-medium text-white/70 uppercase tracking-widest mb-3">📰 本周群聊头条</p>
+        <p class="text-xl md:text-3xl font-black leading-tight">{{ report.week_headline }}</p>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 space-y-6">
-          <!-- v0.7.2: AI 锐评 -->
-          <div v-if="report.ai_roast" class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #1e293b, #334155)">
-            <h3 class="font-semibold mb-3 flex items-center gap-2 text-amber-300">
-              <Flame class="w-4 h-4" /> AI 锐评
-            </h3>
-            <p class="text-sm leading-relaxed text-slate-100 whitespace-pre-line">{{ report.ai_roast }}</p>
-          </div>
-
-          <!-- v0.7.2: 本周群聊故事 -->
-          <div v-if="report.week_narrative" class="card p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-100">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <BookOpen class="w-4 h-4 text-blue-400" /> 本周群聊故事
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.week_narrative }}</p>
-          </div>
-
-          <!-- v0.7.2: 本周奖项 -->
-          <div v-if="report.weekly_awards?.length" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Trophy class="w-4 h-4 text-amber-400" /> 本周群聊奖项
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div
-                v-for="(award, i) in report.weekly_awards"
-                :key="i"
-                class="p-3 rounded-xl border transition-all hover:shadow-sm"
-                :class="[
-                  i === 0 ? 'bg-amber-50 border-amber-200' :
-                  i === 1 ? 'bg-slate-50 border-slate-200' :
-                  'bg-slate-50/50 border-slate-100',
-                ]"
-              >
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-lg">{{ award.emoji || '🏆' }}</span>
-                  <span class="text-sm font-semibold text-slate-700">{{ award.award_name }}</span>
-                </div>
-                <p class="text-xs text-slate-500">
-                  <span class="font-medium text-indigo-600">{{ award.winner }}</span>
-                  — {{ award.reason }}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <!-- AI 综述（旧版兼容） -->
-          <div v-if="report.overview && !report.week_headline" class="card p-5 bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Sparkles class="w-4 h-4 text-indigo-400" /> 本周综述
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.overview }}</p>
-          </div>
-
-          <!-- 情绪过山车 -->
-          <div v-if="report.mood_rollercoaster" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <TrendingUp class="w-4 h-4 text-amber-400" /> 情绪过山车
-            </h3>
-            <!-- 情绪时间线 -->
-            <div v-if="report.mood_timeline?.length" class="flex flex-wrap gap-1 mb-3">
-              <span
-                v-for="e in report.mood_timeline"
-                :key="e.date"
-                :title="`${e.date} ${e.mood}`"
-                class="text-sm cursor-default hover:scale-125 transition-transform"
-              >{{ e.mood_emoji || '💬' }}</span>
-            </div>
-            <p class="text-sm text-slate-600 leading-relaxed">{{ report.mood_rollercoaster }}</p>
-          </div>
-
-          <!-- 名场面回顾（旧版兼容） -->
-          <div v-if="report.highlight_quotes?.length" class="card p-5">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Quote class="w-4 h-4 text-amber-400" /> 名场面回顾
-            </h3>
-            <div class="space-y-3">
-              <div
-                v-for="(q, i) in report.highlight_quotes"
-                :key="i"
-                class="p-3 bg-amber-50/50 rounded-xl border border-amber-100"
-              >
-                <div class="flex items-start gap-2 mb-1">
-                  <span class="text-sm font-medium text-amber-700">{{ q.speaker }}</span>
-                  <span class="text-[10px] text-slate-400">{{ q.date }}</span>
-                </div>
-                <p class="text-sm text-slate-700 leading-relaxed mb-1">"{{ q.quote }}"</p>
-                <div class="flex items-center justify-between">
-                  <p v-if="q.comment" class="text-xs text-amber-500 italic">— {{ q.comment }}</p>
-                  <p v-if="report.highlight_comments?.[i]" class="text-xs text-indigo-500 font-medium ml-auto">
-                    🤖 {{ report.highlight_comments[i] }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 下周预告 -->
-          <div v-if="report.next_week_preview" class="card p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
-            <p class="text-sm text-emerald-700 font-medium">🔮 {{ report.next_week_preview }}</p>
-          </div>
+      <!-- Row 1: AI 锐评 + 数据快照 -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+        <div v-if="report.ai_roast" class="rounded-2xl p-6 text-white shadow-lg" style="background: linear-gradient(135deg, #1e293b, #334155)">
+          <h3 class="font-semibold mb-3 flex items-center gap-2 text-amber-400"><Flame class="w-4 h-4" /> AI 锐评</h3>
+          <p class="text-sm leading-relaxed text-slate-100 whitespace-pre-line">{{ report.ai_roast }}</p>
+        </div>
+        <div v-else-if="report.overview && !report.week_headline" class="rounded-2xl p-6 shadow-sm border border-indigo-100" style="background: linear-gradient(135deg, #eef2ff, #f5f3ff)">
+          <h3 class="font-semibold mb-3 flex items-center gap-2 text-indigo-600"><Sparkles class="w-4 h-4" /> 本周综述</h3>
+          <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{{ report.overview }}</p>
         </div>
 
-        <!-- 侧栏 -->
-        <div class="space-y-4">
-          <!-- v0.7.2: 发言排行 -->
-          <div v-if="report.top_speakers?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm flex items-center gap-1.5">
-              <MessageSquare class="w-3.5 h-3.5 text-indigo-400" /> 发言排行
-            </h3>
+        <!-- 数据快照 -->
+        <div class="space-y-3">
+          <div v-if="report.top_speakers?.length" class="rounded-2xl p-4 shadow-sm border border-slate-100 bg-white">
+            <div class="text-xs text-slate-400 mb-2 font-medium">💬 发言排行</div>
             <div class="space-y-1.5">
-              <div v-for="(s, i) in report.top_speakers.slice(0, 5)" :key="i"
-                   class="flex items-center justify-between text-xs">
-                <span class="text-slate-600">{{ s.alias }}</span>
-                <span class="font-medium text-slate-500">{{ s.count }}条</span>
+              <div v-for="(s, i) in report.top_speakers.slice(0, 5)" :key="i" class="flex items-center justify-between text-xs">
+                <span class="text-slate-600">{{ i+1 }}. {{ s.alias }}</span>
+                <span class="font-medium text-slate-400">{{ s.count }}条</span>
               </div>
             </div>
           </div>
-
-          <!-- v0.7.2: 深夜活跃 -->
-          <div v-if="report.night_owls?.length" class="card p-4 bg-indigo-50/30 border-indigo-100">
-            <div class="text-xs text-slate-400 mb-1">🦉 深夜守群人</div>
-            <div v-for="(n, i) in report.night_owls.slice(0, 3)" :key="i"
-                 class="text-xs text-slate-600">{{ n.alias }} · {{ n.peak }}</div>
+          <div v-if="report.night_owls?.length" class="rounded-2xl p-3 shadow-sm border border-indigo-100 bg-indigo-50/30 text-xs">
+            <span class="text-slate-400">🦉 深夜守群 </span>
+            <span v-for="(n, i) in report.night_owls.slice(0, 3)" :key="i" class="text-slate-600">{{ n.alias }}{{ i < report.night_owls.slice(0,3).length-1 ? '、' : '' }}</span>
           </div>
-
-          <!-- v0.7.2: 潜水观察 -->
-          <div v-if="report.lurkers?.length" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">🤿 潜水观察名单</div>
-            <div v-for="(l, i) in report.lurkers.slice(0, 3)" :key="i"
-                 class="text-xs text-slate-600">{{ l.alias }} · {{ l.days }}天{{ l.msgs }}条</div>
+          <div v-if="report.emoji_kings?.length" class="rounded-2xl p-3 shadow-sm border border-slate-100 bg-white text-xs">
+            <span class="text-slate-400">😂 表情达人 </span>
+            <span v-for="(e, i) in report.emoji_kings.slice(0, 3)" :key="i" class="text-slate-600">{{ e.alias }}{{ i < report.emoji_kings.slice(0,3).length-1 ? '、' : '' }}</span>
           </div>
-
-          <!-- v0.7.2: 表情包大户 -->
-          <div v-if="report.emoji_kings?.length" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">😂 表情包爱好者</div>
-            <div v-for="(e, i) in report.emoji_kings.slice(0, 3)" :key="i"
-                 class="text-xs text-slate-600">{{ e.alias }} {{ (e.emojis || []).join(' ') }}</div>
+          <div v-if="report.lurkers?.length" class="rounded-2xl p-3 shadow-sm border border-slate-100 bg-white text-xs">
+            <span class="text-slate-400">🤿 潜水观察 </span>
+            <span v-for="(l, i) in report.lurkers.slice(0, 3)" :key="i" class="text-slate-600">{{ l.alias }}{{ i < report.lurkers.slice(0,3).length-1 ? '、' : '' }}</span>
           </div>
+        </div>
+      </div>
 
-          <!-- 热门话题（旧版兼容） -->
-          <div v-if="report.top_topics?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm">
-              <Hash class="w-3.5 h-3.5 text-indigo-400" /> 话题热度 TOP 5
-            </h3>
-            <div class="space-y-2">
-              <div
-                v-for="(t, i) in report.top_topics.slice(0, 5)"
-                :key="i"
-                class="flex items-center gap-2"
-              >
-                <span :class="[
-                  'w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0',
-                  i === 0 ? 'bg-red-500 text-white' :
-                  i === 1 ? 'bg-orange-400 text-white' :
-                  i === 2 ? 'bg-amber-400 text-white' :
-                  'bg-slate-200 text-slate-500',
-                ]">{{ i + 1 }}</span>
-                <span class="text-sm text-slate-600 flex-1 truncate">{{ t.text }}</span>
-                <span class="text-xs text-slate-400">{{ t.heat }}</span>
-              </div>
+      <!-- Row 2: 奖项 三列 -->
+      <div v-if="report.weekly_awards?.length" class="mb-6">
+        <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2 text-sm"><Trophy class="w-4 h-4 text-amber-400" /> 本周群聊奖项</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div v-for="(award, i) in report.weekly_awards" :key="i"
+               class="rounded-2xl p-4 text-center shadow-sm border transition-all hover:shadow-md"
+               :class="[i === 0 ? 'bg-amber-50 border-amber-200' : i === 1 ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100']">
+            <div class="text-3xl mb-2">{{ award.emoji || '🏆' }}</div>
+            <div class="text-sm font-bold text-slate-700 mb-1">{{ award.award_name }}</div>
+            <p class="text-xs text-slate-500"><span class="font-medium text-indigo-600">{{ award.winner }}</span> · {{ award.reason }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: 群聊故事 全宽 -->
+      <div v-if="report.week_narrative" class="rounded-2xl p-6 mb-6 shadow-sm border border-blue-100" style="background: linear-gradient(135deg, #eff6ff, #eef2ff)">
+        <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2"><BookOpen class="w-4 h-4 text-blue-400" /> 本周群聊故事</h3>
+        <div class="flex items-start gap-4">
+          <span class="text-4xl leading-none text-blue-300 flex-shrink-0">"</span>
+          <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-line italic">{{ report.week_narrative }}</p>
+        </div>
+      </div>
+
+      <!-- Row 4: 情绪 + 预告 双栏 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+        <div v-if="report.mood_rollercoaster" class="rounded-2xl p-5 shadow-sm border border-amber-100 bg-white">
+          <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2 text-sm"><TrendingUp class="w-4 h-4 text-amber-400" /> 情绪过山车</h3>
+          <div v-if="report.mood_timeline?.length" class="flex flex-wrap gap-1 mb-3">
+            <span v-for="e in report.mood_timeline" :key="e.date" :title="`${e.date} ${e.mood}`"
+                  class="text-base cursor-default hover:scale-125 transition-transform">{{ e.mood_emoji || '💬' }}</span>
+          </div>
+          <p class="text-sm text-slate-600 leading-relaxed">{{ report.mood_rollercoaster }}</p>
+        </div>
+        <div v-if="report.next_week_preview" class="rounded-2xl p-5 shadow-sm border border-emerald-100 flex flex-col justify-center" style="background: linear-gradient(135deg, #ecfdf5, #f0fdf4)">
+          <p class="text-3xl mb-2 text-center">🔮</p>
+          <p class="text-sm text-emerald-700 font-medium text-center">{{ report.next_week_preview }}</p>
+        </div>
+      </div>
+
+      <!-- 旧版兼容：话题+关键词+情绪分布（仅旧报告显示） -->
+      <div v-if="report.top_topics?.length || report.top_keywords?.length" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div v-if="report.top_topics?.length" class="rounded-2xl p-4 shadow-sm border border-slate-100 bg-white">
+          <div class="text-xs text-slate-400 mb-2 font-medium">🔥 话题热度 TOP5</div>
+          <div class="space-y-1.5">
+            <div v-for="(t, i) in report.top_topics.slice(0, 5)" :key="i" class="flex items-center gap-2 text-xs">
+              <span :class="['w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0', i===0?'bg-red-500 text-white':i===1?'bg-orange-400 text-white':i===2?'bg-amber-400 text-white':'bg-slate-200 text-slate-500']">{{ i+1 }}</span>
+              <span class="text-slate-600 truncate">{{ t.text }}</span>
             </div>
           </div>
-
-          <!-- 关键词 -->
-          <div v-if="report.top_keywords?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm">关键词</h3>
-            <div class="flex flex-wrap gap-1">
-              <span
-                v-for="kw in report.top_keywords.slice(0, 8)"
-                :key="kw.text"
-                class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs"
-              >{{ kw.text }}</span>
-            </div>
+        </div>
+        <div v-if="report.top_keywords?.length" class="rounded-2xl p-4 shadow-sm border border-slate-100 bg-white">
+          <div class="text-xs text-slate-400 mb-2 font-medium">🏷️ 关键词</div>
+          <div class="flex flex-wrap gap-1">
+            <span v-for="kw in report.top_keywords.slice(0, 6)" :key="kw.text" class="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[11px]">{{ kw.text }}</span>
           </div>
-
-          <!-- 最热/最冷日 -->
-          <div v-if="report.hottest_day" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">最热闹的一天</div>
-            <div class="text-sm font-medium text-slate-700">{{ report.hottest_day.date }}</div>
-            <div class="text-xs text-slate-400">{{ report.hottest_day.msg_count }}条 · {{ report.hottest_day.mood_emoji }} {{ report.hottest_day.one_line }}</div>
-          </div>
-          <div v-if="report.coldest_day" class="card p-4">
-            <div class="text-xs text-slate-400 mb-1">最冷清的一天</div>
-            <div class="text-sm font-medium text-slate-700">{{ report.coldest_day.date }}</div>
-            <div class="text-xs text-slate-400">{{ report.coldest_day.msg_count }}条</div>
-          </div>
-
-          <!-- 情绪分布 -->
-          <div v-if="report.mood_ranking?.length" class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-2 text-sm">情绪分布</h3>
-            <div class="space-y-1.5">
-              <div v-for="m in report.mood_ranking" :key="m.mood"
-                   class="flex items-center justify-between text-xs">
-                <span class="text-slate-500">{{ m.mood }}</span>
-                <span class="font-medium text-slate-600">{{ m.count }}天</span>
-              </div>
+        </div>
+        <div v-if="report.mood_ranking?.length" class="rounded-2xl p-4 shadow-sm border border-slate-100 bg-white">
+          <div class="text-xs text-slate-400 mb-2 font-medium">🎭 情绪分布</div>
+          <div class="space-y-1">
+            <div v-for="m in report.mood_ranking" :key="m.mood" class="flex items-center justify-between text-xs">
+              <span class="text-slate-500">{{ m.mood }}</span><span class="font-medium text-slate-600">{{ m.count }}天</span>
             </div>
           </div>
         </div>
