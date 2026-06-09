@@ -39,6 +39,119 @@ def _trim_message_fields(messages: list[dict]):
         logger.info(f"消息字段精简: 删除 {removed} 个无用字段 (保留 {_KEEP_MESSAGE_KEYS})")
 
 
+# ---- QQ 聊天记录格式适配 (v0.8) ----
+# QQChatExporter V5 导出 JSON 与微信格式完全不同，在 load() 入口归一化
+
+_QQ_TYPE_MAP = {
+    "type_1": "文本消息",    # 文本消息（图片/表情内嵌在 elements 中）
+    "type_3": "引用消息",    # 引用回复
+    "type_7": "系统消息",    # JSON/卡片/小程序消息
+    "type_8": "文件消息",    # 文件
+    "type_9": "视频消息",    # 视频
+    "type_11": "聊天记录",   # 合并转发
+    # type_21/27/31 等未知类型 → 系统消息（default）
+}
+
+
+def _detect_qq_format(raw: dict) -> bool:
+    """检测是否为 QQChatExporter V5 导出的 JSON 格式
+
+    微信 JSON 顶层为 session + senders + messages，
+    QQ JSON 顶层为 metadata + chatInfo + messages，两者互斥。
+    """
+    return (
+        isinstance(raw, dict)
+        and "metadata" in raw
+        and "chatInfo" in raw
+        and "QQChatExporter" in raw.get("metadata", {}).get("name", "")
+    )
+
+
+def _normalize_qq(raw: dict) -> tuple[dict, list[dict], list[dict]]:
+    """将 QQ JSON 归一化为微信格式 (session, senders, messages)
+
+    分三步：构建 session → 从消息去重提取 senders → 逐条转换消息
+    """
+    chat_info = raw["chatInfo"]
+    stats = raw.get("statistics", {})
+    qq_messages = raw.get("messages", [])
+
+    # Step 1: 构建 session
+    if chat_info.get("type") == "private":
+        # 私聊：双方 UID 拼接作为群标识（确定性唯一）
+        all_uids = sorted(set(
+            m.get("sender", {}).get("uid", "")
+            for m in qq_messages
+            if m.get("sender", {}).get("uid")
+        ))
+        group_wxid = "_".join(all_uids)
+    else:
+        group_wxid = chat_info.get("groupUid") or chat_info.get("selfUid") or ""
+
+    session = {
+        "nickname": chat_info.get("name", ""),
+        "wxid": group_wxid,
+        "messageCount": stats.get("totalMessages", len(qq_messages)),
+    }
+
+    # Step 2: 构建 senders（从消息中提取去重 UID，按首次出现顺序分配 senderID）
+    uid_to_sid: dict[str, int] = {}
+    sid_to_info: dict[int, dict] = {}
+    next_sid = 1
+
+    for m in qq_messages:
+        sender = m.get("sender", {})
+        uid = sender.get("uid", "")
+        if not uid or uid in uid_to_sid:
+            continue
+        uid_to_sid[uid] = next_sid
+        sid_to_info[next_sid] = {
+            "senderID": next_sid,
+            "wxid": uid,
+            "displayName": sender.get("remark") or sender.get("name") or sender.get("nickname") or "",
+            "nickname": sender.get("nickname") or "",
+        }
+        next_sid += 1
+
+    senders = list(sid_to_info.values())
+
+    # Step 3: 转换消息
+    messages = []
+    for m in qq_messages:
+        # 跳过撤回消息和系统消息
+        if m.get("recalled"):
+            continue
+        if m.get("system"):
+            continue
+
+        sender = m.get("sender", {})
+        uid = sender.get("uid", "")
+        sid = uid_to_sid.get(uid, 0)
+
+        qq_type = m.get("type", "")
+        internal_type = _QQ_TYPE_MAP.get(qq_type, "系统消息")
+
+        content_text = (m.get("content", {}).get("text") or "").strip()
+        # 无文本内容的消息（纯图片/文件等）跳过，不参与 AI 分析
+        if not content_text:
+            continue
+
+        messages.append({
+            "wxid": uid,
+            "senderID": sid,
+            "createTime": m.get("timestamp", 0) // 1000,   # 毫秒 → 秒
+            "formattedTime": m.get("time", ""),
+            "type": internal_type,
+            "content": content_text,
+            "platformMessageId": m.get("id", ""),
+        })
+
+    # 按时间排序
+    messages.sort(key=lambda x: x.get("createTime", 0))
+
+    return session, senders, messages
+
+
 class ParsedChat:
     """解析后的群聊数据"""
 
@@ -90,6 +203,28 @@ class ParsedChat:
         with open(self.file_path, "r", encoding="utf-8") as f:
             self.raw = json.load(f)
 
+        # QQ 格式检测与归一化（v0.8）
+        if _detect_qq_format(self.raw):
+            self.session, self.senders, self.messages = _normalize_qq(self.raw)
+            _trim_message_fields(self.messages)
+            logger.info(f"QQ JSON 解析完成: 群={self.group_name}, "
+                        f"消息={len(self.messages)}, 成员={len(self.senders)}")
+            # 写入 pickle 缓存
+            try:
+                with open(self._pickle_path, "wb") as f:
+                    pickle.dump({
+                        "session": self.session,
+                        "senders": self.senders,
+                        "messages": self.messages,
+                        "_by_date": self._by_date,
+                    }, f, protocol=pickle.HIGHEST_PROTOCOL)
+                logger.info(f"pickle 缓存已保存: {self._pickle_path} "
+                            f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
+            except Exception as e:
+                logger.warning(f"保存 pickle 缓存失败: {e}")
+            return self
+
+        # ---- 微信格式解析 ----
         self.session = self.raw.get("session", {})
         self.senders = self.raw.get("senders", [])
 

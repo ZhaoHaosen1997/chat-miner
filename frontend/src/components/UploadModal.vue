@@ -36,7 +36,7 @@ function onFileChange(e) {
   reader.onload = (ev) => {
     try {
       const data = JSON.parse(ev.target.result)
-      const name = data?.session?.nickname || data?.session?.displayName || ''
+      const name = data?.session?.nickname || data?.session?.displayName || data?.chatInfo?.name || ''
       if (name && isGroupImport.value && name !== groupName.value) {
         jsonGroupName.value = name
         renameGroup.value = true
@@ -109,7 +109,7 @@ async function handleUpload() {
             <FileJson class="w-10 h-10 text-slate-300" />
             <div class="text-center">
               <p class="text-sm text-slate-500">点击或拖拽上传 .json 文件</p>
-              <p class="text-xs text-slate-400 mt-1">微信聊天记录导出格式</p>
+              <p class="text-xs text-slate-400 mt-1">微信/QQ聊天记录导出格式</p>
             </div>
           </template>
           <template v-else>
