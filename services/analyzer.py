@@ -299,11 +299,14 @@ async def analyze_daily_chat(
     model: str = "",
     task=None,
     hourly_stats: str = "",
+    is_private: bool = False,
 ) -> dict:
     """分析一天的群聊内容，生成每日报告
 
     通过 5 步子任务管道执行：话题 → 搞笑发言 → 情绪 → 关键词 → 总结
     每个子任务独立调用 Ollama，降低单次复杂度，提高 9B 模型成功率。
+
+    is_private: 私聊模式，prompt 自动适配话术（群聊→聊天、群友→对方）
 
     Returns:
         {"success": bool, "data": dict, "error": str, "model": str, "duration_ms": int}
@@ -315,7 +318,7 @@ async def analyze_daily_chat(
 
     start = _time.time()
     try:
-        data = await run_daily_pipeline(chat_text, group_name, date, msg_count, task, hourly_stats)
+        data = await run_daily_pipeline(chat_text, group_name, date, msg_count, task, hourly_stats, is_private=is_private)
         duration = int((_time.time() - start) * 1000)
         return {
             "success": True,

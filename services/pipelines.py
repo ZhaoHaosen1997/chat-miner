@@ -14,6 +14,25 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# ---- 私聊适配 ----
+# 当群聊只有 2 人时，自动将 prompt 中的群聊话术替换为私聊话术
+_PRIVATE_REPLACEMENTS = [
+    ("群聊", "聊天"),
+    ("群友", "对方"),
+    ("群内", "聊天"),
+    ("群里的", "聊天中的"),
+    ("本群", "聊天"),
+]
+
+
+def _adapt_for_private(text: str) -> str:
+    """将 prompt 文本中的群聊话术替换为私聊话术"""
+    result = text
+    for old, new in _PRIVATE_REPLACEMENTS:
+        result = result.replace(old, new)
+    return result
+
+
 # ---- 极简子任务 Prompt ----
 
 def _safe_format(template: str, **kwargs) -> str:
@@ -456,8 +475,12 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
 async def run_daily_pipeline(chat_text: str, group_name: str,
                               date: str, msg_count: int, task=None,
-                              hourly_stats: str = "") -> dict:
-    """执行 8 步子任务管道，拼装每日报告 JSON（含趣味功能）"""
+                              hourly_stats: str = "",
+                              is_private: bool = False) -> dict:
+    """执行 8 步子任务管道，拼装每日报告 JSON（含趣味功能）
+
+    is_private: 私聊模式，将 prompt 中的"群聊"替换为"聊天"、"群友"替换为"对方"
+    """
     total = 8
 
     if task:
@@ -467,6 +490,15 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     failed_steps = []
 
+    # 私聊模式：适配 prompt 话术
+    def _p(key):
+        """获取 prompt dict，私聊时自动替换群聊话术"""
+        prompt = PROMPTS[key]
+        if not is_private:
+            return prompt
+        # prompt 是 {"system": ..., "user": ...} dict
+        return {k: _adapt_for_private(v) for k, v in prompt.items()}
+
     # 取消检查辅助
     def _cancelled():
         return task and hasattr(task, '_cancelled') and task._cancelled
@@ -474,8 +506,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 1. 话题（每行一个）
     if _cancelled(): return {}
     topics_data = await _run_sub(task, "提取话题", 1, total,
-                                  PROMPTS["topics"]["system"],
-                                  f"{chat_text}\n\n{PROMPTS['topics']['user']}")
+                                  _p("topics")["system"],
+                                  f"{chat_text}\n\n{_p('topics')['user']}")
     topics = _parse_lines(topics_data) if topics_data else []
     if not topics:
         topics = ["今日话题"]
@@ -484,8 +516,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 2. 搞笑发言（发言人|原话|吐槽）
     if _cancelled(): return {}
     quotes_data = await _run_sub(task, "找搞笑发言", 2, total,
-                                  PROMPTS["quotes"]["system"],
-                                  f"{chat_text}\n\n{PROMPTS['quotes']['user']}")
+                                  _p("quotes")["system"],
+                                  f"{chat_text}\n\n{_p('quotes')['user']}")
     quotes = _parse_quotes(quotes_data) if quotes_data else []
     if not quotes and quotes_data is None:
         failed_steps.append("quotes")
@@ -493,8 +525,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 3. 情绪（一个词）
     if _cancelled(): return {}
     mood_data = await _run_sub(task, "判断情绪", 3, total,
-                                PROMPTS["mood"]["system"],
-                                f"{chat_text}\n\n{PROMPTS['mood']['user']}")
+                                _p("mood")["system"],
+                                f"{chat_text}\n\n{_p('mood')['user']}")
     mood, mood_emoji = _parse_mood(mood_data)
     if mood_data is None:
         failed_steps.append("mood")
@@ -502,8 +534,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 4. 关键词（逗号分隔）
     if _cancelled(): return {}
     kw_data = await _run_sub(task, "提取关键词", 4, total,
-                              PROMPTS["keywords"]["system"],
-                              f"{chat_text}\n\n{PROMPTS['keywords']['user']}")
+                              _p("keywords")["system"],
+                              f"{chat_text}\n\n{_p('keywords')['user']}")
     keywords = _parse_kw(kw_data)
     if kw_data is None:
         failed_steps.append("keywords")
@@ -511,8 +543,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 5. 一句话总结（两行：总结+高光）
     if _cancelled(): return {}
     ol_data = await _run_sub(task, "一句话总结", 5, total,
-                              PROMPTS["oneline"]["system"],
-                              f"{chat_text}\n\n{PROMPTS['oneline']['user']}")
+                              _p("oneline")["system"],
+                              f"{chat_text}\n\n{_p('oneline')['user']}")
     one_line, highlight = _parse_oneline(ol_data)
     if ol_data is None:
         failed_steps.append("oneline")
@@ -522,7 +554,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     hs = (hourly_stats or "(无小时分布数据)").replace("{", "{{").replace("}", "}}")
     hs_user = PROMPTS["active_hours"]["user"].replace("{hourly_stats}", hs)
     ah_data = await _run_sub(task, "活跃时段分析", 6, total,
-                              PROMPTS["active_hours"]["system"], hs_user)
+                              _p("active_hours")["system"], hs_user)
     ah = _parse_active_hours(ah_data)
     if ah_data is None:
         failed_steps.append("active_hours")
@@ -530,8 +562,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     # 7. 趣味标题（UC震惊体/综艺预告片风）
     if _cancelled(): return {}
     headline_data = await _run_sub(task, "趣味标题", 7, total,
-                                    PROMPTS["headline"]["system"],
-                                    f"{chat_text}\n\n{PROMPTS['headline']['user']}")
+                                    _p("headline")["system"],
+                                    f"{chat_text}\n\n{_p('headline')['user']}")
     headline = str(headline_data).strip() if headline_data else ""
 
     # 8. 名场面（取最佳搞笑发言，AI配花字吐槽）
@@ -539,10 +571,10 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if quotes and len(quotes) > 0:
         best_quote = quotes[0]
         scene_text = f"{best_quote.get('speaker','某人')}：「{best_quote.get('quote','')}」"
-        scene_user = PROMPTS["scene_commentary"]["user"].format(scene=scene_text)
+        sc = _p("scene_commentary")
+        scene_user = sc["user"].format(scene=scene_text)
         scene_data = await _run_sub(task, "名场面吐槽", 8, total,
-                                     PROMPTS["scene_commentary"]["system"],
-                                     scene_user)
+                                     sc["system"], scene_user)
         scene_commentary = str(scene_data).strip() if scene_data else ""
     if headline_data is None:
         failed_steps.append("headline")
@@ -578,14 +610,25 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
 async def run_portrait_pipeline(chat_text: str, sender_name: str,
                                  group_name: str, msg_count: int,
-                                 task=None) -> dict:
-    """执行 4 步子任务管道，拼装画像 JSON"""
+                                 task=None, is_private: bool = False) -> dict:
+    """执行 4 步子任务管道，拼装画像 JSON
+
+    is_private: 私聊模式，将 prompt 中的"群聊"替换为"聊天"、"群友"替换为"对方"
+    """
     total = 4
 
     if task:
         task.update("inference", f"(0/4) 分析 {sender_name}...")
         if task.type != "full_portrait":
             task.steps.clear()  # 统一分析时不重置，追加到已有步骤
+
+    # 私聊模式：适配 prompt 话术
+    def _pp(key):
+        """获取 PORTRAIT_PROMPTS dict，私聊时自动替换群聊话术"""
+        prompt = PORTRAIT_PROMPTS[key]
+        if not is_private:
+            return prompt
+        return {k: _adapt_for_private(v) for k, v in prompt.items()}
 
     prompt_user = f"{chat_text}\n\n以上是 {sender_name} 的发言。"
     role_opts = "气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/开车司机/破防boy/摆烂王者"
@@ -597,8 +640,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     # 1. 性格+角色（三行文本）
     if _cancelled_portrait(): return {}
     p_data = await _run_sub(task, "分析性格角色", 1, total,
-                             PORTRAIT_PROMPTS["persona"]["system"],
-                             f"{prompt_user}{PORTRAIT_PROMPTS['persona']['user'].replace('{name}', sender_name)}")
+                             _pp("persona")["system"],
+                             f"{prompt_user}{_pp('persona')['user'].replace('{name}', sender_name)}")
     p_lines = _parse_lines(p_data)
     personality = [t.strip() for t in p_lines[0].replace("，",",").split(",")] if len(p_lines) > 0 else []
     speaking_style = p_lines[1] if len(p_lines) > 1 else ""
@@ -613,8 +656,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
     # 2. 兴趣+活跃时段（两行文本）
     i_data = await _run_sub(task, "分析兴趣爱好", 2, total,
-                             PORTRAIT_PROMPTS["interests"]["system"],
-                             f"{prompt_user}{PORTRAIT_PROMPTS['interests']['user'].replace('{name}', sender_name)}")
+                             _pp("interests")["system"],
+                             f"{prompt_user}{_pp('interests')['user'].replace('{name}', sender_name)}")
     i_lines = _parse_lines(i_data)
     interests = [t.strip() for t in i_lines[0].replace("，",",").split(",")] if len(i_lines) > 0 else []
     active_hours = i_lines[1] if len(i_lines) > 1 else ""
@@ -623,8 +666,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
     # 3. 口头禅（v0.6.4: 支持多条，逗号分隔）
     ph_data = await _run_sub(task, "检测口头禅", 3, total,
-                              PORTRAIT_PROMPTS["phrase"]["system"],
-                              f"{prompt_user}{PORTRAIT_PROMPTS['phrase']['user'].replace('{name}', sender_name)}")
+                              _pp("phrase")["system"],
+                              f"{prompt_user}{_pp('phrase')['user'].replace('{name}', sender_name)}")
     ph_text = str(ph_data or "").strip()
     if "无" in ph_text or not ph_text or _is_ai_apology(ph_text):
         signature_phrases = []
@@ -640,10 +683,10 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     ol_data = None
     one_line = ""
     emoji_style = ""  # 空字符串表示待填充，调用方可传入 stats 兜底
-    ol_prompt_user = f"{prompt_user}{PORTRAIT_PROMPTS['oneline_portrait']['user'].replace('{name}', sender_name)}"
+    ol_prompt_user = f"{prompt_user}{_pp('oneline_portrait')['user'].replace('{name}', sender_name)}"
     for ol_attempt in range(2):
         ol_data = await _run_sub(task, "一句话素描", 4, total,
-                                  PORTRAIT_PROMPTS["oneline_portrait"]["system"],
+                                  _pp("oneline_portrait")["system"],
                                   ol_prompt_user)
         # 用 _parse_lines 提取第一行（人设描述）
         ol_lines = _parse_lines(ol_data)
@@ -700,9 +743,9 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         if role and pers:
             one_line = f"一个{pers[0]}的{role}"
         elif pers:
-            one_line = f"一个{pers[0]}的群友"
+            one_line = f"一个{pers[0]}的{'聊天对象' if is_private else '群友'}"
         elif role:
-            one_line = f"群里的{role}"
+            one_line = f"{'聊天中的' if is_private else '群里的'}{role}"
 
     # 拼装
     portrait = {

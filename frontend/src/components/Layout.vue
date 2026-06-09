@@ -14,6 +14,7 @@ const route = useRoute()
 const showUpload = ref(false)
 const importLoading = ref(false)
 const activeTaskId = inject('activeTaskId', ref(''))
+const groupSelectorRef = ref(null)
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
@@ -26,9 +27,13 @@ function navTo(path) {
 
 async function onUploaded(data) {
   showUpload.value = false
-  // 导入新群：重新加载群列表，选中新导入的群并跳转
+  // 导入新群：刷新群列表下拉菜单，选中新导入的群并跳转
   importLoading.value = true
   try {
+    // 先刷新 GroupSelector 的群列表
+    if (groupSelectorRef.value) {
+      await groupSelectorRef.value.reload()
+    }
     const groups = await listGroups()
     const newGroup = groups.find(g => g.id === data.group_id)
     if (newGroup) {
@@ -59,6 +64,7 @@ async function onUploaded(data) {
           </div>
           <!-- 群选择器 -->
           <GroupSelector
+            ref="groupSelectorRef"
             :current="currentGroup"
             @select="emit('group-change', $event)"
             @upload-click="showUpload = true"

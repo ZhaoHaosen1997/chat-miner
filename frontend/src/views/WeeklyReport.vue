@@ -110,10 +110,13 @@ const moodColors = {
 const defaultMood = { bg: 'linear-gradient(135deg, #dc2626, #ea580c, #f59e0b)', badge: 'bg-red-500/20 text-red-200' }
 
 const headlineColors = computed(() => {
-  if (!report.value?.mood_ranking?.length) return defaultMood
-  // 取出现最多的情绪
-  const top = report.value.mood_ranking[0]
-  return moodColors[top.mood] || defaultMood
+  // 优先用 AI 判断的主导情绪
+  const dm = report.value?.dominant_mood
+  if (dm && moodColors[dm]) return moodColors[dm]
+  // 回退：情绪排名第一
+  const top = report.value?.mood_ranking?.[0]
+  if (top?.mood && moodColors[top.mood]) return moodColors[top.mood]
+  return defaultMood
 })
 </script>
 

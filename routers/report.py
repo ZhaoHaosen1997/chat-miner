@@ -76,6 +76,7 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
                     sorted(day_stats.get("hourly_distribution", {}).items()) if cnt > 0]
     hourly_stats_str = "\n".join(hourly_lines) if hourly_lines else ""
 
+    is_private = len(chat.senders) <= 2
     result = await analyze_daily_chat(
         group_name=group_name,
         date=date,
@@ -84,6 +85,7 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
         model=config.OLLAMA_MODEL,
         task=task,
         hourly_stats=hourly_stats_str,
+        is_private=is_private,
     )
 
     if result["success"] and result["data"]:
@@ -258,6 +260,7 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
             task=task,
             model=config.OLLAMA_MODEL,
             hourly_stats=hourly_stats_str,
+            is_private=len(chat.senders) <= 2,
         )
 
         if result["success"] and result["data"]:
@@ -456,8 +459,9 @@ async def api_periods(group_id: int, type: str = "weekly"):
     from services.weekly_report import compute_available_periods
     from models.database import list_periodic_reports
 
-    analyzed = set(get_analyzed_dates(group_id))
-    periods = compute_available_periods(list(analyzed), type)
+    chat = get_chat_cache(group_id)
+    all_dates = chat.all_dates() if chat else []
+    periods = compute_available_periods(all_dates, type)
 
     # 合并已生成状态
     existing = list_periodic_reports(group_id, type)
@@ -532,14 +536,14 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
         raise HTTPException(404, detail="群数据未加载")
 
     # 找最新可用的周
-    analyzed = list(get_analyzed_dates(group_id))
     if not period_key:
-        periods = compute_available_periods(analyzed, "weekly")
+        all_dates = chat.all_dates()
+        periods = compute_available_periods(all_dates, "weekly")
         ready = [p for p in periods if p["status"] == "ready"]
         if not ready:
             return {
                 "code": 200,
-                "message": "暂无足够数据的自然周（至少需要3天日报）",
+                "message": "暂无足够数据的自然周（至少需要3天聊天数据）",
                 "data": None,
             }
         period_key = ready[-1]["period_key"]  # 最新的
@@ -551,7 +555,8 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
 
     async def _run():
         try:
-            result = await generate_weekly_report(group_id, period_key, task, force=force)
+            result = await generate_weekly_report(group_id, period_key, task, force=force,
+                                                  is_private=len(chat.senders) <= 2)
             if result["success"]:
                 task.update("done", f"周报 {period_key} 生成完成")
                 task.finish(success=True)
@@ -623,14 +628,14 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
     if not chat:
         raise HTTPException(404, detail="群数据未加载")
 
-    analyzed = list(get_analyzed_dates(group_id))
     if not period_key:
-        periods = compute_available_periods(analyzed, "monthly")
+        all_dates = chat.all_dates()
+        periods = compute_available_periods(all_dates, "monthly")
         ready = [p for p in periods if p["status"] == "ready"]
         if not ready:
             return {
                 "code": 200,
-                "message": "暂无足够数据的自然月（至少需要10天日报）",
+                "message": "暂无足够数据的自然月（至少需要5天聊天数据）",
                 "data": None,
             }
         period_key = ready[-1]["period_key"]
@@ -641,7 +646,8 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
 
     async def _run():
         try:
-            result = await generate_monthly_report(group_id, period_key, task, force=force)
+            result = await generate_monthly_report(group_id, period_key, task, force=force,
+                                                   is_private=len(chat.senders) <= 2)
             if result["success"]:
                 task.update("done", f"月报 {period_key} 生成完成")
                 task.finish(success=True)

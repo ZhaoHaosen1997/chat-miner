@@ -77,7 +77,8 @@ async def generate_single_portrait(
 
     start = _time.time()
     try:
-        data = await run_portrait_pipeline(chat_text, sender_name, group_name, len(all_msgs), task)
+        data = await run_portrait_pipeline(chat_text, sender_name, group_name, len(all_msgs), task,
+                                           is_private=len(chat.senders) <= 2)
         duration = int((_time.time() - start) * 1000)
         data["_data_start"] = data_start
         data["_data_end"] = data_end

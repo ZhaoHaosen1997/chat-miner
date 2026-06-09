@@ -84,22 +84,29 @@ watch(activeTaskId, (newVal, oldVal) => {
 function goBack() { router.push('/') }
 function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
 
-// 根据人格类型选择主题色
+// 根据人格类型或情绪选择主题色
 const personalityThemes = [
-  { keys: ['辩论','技术','理性','逻辑'], bg: 'linear-gradient(135deg, rgba(30,64,175,0.5), rgba(37,99,235,0.3))', accent: '#60a5fa', label: 'text-blue-200', tag: 'bg-blue-500/20 text-blue-200' },
-  { keys: ['吃瓜','社交','八卦','娱乐'], bg: 'linear-gradient(135deg, rgba(217,119,6,0.5), rgba(245,158,11,0.3))', accent: '#fbbf24', label: 'text-amber-200', tag: 'bg-amber-500/20 text-amber-200' },
-  { keys: ['摸鱼','摆烂','佛系','养生'], bg: 'linear-gradient(135deg, rgba(8,145,178,0.5), rgba(6,182,212,0.3))', accent: '#22d3ee', label: 'text-cyan-200', tag: 'bg-cyan-500/20 text-cyan-200' },
-  { keys: ['沙雕','搞笑','欢乐','段子'], bg: 'linear-gradient(135deg, rgba(217,70,239,0.5), rgba(168,85,247,0.3))', accent: '#c084fc', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
-  { keys: ['内卷','奋斗','努力'], bg: 'linear-gradient(135deg, rgba(220,38,38,0.5), rgba(239,68,68,0.3))', accent: '#f87171', label: 'text-red-200', tag: 'bg-red-500/20 text-red-200' },
-  { keys: ['温馨','治愈','温暖'], bg: 'linear-gradient(135deg, rgba(249,115,22,0.5), rgba(251,146,60,0.3))', accent: '#fb923c', label: 'text-orange-200', tag: 'bg-orange-500/20 text-orange-200' },
-  { keys: ['抽象','离谱','魔幻'], bg: 'linear-gradient(135deg, rgba(124,58,237,0.5), rgba(139,92,246,0.3))', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
+  { keys: ['辩论','技术','理性','逻辑'], moodKeys: ['严肃'], bg: 'linear-gradient(135deg, rgba(30,64,175,0.5), rgba(37,99,235,0.3))', pageBg: 'linear-gradient(180deg, #0f172a 0%, #1e3a5f 40%, #0f172a 100%)', accent: '#60a5fa', label: 'text-blue-200', tag: 'bg-blue-500/20 text-blue-200' },
+  { keys: ['吃瓜','社交','八卦','娱乐'], moodKeys: ['吃瓜'], bg: 'linear-gradient(135deg, rgba(217,119,6,0.5), rgba(245,158,11,0.3))', pageBg: 'linear-gradient(180deg, #1a1206 0%, #3d2e0a 40%, #1a1206 100%)', accent: '#fbbf24', label: 'text-amber-200', tag: 'bg-amber-500/20 text-amber-200' },
+  { keys: ['摸鱼','摆烂','佛系','养生'], moodKeys: ['摸鱼','摆烂'], bg: 'linear-gradient(135deg, rgba(8,145,178,0.5), rgba(6,182,212,0.3))', pageBg: 'linear-gradient(180deg, #061f2c 0%, #0e4a5c 40%, #061f2c 100%)', accent: '#22d3ee', label: 'text-cyan-200', tag: 'bg-cyan-500/20 text-cyan-200' },
+  { keys: ['沙雕','搞笑','欢乐','段子'], moodKeys: ['沙雕','欢乐'], bg: 'linear-gradient(135deg, rgba(217,70,239,0.5), rgba(168,85,247,0.3))', pageBg: 'linear-gradient(180deg, #1a0a2e 0%, #4a1a6b 40%, #1a0a2e 100%)', accent: '#c084fc', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
+  { keys: ['内卷','奋斗','努力'], moodKeys: ['内卷'], bg: 'linear-gradient(135deg, rgba(220,38,38,0.5), rgba(239,68,68,0.3))', pageBg: 'linear-gradient(180deg, #1a0606 0%, #5c1a1a 40%, #1a0606 100%)', accent: '#f87171', label: 'text-red-200', tag: 'bg-red-500/20 text-red-200' },
+  { keys: ['温馨','治愈','温暖'], moodKeys: ['温馨'], bg: 'linear-gradient(135deg, rgba(249,115,22,0.5), rgba(251,146,60,0.3))', pageBg: 'linear-gradient(180deg, #1a0e06 0%, #5c2d0a 40%, #1a0e06 100%)', accent: '#fb923c', label: 'text-orange-200', tag: 'bg-orange-500/20 text-orange-200' },
+  { keys: ['抽象','离谱','魔幻'], moodKeys: ['离谱','破防','伤感'], bg: 'linear-gradient(135deg, rgba(124,58,237,0.5), rgba(139,92,246,0.3))', pageBg: 'linear-gradient(180deg, #0f0a2e 0%, #2d1a5c 40%, #0f0a2e 100%)', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' },
 ]
-const defaultPersonality = { bg: 'linear-gradient(135deg, rgba(124,58,237,0.4), rgba(99,102,241,0.3))', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' }
+const defaultPersonality = { bg: 'linear-gradient(135deg, rgba(124,58,237,0.4), rgba(99,102,241,0.3))', pageBg: 'linear-gradient(180deg, #0f172a 0%, #1e293b 40%, #1a1a2e 100%)', accent: '#a78bfa', label: 'text-purple-200', tag: 'bg-purple-500/20 text-purple-200' }
 
 const personalityColors = computed(() => {
+  if (!report.value) return defaultPersonality
+  // 优先用人格类型匹配
   const label = report.value?.group_personality?.type_label || ''
   for (const theme of personalityThemes) {
     if (theme.keys.some(k => label.includes(k))) return theme
+  }
+  // 回退：用 AI 判断的主导情绪
+  const dm = report.value?.dominant_mood || report.value?.mood_ranking?.[0]?.mood || ''
+  for (const theme of personalityThemes) {
+    if (theme.moodKeys && theme.moodKeys.some(k => k === dm)) return theme
   }
   return defaultPersonality
 })
@@ -134,7 +141,7 @@ const personalityColors = computed(() => {
     </div>
 
     <!-- 报告内容 v0.7.3: 电影风深色主题 -->
-    <div v-else-if="report" class="rounded-2xl overflow-hidden" style="background: linear-gradient(180deg, #0f172a 0%, #1e293b 40%, #1a1a2e 100%)">
+    <div v-else-if="report" class="rounded-2xl overflow-hidden" :style="{ background: personalityColors.pageBg }">
       <!-- 头部 -->
       <div class="text-center py-10 px-6">
         <div class="text-5xl mb-3">🎬</div>

@@ -376,7 +376,8 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
                                                      member_names=member_names)
     try:
         portrait_data = await run_portrait_pipeline(
-            chat_text, sender_name, group["name"], len(all_msgs), task=task
+            chat_text, sender_name, group["name"], len(all_msgs), task=task,
+            is_private=len(chat.senders) <= 2,
         )
         data_start = all_dates[0] if all_dates else ""
         data_end = all_dates[-1] if all_dates else ""
