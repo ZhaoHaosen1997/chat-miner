@@ -1,8 +1,8 @@
 # Chat-Miner — 群聊内容挖掘机
 
-基于本地 Ollama AI 的微信群聊分析工具。上传导出的聊天记录 JSON，自动生成每日报告、群友画像、情绪追踪和趣味内容。
+基于本地 Ollama AI 的群聊分析工具。支持微信/QQ 聊天记录导入，自动生成每日报告、群友画像、情绪追踪和趣味内容。
 
-> **当前版本**: v0.7.1  
+> **当前版本**: v0.8  
 > **技术栈**: FastAPI + SQLite + Vue3 + TailwindCSS + Ollama + DeepSeek API
 
 ---
@@ -41,10 +41,10 @@
 ## 架构概览
 
 ```
-微信聊天记录 JSON
+微信/QQ聊天记录 JSON
        │
        ▼
-  parser.py        ←── 解析 + wxid注入 + 按天分块
+  parser.py        ←── 格式检测 + 归一化 + wxid注入 + 按天分块
        │
        ├──→ pipelines.py   ←── 多步子任务 Pipeline（拆解复杂分析）
        │       │                    每次只让 AI 做一件事
@@ -189,7 +189,7 @@ OLLAMA_TIMEOUT=300
 
 ## 输入格式
 
-上传微信聊天记录导出的 JSON 文件，格式如下：
+### 微信聊天记录
 
 ```json
 {
@@ -207,6 +207,10 @@ OLLAMA_TIMEOUT=300
   ]
 }
 ```
+
+### QQ 聊天记录（v0.8 新增）
+
+支持 [QQChatExporter V5](https://github.com/shuakami/qq-chat-exporter) 导出的 JSON 格式。私聊和群聊均可导入，自动归一化为微信格式，下游分析管线零改动复用。
 
 - 支持追加导入：已有群可追加新 JSON，按 `platformMessageId` 自动去重
 - 支持多群管理
@@ -279,11 +283,11 @@ wsl -d DebianDev -- sh -c "rsync -av --delete \
 
 | 版本 | 亮点 |
 |------|------|
+| v0.8 | QQ 聊天记录导入（QQChatExporter V5 格式适配）|
+| v0.7.3 | 周报/月报页面重设计 + 动态配色 + 异常处理修复 |
+| v0.7.2 | 月报 5 新模块 + 词频突变检测 + 匿名化消息直传 DeepSeek |
 | v0.7.0 | 周报/月报 + DeepSeek API 深度推理 + 脱敏架构 |
-| v0.6.4 | emoji 智能匹配、个人情绪轨迹、性能优化 (O(n²)→O(log n))、消息字段精简、pickle 缓存 |
-| v0.6.3 | emoji 选择题 + 兜底重试 + 去模板化 |
-| v0.6.2 | Prompt 去模板化 + 兜底修复 |
-| v0.6.1 | 去掉增量刷新 + Prompt 去模板化 |
+| v0.6.4 | emoji 智能匹配、个人情绪轨迹、性能优化 (O(n²)→O(log n))、pickle 缓存 |
 | v0.5.1 | 趣味称号 + 关系解读 |
 | v0.5.0 | 深度画像 Pipeline + Python 统计引擎 |
 | v0.4.0 | 多任务 Pipeline + SSE 进度推送 |
