@@ -11,6 +11,7 @@ const error = ref('')
 const preview = ref(null)
 const jsonGroupName = ref('')
 const renameGroup = ref(false)
+const isZipFile = ref(false)
 
 const isGroupImport = computed(() => !!props.group)
 const groupName = computed(() => props.group?.display_name || props.group?.name || '')
@@ -19,8 +20,10 @@ const showRenameOption = computed(() => isGroupImport.value && jsonGroupName.val
 function onFileChange(e) {
   const f = e.target.files?.[0]
   if (!f) return
-  if (!f.name.endsWith('.json')) {
-    error.value = '请选择 .json 格式的聊天记录文件'
+  const isJson = f.name.endsWith('.json')
+  const isZip = f.name.endsWith('.zip')
+  if (!isJson && !isZip) {
+    error.value = '请选择 .json 或 .zip 格式的聊天记录文件'
     fileRef.value = null
     preview.value = null
     return
@@ -30,6 +33,14 @@ function onFileChange(e) {
   fileRef.value = f
   renameGroup.value = false
   jsonGroupName.value = ''
+  isZipFile.value = isZip
+
+  if (isZip) {
+    // ZIP 文件：尝试读取 manifest.json 获取群名
+    // 简单扫描：ZIP local file header 中包含文件名，manifest 一般在末尾
+    tryReadZipManifest(f)
+    return
+  }
 
   // 读取 JSON 中的群名
   const reader = new FileReader()
@@ -44,6 +55,63 @@ function onFileChange(e) {
     } catch (_) { /* JSON parse error, ignore */ }
   }
   reader.readAsText(f.slice(0, 1024 * 1024)) // 只读前 1MB 就够了
+}
+
+function tryReadZipManifest(file) {
+  // 读取 ZIP 最后 64KB 找 manifest.json（ZIP central directory 在文件末尾）
+  const sliceSize = Math.min(file.size, 65536)
+  const blob = file.slice(-sliceSize, file.size)
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    try {
+      const bytes = new Uint8Array(ev.target.result)
+      // 简单搜索 "manifest.json" 字节串
+      const marker = new TextEncoder().encode('manifest.json')
+      let found = false
+      for (let i = 0; i < bytes.length - marker.length; i++) {
+        if (bytes.slice(i, i + marker.length).every((b, j) => b === marker[j])) {
+          // 找到 manifest.json 记录，尝试从完整文件中提取
+          found = true
+          readFullZipManifest(file)
+          break
+        }
+      }
+      if (!found) {
+        // 可能是旧版格式或无manifest，忽略预览
+      }
+    } catch (_) { /* ignore */ }
+  }
+  reader.readAsArrayBuffer(blob)
+}
+
+function readFullZipManifest(file) {
+  // 读取整个 ZIP 找 manifest.json 内容（利用 local file header）
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    try {
+      const bytes = new Uint8Array(ev.target.result)
+      const text = new TextDecoder().decode(bytes)
+      // 找 "chatInfo" 附近的内容
+      const chatInfoIdx = text.indexOf('"chatInfo"')
+      if (chatInfoIdx > 0) {
+        // 截取 chatInfo 附近 2KB
+        const snippet = text.substring(
+          Math.max(0, chatInfoIdx - 200),
+          Math.min(text.length, chatInfoIdx + 2000)
+        )
+        const nameMatch = snippet.match(/"name"\s*:\s*"([^"]+)"/)
+        if (nameMatch && nameMatch[1].length > 0 && nameMatch[1].length < 100) {
+          const name = nameMatch[1]
+          if (name && isGroupImport.value && name !== groupName.value) {
+            jsonGroupName.value = name
+            renameGroup.value = true
+          }
+        }
+      }
+    } catch (_) { /* ignore */ }
+  }
+  // 只读前 2MB 就够了（manifest 通常在 ZIP 开头或结尾附近）
+  reader.readAsText(file.slice(0, Math.min(file.size, 2 * 1024 * 1024)))
 }
 
 async function handleUpload() {
@@ -104,12 +172,12 @@ async function handleUpload() {
             fileRef ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50',
           ]"
         >
-          <input type="file" accept=".json" class="hidden" @change="onFileChange" />
+          <input type="file" accept=".json,.zip" class="hidden" @change="onFileChange" />
           <template v-if="!fileRef">
             <FileJson class="w-10 h-10 text-slate-300" />
             <div class="text-center">
-              <p class="text-sm text-slate-500">点击或拖拽上传 .json 文件</p>
-              <p class="text-xs text-slate-400 mt-1">微信/QQ聊天记录导出格式</p>
+              <p class="text-sm text-slate-500">点击或拖拽上传 .json 或 .zip 文件</p>
+              <p class="text-xs text-slate-400 mt-1">微信/QQ聊天记录导出（JSON / ZIP）</p>
             </div>
           </template>
           <template v-else>

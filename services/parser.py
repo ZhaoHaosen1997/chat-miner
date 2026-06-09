@@ -4,7 +4,9 @@
 """
 import json
 import re
+import io
 import logging
+import zipfile
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -43,6 +45,7 @@ def _trim_message_fields(messages: list[dict]):
 # QQChatExporter V5 导出 JSON 与微信格式完全不同，在 load() 入口归一化
 
 _QQ_TYPE_MAP = {
+    # Single-JSON 格式 (v0.8, QQChatExporter V5 私聊导出)
     "type_1": "文本消息",    # 文本消息（图片/表情内嵌在 elements 中）
     "type_3": "引用消息",    # 引用回复
     "type_7": "系统消息",    # JSON/卡片/小程序消息
@@ -50,6 +53,14 @@ _QQ_TYPE_MAP = {
     "type_9": "视频消息",    # 视频
     "type_11": "聊天记录",   # 合并转发
     # type_21/27/31 等未知类型 → 系统消息（default）
+    # Chunked-JSONL 格式 (v0.8.2, QQChatExporter V5 群聊导出)
+    "text": "文本消息",
+    "reply": "引用消息",
+    "system": "系统消息",
+    "forward": "聊天记录",
+    "video": "视频消息",
+    "json": "系统消息",
+    "file": "文件消息",
 }
 
 
@@ -152,6 +163,185 @@ def _normalize_qq(raw: dict) -> tuple[dict, list[dict], list[dict]]:
     return session, senders, messages
 
 
+# ---- QQ 群聊 chunked-jsonl 格式适配 (v0.8.2) ----
+# QQChatExporter V5 群聊导出为 ZIP 包，内含 manifest.json + JSONL 分块消息文件
+
+def _detect_qq_chunked(file_path: Path) -> bool:
+    """检测是否为 QQChatExporter V5 chunked-jsonl 格式（群聊导出 ZIP）
+
+    特征：
+    1. 文件扩展名为 .zip
+    2. ZIP 内包含 manifest.json
+    3. manifest.json 的 metadata.name 包含 "QQChatExporter"
+    """
+    if file_path.suffix.lower() != ".zip":
+        return False
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            # 查找 manifest.json（可能在一层子目录下）
+            for name in zf.namelist():
+                if name.endswith("/manifest.json") or name == "manifest.json":
+                    manifest_bytes = zf.read(name)
+                    manifest = json.loads(manifest_bytes.decode("utf-8"))
+                    meta = manifest.get("metadata", {})
+                    return "QQChatExporter" in meta.get("name", "")
+            return False
+    except (zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+
+
+def _normalize_qq_chunked(file_path: Path) -> tuple[dict, list[dict], list[dict]]:
+    """将 QQ chunked-jsonl ZIP 归一化为微信格式 (session, senders, messages)
+
+    流程：解压ZIP → 读 manifest.json → 读各 chunk JSONL → 逐条转换消息
+    """
+    with zipfile.ZipFile(file_path, "r") as zf:
+        namelist = zf.namelist()
+
+        # 1. 找 manifest.json
+        manifest_path = None
+        for name in namelist:
+            if name.endswith("/manifest.json") or name == "manifest.json":
+                manifest_path = name
+                break
+        if not manifest_path:
+            raise ValueError("ZIP 中未找到 manifest.json")
+
+        manifest = json.loads(zf.read(manifest_path).decode("utf-8"))
+        logger.info(f"QQ chunked-jsonl manifest: {manifest_path}")
+
+        # 确定 base_dir（manifest 所在的目录层级）
+        base_dir = manifest_path.rsplit("/", 1)[0] + "/" if "/" in manifest_path else ""
+
+        # 2. 读取 chunk 文件列表
+        chunk_info = manifest.get("chunked", {})
+        chunks_dir = chunk_info.get("chunksDir", "chunks")
+        chunk_files = [c["relativePath"] for c in chunk_info.get("chunks", [])]
+
+        # 如果 manifest 没列 chunk（兼容），则自动扫描
+        if not chunk_files:
+            chunk_prefix = f"{base_dir}{chunks_dir}/"
+            chunk_files = sorted(
+                n for n in namelist
+                if n.startswith(chunk_prefix) and n.endswith(".jsonl")
+            )
+            logger.info(f"manifest 未列 chunk，自动扫描到 {len(chunk_files)} 个文件")
+
+        chat_info = manifest.get("chatInfo", {})
+        stats = manifest.get("statistics", {})
+
+        # 3. 构建 session
+        if chat_info.get("type") == "group":
+            # 群聊：从目录名提取群号作为 wxid
+            # 目录名格式: group_{群号}_{timestamp}_chunked_jsonl
+            dir_name = base_dir.strip("/")
+            group_code = ""
+            m = re.search(r"group_(\d+)", dir_name)
+            if m:
+                group_code = m.group(1)
+            group_wxid = group_code or chat_info.get("selfUid") or ""
+        else:
+            # 按理说 chunked-jsonl 只用于群聊，但保持兼容
+            group_wxid = chat_info.get("selfUid") or ""
+
+        session = {
+            "nickname": chat_info.get("name", ""),
+            "wxid": group_wxid,
+            "messageCount": stats.get("totalMessages", 0),
+        }
+
+        # 4. 逐 chunk 读取消息（JSONL 格式），一边读一边构建 senders
+        uid_to_sid: dict[str, int] = {}
+        sid_to_info: dict[int, dict] = {}
+        next_sid = 1
+        all_messages: list[dict] = []
+
+        for chunk_rel_path in chunk_files:
+            # 兼容：chunk 路径可能带或不带 base_dir
+            possible_paths = [chunk_rel_path]
+            if base_dir and not chunk_rel_path.startswith(base_dir):
+                possible_paths.insert(0, base_dir + chunk_rel_path)
+
+            chunk_data = None
+            for path in possible_paths:
+                try:
+                    chunk_data = zf.read(path).decode("utf-8")
+                    break
+                except KeyError:
+                    continue
+            if chunk_data is None:
+                logger.warning(f"chunk 文件未找到: {chunk_rel_path}")
+                continue
+
+            # 逐行解析 JSONL
+            for line in chunk_data.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    m = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(f"JSONL 解析失败: {line[:100]}...")
+                    continue
+
+                # 跳过撤回消息和纯系统消息
+                if m.get("recalled"):
+                    continue
+                if m.get("system"):
+                    continue
+
+                sender = m.get("sender", {})
+                uid = sender.get("uid", "")
+                if not uid:
+                    continue
+
+                # 构建 sender（首次遇到时登记）
+                if uid not in uid_to_sid:
+                    uid_to_sid[uid] = next_sid
+                    sid_to_info[next_sid] = {
+                        "senderID": next_sid,
+                        "wxid": uid,
+                        "displayName": (
+                            sender.get("remark")
+                            or sender.get("groupCard")
+                            or sender.get("name")
+                            or sender.get("nickname")
+                            or ""
+                        ),
+                        "nickname": sender.get("nickname") or "",
+                    }
+                    next_sid += 1
+
+                sid = uid_to_sid[uid]
+                qq_type = m.get("type", "")
+                internal_type = _QQ_TYPE_MAP.get(qq_type, "系统消息")
+
+                content_text = (m.get("content", {}).get("text") or "").strip()
+                # 无文本内容的消息（纯图片/文件/视频占位符）跳过
+                if not content_text:
+                    continue
+
+                all_messages.append({
+                    "wxid": uid,
+                    "senderID": sid,
+                    "createTime": m.get("timestamp", 0) // 1000,   # 毫秒 → 秒
+                    "formattedTime": m.get("time", ""),
+                    "type": internal_type,
+                    "content": content_text,
+                    "platformMessageId": m.get("id", ""),
+                })
+
+    # 按时间排序
+    all_messages.sort(key=lambda x: x.get("createTime", 0))
+
+    senders = list(sid_to_info.values())
+    logger.info(f"QQ chunked-jsonl 解析完成: 群={session['nickname']}, "
+                f"消息={len(all_messages)}, 成员={len(senders)}, "
+                f"chunks={len(chunk_files)}")
+
+    return session, senders, all_messages
+
+
 class ParsedChat:
     """解析后的群聊数据"""
 
@@ -199,6 +389,30 @@ class ParsedChat:
                 logger.warning(f"pickle 缓存损坏或版本不兼容，重新解析JSON: {e}")
 
         # 回退：从 JSON 完整解析
+        # QQ chunked-jsonl 格式检测（v0.8.2，群聊 ZIP 导出）
+        if self.file_path.suffix.lower() == ".zip":
+            if _detect_qq_chunked(self.file_path):
+                self.session, self.senders, self.messages = _normalize_qq_chunked(self.file_path)
+                _trim_message_fields(self.messages)
+                logger.info(f"QQ chunked-jsonl 解析完成: 群={self.group_name}, "
+                            f"消息={len(self.messages)}, 成员={len(self.senders)}")
+                # 写入 pickle 缓存
+                try:
+                    with open(self._pickle_path, "wb") as f:
+                        pickle.dump({
+                            "session": self.session,
+                            "senders": self.senders,
+                            "messages": self.messages,
+                            "_by_date": self._by_date,
+                        }, f, protocol=pickle.HIGHEST_PROTOCOL)
+                    logger.info(f"pickle 缓存已保存: {self._pickle_path} "
+                                f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
+                except Exception as e:
+                    logger.warning(f"保存 pickle 缓存失败: {e}")
+                return self
+            else:
+                raise ValueError("不支持的 ZIP 文件格式，请上传 QQChatExporter V5 导出的群聊 ZIP 文件")
+
         logger.info(f"JSON 解析: {self.file_path} ({self.file_path.stat().st_size / 1024 / 1024:.1f} MB)")
         with open(self.file_path, "r", encoding="utf-8") as f:
             self.raw = json.load(f)

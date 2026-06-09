@@ -83,8 +83,10 @@ async def api_create_group(body: CreateGroupBody):
 @router.post("/upload")
 async def api_upload_group(file: UploadFile = File(...)):
     """上传群聊 JSON 文件，自动创建新群并导入数据"""
-    if not file.filename or not file.filename.endswith(".json"):
-        raise HTTPException(400, detail="请上传 .json 格式的聊天记录文件")
+    is_json = file.filename and file.filename.endswith(".json")
+    is_zip = file.filename and file.filename.endswith(".zip")
+    if not is_json and not is_zip:
+        raise HTTPException(400, detail="请上传 .json 或 .zip 格式的聊天记录文件")
 
     # 保存文件
     config.ensure_dirs()
@@ -100,11 +102,13 @@ async def api_upload_group(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, detail=f"文件保存失败: {e}")
 
-    # 解析 JSON
+    # 解析（ParsedChat.load() 自动识别 QQ chunked-jsonl / QQ JSON / 微信 JSON）
     try:
         chat = ParsedChat(file_path).load()
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
     except Exception as e:
         raise HTTPException(500, detail=f"文件处理失败: {e}")
 
@@ -201,8 +205,10 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
     if not group:
         raise HTTPException(404, detail="群不存在")
 
-    if not file.filename or not file.filename.endswith(".json"):
-        raise HTTPException(400, detail="请上传 .json 格式的聊天记录文件")
+    is_json = file.filename and file.filename.endswith(".json")
+    is_zip = file.filename and file.filename.endswith(".zip")
+    if not is_json and not is_zip:
+        raise HTTPException(400, detail="请上传 .json 或 .zip 格式的聊天记录文件")
 
     if mode not in ("append", "replace"):
         raise HTTPException(400, detail="mode 必须是 append 或 replace")
@@ -220,11 +226,13 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
     except Exception as e:
         raise HTTPException(500, detail=f"文件保存失败: {e}")
 
-    # 解析新 JSON
+    # 解析（ParsedChat.load() 自动识别 QQ chunked-jsonl / QQ JSON / 微信 JSON）
     try:
         new_chat = ParsedChat(upload_path).load()
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
 
     # 用 JSON 中的群名替换当前群名
     if rename in ("1", "true") and new_chat.group_name and new_chat.group_name != group["name"]:
