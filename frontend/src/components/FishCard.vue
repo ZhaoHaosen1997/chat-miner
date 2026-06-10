@@ -94,21 +94,20 @@ function emitAction(action, extra) {
         </div>
       </div>
 
-      <!-- D&D Hex Attributes -->
+      <!-- 属性面板 -->
       <div class="px-6 pb-4">
-        <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">D&D 属性面板</h3>
+        <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">属性面板</h3>
         <div class="grid grid-cols-3 gap-2">
           <div v-for="attr in attrConfig" :key="attr.key"
             class="rounded-lg p-2.5 text-center border"
             :style="{ borderColor: attr.color + '40', background: attr.color + '08' }">
             <div class="text-lg">{{ attr.icon }}</div>
-            <div class="text-[10px] text-slate-400">{{ attr.abbr }}</div>
-            <div class="text-lg font-bold" :style="{ color: attr.color }">
+            <div class="text-[10px]" :style="{ color: attr.color }">{{ attr.label }}</div>
+            <div class="text-lg font-bold text-slate-800">
               {{ fish[attr.key] || 0 }}
             </div>
-            <div class="text-xs font-medium"
-              :style="{ color: attr.color }">
-              {{ abilityMod(fish[attr.key] || 0) }}
+            <div class="text-[10px] font-medium text-slate-400">
+              调整 {{ abilityMod(fish[attr.key] || 0) }}
             </div>
           </div>
         </div>

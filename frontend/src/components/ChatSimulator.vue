@@ -151,17 +151,33 @@ async function sendCommand() {
       msgEntry.resultType = 'showoff'
     } else if (text.startsWith('/斗鱼')) {
       const targetName = text.replace('/斗鱼', '').replace('@', '').trim()
-      // Find target by display_name or use raw input
+      // 精准匹配：display_name > nickname > group_nickname > wxid前缀
       const target = members.value.find(m =>
-        m.display_name === targetName || m.nickname === targetName
+        (m.display_name && m.display_name !== 'null' && m.display_name === targetName) ||
+        (m.nickname && m.nickname !== 'null' && m.nickname === targetName) ||
+        (m.group_nickname && m.group_nickname !== 'null' && m.group_nickname === targetName) ||
+        (m.wxid && m.wxid === targetName) ||
+        (m.wxid && m.wxid.startsWith(targetName))
       )
       if (target) {
         result = await battleFish(gid.value, wxid, target.wxid)
-        d20Result = result.check
+        // 对抗检定：结构为 {attacker: {roll,modifier,total,...}, defender: {...}, winner}
+        const mySide = result.check.winner === 'attacker' ? result.check.attacker : result.check.defender
+        const theirSide = result.check.winner === 'attacker' ? result.check.defender : result.check.attacker
+        d20Result = {
+          roll: mySide.roll,
+          modifier: mySide.modifier,
+          total: mySide.total,
+          dc: theirSide.total,
+          success: result.check.winner === 'attacker',
+          critical_hit: mySide.roll === 20,
+          critical_miss: mySide.roll === 1,
+        }
         msgEntry.resultType = 'battle'
-        msgEntry.targetName = target.display_name || target.wxid
+        msgEntry.targetName = target.display_name || target.nickname || target.wxid
+        msgEntry.battleWinner = result.winner
       } else {
-        msgEntry.error = `找不到目标成员: ${targetName}`
+        msgEntry.error = `找不到目标: "${targetName}"。可用成员: ${members.value.map(m => m.display_name || m.nickname || m.wxid.slice(0,12)).filter(n => n && n !== 'null').join(', ')}`
       }
     } else if (text.startsWith('/改名')) {
       const newName = text.replace('/改名', '').trim()
@@ -384,10 +400,16 @@ function quickCommand(cmd) {
                 </div>
 
                 <!-- Battle result -->
-                <div v-if="msg.resultType === 'battle' && msg.result"
-                  class="px-3 py-2 rounded-xl rounded-tl-sm bg-red-50 border border-red-200 text-xs">
-                  <span class="font-medium text-red-700">⚔️ {{ msg.result.winner === msg.wxid ? '你赢了！' : '你输了...' }}</span>
-                  <span class="text-red-600 ml-1">vs {{ msg.targetName }}</span>
+                <div v-if="msg.resultType === 'battle' && !msg.error"
+                  class="px-3 py-2 rounded-xl rounded-tl-sm text-xs"
+                  :class="msg.battleWinner === msg.wxid
+                    ? 'bg-green-50 border border-green-200'
+                    : 'bg-red-50 border border-red-200'">
+                  <span class="font-medium"
+                    :class="msg.battleWinner === msg.wxid ? 'text-green-700' : 'text-red-700'">
+                    ⚔️ {{ msg.battleWinner === msg.wxid ? '你赢了！' : '你输了...' }}
+                  </span>
+                  <span class="text-slate-500 ml-1">vs {{ msg.targetName }}</span>
                 </div>
 
                 <!-- Rename -->

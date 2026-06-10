@@ -378,6 +378,45 @@ def create_fish(group_id: int, wxid: str, display_name: str,
     return {"fish": fish, "species_info": species_info, "new": True}
 
 
+# ==================== 每日次数限制 ====================
+
+CMD_DAILY_LIMITS = {
+    "feed": 3, "clean": 3, "touch": 5,
+    "explore": 3, "treasure": 2, "showoff": 3,
+    "battle": 3,
+}
+# /领养 不在此表，由 create_fish 内 is_alive 检查控制（有存活鱼则不可领养）
+
+
+def _count_today_events(group_id: int, wxid: str, event_type: str,
+                        date_str: str = None) -> int:
+    """统计某条鱼今天已执行某类指令的次数"""
+    from datetime import datetime as dt
+    today = date_str or dt.now().strftime("%Y-%m-%d")
+    conn = db.get_conn()
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM fish_events
+           WHERE group_id=? AND wxid=? AND event_type=?
+           AND date(created_at)=?""",
+        (group_id, wxid, event_type, today)
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def check_daily_limit(group_id: int, wxid: str, cmd_type: str,
+                      date_str: str = None) -> dict | None:
+    """检查每日限制，返回 None 表示通过，返回 dict 表示超限"""
+    limit = CMD_DAILY_LIMITS.get(cmd_type)
+    if limit is None:
+        return None  # 无限制
+    count = _count_today_events(group_id, wxid, cmd_type, date_str)
+    if count >= limit:
+        return {"error": f"今日 /{cmd_type} 次数已用完 ({count}/{limit})",
+                "limit": limit, "used": count}
+    return None
+
+
 # ==================== 互动指令 ====================
 
 def cmd_feed(group_id: int, wxid: str, from_wxid: str = None,
@@ -386,6 +425,9 @@ def cmd_feed(group_id: int, wxid: str, from_wxid: str = None,
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "feed")
+    if limit_check:
+        return limit_check
 
     result = ability_check(fish["dexterity"], dc=10,
                           is_proficient="acrobatics" in get_proficiencies(fish["species"]),
@@ -435,6 +477,9 @@ def cmd_clean(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "clean")
+    if limit_check:
+        return limit_check
 
     result = ability_check(fish["wisdom"], dc=8,
                           is_proficient="nature" in get_proficiencies(fish["species"]),
@@ -466,6 +511,9 @@ def cmd_touch(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "touch")
+    if limit_check:
+        return limit_check
 
     result = ability_check(fish["charisma"], dc=12,
                           is_proficient="performance" in get_proficiencies(fish["species"]),
@@ -496,6 +544,9 @@ def cmd_battle(group_id: int, wxid_a: str, wxid_b: str, seed: str = None) -> dic
     fish_b = db.get_fish(group_id, wxid_b)
     if not fish_a or not fish_b or not fish_a["is_alive"] or not fish_b["is_alive"]:
         return {"error": "一方或双方鱼不存在/已死亡"}
+    limit_check = check_daily_limit(group_id, wxid_a, "battle")
+    if limit_check:
+        return limit_check
 
     result = opposed_check(
         fish_a["strength"], fish_b["strength"],
@@ -552,6 +603,9 @@ def cmd_explore(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "explore")
+    if limit_check:
+        return limit_check
 
     # 用较高的那个属性
     ability = fish["wisdom"] if fish["wisdom"] >= fish["intelligence"] else fish["intelligence"]
@@ -589,6 +643,9 @@ def cmd_treasure(group_id: int, wxid: str, advantage: bool = False,
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "treasure")
+    if limit_check:
+        return limit_check
 
     result = ability_check(fish["intelligence"], dc=15,
                           is_proficient="investigation" in get_proficiencies(fish["species"]),
@@ -625,6 +682,9 @@ def cmd_showoff(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
+    limit_check = check_daily_limit(group_id, wxid, "showoff")
+    if limit_check:
+        return limit_check
 
     result = ability_check(fish["charisma"], dc=10,
                           is_proficient="performance" in get_proficiencies(fish["species"]),
