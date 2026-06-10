@@ -12,6 +12,7 @@ const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
 const activeTaskId = inject('activeTaskId')
+const gid = computed(() => currentGroup.value?.id)
 
 // 批量任务运行时定时刷新（逐个标绿）
 let _refreshTimer = null
