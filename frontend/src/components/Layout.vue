@@ -3,7 +3,7 @@ import { ref, inject, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
-import { MessageCircle, Users, LayoutDashboard, Loader2 } from 'lucide-vue-next'
+import { MessageCircle, Users, LayoutDashboard, Loader2, Fish } from 'lucide-vue-next'
 import { listGroups } from '../api/index.js'
 
 const props = defineProps({ currentGroup: Object })
@@ -19,6 +19,7 @@ const groupSelectorRef = ref(null)
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
   { path: '/portraits', label: '群友画像', icon: Users },
+  { path: '/fishpond', label: '群鱼塘', icon: Fish },
 ]
 
 function navTo(path) {

@@ -179,6 +179,75 @@ def init_db():
             UNIQUE(group_id, report_type, period_key),
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
+
+        -- v0.9 群鱼塘
+        CREATE TABLE IF NOT EXISTS fish_pond (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL DEFAULT '',
+            fish_name TEXT,
+            species TEXT NOT NULL,
+            rarity TEXT NOT NULL DEFAULT '普通',
+            -- D&D 六维 (稀有度基准 6/8/10/12 + 随机 ±2 + 种族 ASI)
+            strength INTEGER NOT NULL DEFAULT 10,
+            dexterity INTEGER NOT NULL DEFAULT 10,
+            constitution INTEGER NOT NULL DEFAULT 10,
+            intelligence INTEGER NOT NULL DEFAULT 10,
+            wisdom INTEGER NOT NULL DEFAULT 10,
+            charisma INTEGER NOT NULL DEFAULT 10,
+            -- 经验与等级
+            experience INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            -- 鱼状态
+            growth REAL NOT NULL DEFAULT 0,
+            happiness REAL NOT NULL DEFAULT 50,
+            hp INTEGER NOT NULL DEFAULT 20,
+            stage TEXT NOT NULL DEFAULT '鱼苗',
+            -- 活跃追踪
+            consecutive_days INTEGER DEFAULT 0,
+            last_active_date TEXT,
+            last_fed_date TEXT,
+            -- 生死标记
+            is_alive INTEGER NOT NULL DEFAULT 1,
+            -- 时间戳
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, wxid),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS fish_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL,
+            event_data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS scale_coin_wallet (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL DEFAULT '',
+            balance INTEGER NOT NULL DEFAULT 0,
+            total_earned INTEGER NOT NULL DEFAULT 0,
+            total_spent INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, wxid),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS scale_coin_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL DEFAULT '',
+            amount INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
@@ -254,6 +323,14 @@ def _migrate_db(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_wxid "
             "ON group_members(group_id, wxid)"
         )
+
+    # v0.9 群鱼塘迁移：检查新表是否存在
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='fish_pond'"
+    )
+    if not cur.fetchone():
+        # 表不存在时会由 init_db 创建，这里处理已有数据库升级
+        pass  # init_db 使用 CREATE TABLE IF NOT EXISTS，自动处理
 
 
 # ==================== 群管理 CRUD ====================
@@ -706,3 +783,269 @@ def delete_periodic_report(group_id: int, report_type: str,
     deleted = cur.rowcount > 0
     conn.close()
     return deleted
+
+
+# ==================== 群鱼塘 v0.9 CRUD ====================
+
+def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
+                rarity: str, strength: int, dexterity: int, constitution: int,
+                intelligence: int, wisdom: int, charisma: int,
+                experience: int = 0, level: int = 1,
+                growth: float = 0, happiness: float = 50, hp: int = 20,
+                stage: str = "鱼苗", consecutive_days: int = 0,
+                last_active_date: str = "", last_fed_date: str = "",
+                is_alive: int = 1) -> int:
+    """创建或更新鱼（按 group_id + wxid 唯一键）"""
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO fish_pond
+           (group_id, wxid, fish_name, species, rarity,
+            strength, dexterity, constitution, intelligence, wisdom, charisma,
+            experience, level, growth, happiness, hp, stage,
+            consecutive_days, last_active_date, last_fed_date, is_alive, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(group_id, wxid) DO UPDATE SET
+           fish_name = excluded.fish_name,
+           species = excluded.species,
+           rarity = excluded.rarity,
+           strength = excluded.strength,
+           dexterity = excluded.dexterity,
+           constitution = excluded.constitution,
+           intelligence = excluded.intelligence,
+           wisdom = excluded.wisdom,
+           charisma = excluded.charisma,
+           experience = excluded.experience,
+           level = excluded.level,
+           growth = excluded.growth,
+           happiness = excluded.happiness,
+           hp = excluded.hp,
+           stage = excluded.stage,
+           consecutive_days = excluded.consecutive_days,
+           last_active_date = excluded.last_active_date,
+           last_fed_date = excluded.last_fed_date,
+           is_alive = excluded.is_alive,
+           updated_at = datetime('now')""",
+        (group_id, wxid, fish_name, species, rarity,
+         strength, dexterity, constitution, intelligence, wisdom, charisma,
+         experience, level, growth, happiness, hp, stage,
+         consecutive_days, last_active_date, last_fed_date, is_alive)
+    )
+    conn.commit()
+    fid = cur.lastrowid
+    conn.close()
+    return fid
+
+
+def get_fish(group_id: int, wxid: str) -> dict | None:
+    """获取单条鱼"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM fish_pond WHERE group_id=? AND wxid=?",
+        (group_id, wxid)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_fish(group_id: int) -> list[dict]:
+    """获取群所有鱼（存活优先，按成长值降序）"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM fish_pond WHERE group_id=?
+           ORDER BY is_alive DESC, growth DESC""",
+        (group_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_alive_fish(group_id: int) -> list[dict]:
+    """获取所有存活的鱼"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM fish_pond WHERE group_id=? AND is_alive=1
+           ORDER BY growth DESC""",
+        (group_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_fish_dead(group_id: int, wxid: str) -> bool:
+    """标记鱼死亡（鲨鱼事件），保留历史数据"""
+    conn = get_conn()
+    conn.execute(
+        """UPDATE fish_pond SET is_alive=0, updated_at=datetime('now')
+           WHERE group_id=? AND wxid=?""",
+        (group_id, wxid)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def update_fish_field(group_id: int, wxid: str, field: str, value):
+    """更新鱼的单字段"""
+    conn = get_conn()
+    conn.execute(
+        f"""UPDATE fish_pond SET {field}=?, updated_at=datetime('now')
+            WHERE group_id=? AND wxid=?""",
+        (value, group_id, wxid)
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_fish_multi(group_id: int, wxid: str, updates: dict):
+    """更新鱼的多个字段"""
+    if not updates:
+        return
+    conn = get_conn()
+    sets = ", ".join(f"{k}=?" for k in updates)
+    values = list(updates.values())
+    conn.execute(
+        f"UPDATE fish_pond SET {sets}, updated_at=datetime('now') "
+        f"WHERE group_id=? AND wxid=?",
+        (*values, group_id, wxid)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ==================== 鱼塘事件 CRUD ====================
+
+def add_fish_event(group_id: int, wxid: str, event_type: str,
+                   event_data: dict = None) -> int:
+    """记录鱼塘事件"""
+    import json
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO fish_events (group_id, wxid, event_type, event_data)
+           VALUES (?, ?, ?, ?)""",
+        (group_id, wxid, event_type,
+         json.dumps(event_data, ensure_ascii=False) if event_data else "")
+    )
+    conn.commit()
+    eid = cur.lastrowid
+    conn.close()
+    return eid
+
+
+def get_fish_events(group_id: int, wxid: str = "", limit: int = 20) -> list[dict]:
+    """获取鱼塘事件列表"""
+    conn = get_conn()
+    if wxid:
+        rows = conn.execute(
+            """SELECT * FROM fish_events WHERE group_id=? AND wxid=?
+               ORDER BY created_at DESC LIMIT ?""",
+            (group_id, wxid, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM fish_events WHERE group_id=?
+               ORDER BY created_at DESC LIMIT ?""",
+            (group_id, limit)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ==================== 鳞币 CRUD ====================
+
+def get_coin_wallet(group_id: int, wxid: str) -> dict:
+    """获取鳞币钱包，不存在则返回默认值"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM scale_coin_wallet WHERE group_id=? AND wxid=?",
+        (group_id, wxid)
+    ).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return {"group_id": group_id, "wxid": wxid, "balance": 0,
+            "total_earned": 0, "total_spent": 0}
+
+
+def ensure_coin_wallet(group_id: int, wxid: str) -> dict:
+    """确保钱包存在，不存在则创建"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT OR IGNORE INTO scale_coin_wallet (group_id, wxid)
+           VALUES (?, ?)""",
+        (group_id, wxid)
+    )
+    conn.commit()
+    conn.close()
+    return get_coin_wallet(group_id, wxid)
+
+
+def earn_coins(group_id: int, wxid: str, amount: int,
+               reason: str, description: str = "") -> dict:
+    """获得鳞币"""
+    ensure_coin_wallet(group_id, wxid)
+    conn = get_conn()
+    conn.execute(
+        """UPDATE scale_coin_wallet
+           SET balance = balance + ?, total_earned = total_earned + ?,
+               updated_at = datetime('now')
+           WHERE group_id=? AND wxid=?""",
+        (amount, amount, group_id, wxid)
+    )
+    # 流水
+    conn.execute(
+        """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
+           VALUES (?, ?, ?, ?, ?)""",
+        (group_id, wxid, amount, reason, description)
+    )
+    conn.commit()
+    conn.close()
+    return get_coin_wallet(group_id, wxid)
+
+
+def spend_coins(group_id: int, wxid: str, amount: int,
+                reason: str, description: str = "") -> dict | None:
+    """消费鳞币，余额不足返回 None"""
+    wallet = ensure_coin_wallet(group_id, wxid)
+    if wallet["balance"] < amount:
+        return None
+    conn = get_conn()
+    conn.execute(
+        """UPDATE scale_coin_wallet
+           SET balance = balance - ?, total_spent = total_spent + ?,
+               updated_at = datetime('now')
+           WHERE group_id=? AND wxid=?""",
+        (amount, amount, group_id, wxid)
+    )
+    conn.execute(
+        """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
+           VALUES (?, ?, ?, ?, ?)""",
+        (group_id, wxid, -amount, reason, description)
+    )
+    conn.commit()
+    conn.close()
+    return get_coin_wallet(group_id, wxid)
+
+
+def get_coin_transactions(group_id: int, wxid: str, limit: int = 20) -> list[dict]:
+    """获取鳞币流水"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM scale_coin_transactions
+           WHERE group_id=? AND wxid=?
+           ORDER BY created_at DESC LIMIT ?""",
+        (group_id, wxid, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_coin_leaderboard(group_id: int, limit: int = 10) -> list[dict]:
+    """鳞币排行榜"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM scale_coin_wallet WHERE group_id=?
+           ORDER BY balance DESC LIMIT ?""",
+        (group_id, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

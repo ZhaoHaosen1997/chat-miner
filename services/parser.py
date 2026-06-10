@@ -526,6 +526,18 @@ class ParsedChat:
         day_msgs = self.chunk_by_date().get(date, [])
         return [m for m in day_msgs if m.get("type") in PORTRAIT_TEXT_TYPES and (m.get("content") or "").strip()]
 
+    def get_analysis_messages(self, date: str, msg_types: set = None) -> list[dict]:
+        """获取某天用于 AI 分析的消息（自动过滤 / 开头的游戏指令）"""
+        if msg_types is None:
+            msg_types = TEXT_TYPES
+        day_msgs = self.chunk_by_date().get(date, [])
+        return [
+            m for m in day_msgs
+            if m.get("type") in msg_types
+            and (m.get("content") or "").strip()
+            and not is_game_command(m.get("content", ""))
+        ]
+
     def get_sender_name(self, sender_id: int) -> str:
         """通过 senderID 获取显示名（兼容旧代码）"""
         for s in self.senders:
@@ -650,6 +662,15 @@ def merge_chat_data(existing_messages: list[dict],
         "total_new": len(new_messages),
     }
 
+
+# ---- 鱼塘游戏指令过滤 (v0.9) ----
+
+def is_game_command(content: str) -> bool:
+    """判断消息是否为鱼塘游戏指令（以 / 开头），这些消息不参与 AI 分析"""
+    return (content or "").strip().startswith('/')
+
+
+# ---- Token 估算 ----
 
 def estimate_tokens(text: str) -> int:
     """简单估算 token 数（中文约 1 字符=1.5 token，英文约 4 字符=1 token）"""

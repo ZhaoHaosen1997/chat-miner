@@ -9,6 +9,7 @@ import Portraits from './views/Portraits.vue'
 import PortraitDetail from './views/PortraitDetail.vue'
 import WeeklyReport from './views/WeeklyReport.vue'
 import MonthlyReport from './views/MonthlyReport.vue'
+import FishPond from './views/FishPond.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -17,6 +18,7 @@ const routes = [
   { path: '/portrait/:memberId', component: PortraitDetail, props: true },
   { path: '/weekly/:weekId', component: WeeklyReport, props: true },
   { path: '/monthly/:monthId', component: MonthlyReport, props: true },
+  { path: '/fishpond', component: FishPond },
 ]
 
 const router = createRouter({
