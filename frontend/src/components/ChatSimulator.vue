@@ -153,9 +153,9 @@ async function sendCommand() {
       const targetName = text.replace('/斗鱼', '').replace('@', '').trim()
       // 精准匹配：display_name > nickname > group_nickname > wxid前缀
       const target = members.value.find(m =>
-        (m.display_name && m.display_name !== 'null' && m.display_name === targetName) ||
-        (m.nickname && m.nickname !== 'null' && m.nickname === targetName) ||
-        (m.group_nickname && m.group_nickname !== 'null' && m.group_nickname === targetName) ||
+        (m.display_name && m.display_name === targetName) ||
+        (m.nickname && m.nickname === targetName) ||
+        (m.group_nickname && m.group_nickname === targetName) ||
         (m.wxid && m.wxid === targetName) ||
         (m.wxid && m.wxid.startsWith(targetName))
       )

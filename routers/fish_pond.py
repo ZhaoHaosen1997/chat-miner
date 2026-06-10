@@ -210,22 +210,93 @@ def fish_events(group_id: int, wxid: str = "", limit: int = 20):
     return {"code": 200, "message": "ok", "data": events}
 
 
-# ---- 历史指令解析 ----
+# ---- 今日指令解析 + 结算 ----
 
 @router.post("/parse-commands")
 def parse_commands(group_id: int):
-    """扫描聊天记录中的 / 指令并执行"""
-    # 获取 ParsedChat 和消息
+    """扫描今日聊天记录中的 / 指令并执行，然后自动结算"""
+    from datetime import datetime as dt
     try:
         from routers.groups import get_chat_cache
         chat = get_chat_cache(group_id)
     except Exception:
         raise HTTPException(400, "无法加载聊天数据，请先导入群")
 
-    all_messages = chat.messages
-    result = fp.parse_commands_from_messages(
-        group_id, all_messages,
+    # 只取今日消息
+    today = dt.now().strftime("%Y-%m-%d")
+    today_msgs = [m for m in chat.messages
+                  if (m.get("formattedTime") or "").startswith(today)]
+
+    # 按时间排序
+    today_msgs.sort(key=lambda m: m.get("createTime", 0))
+
+    # 解析指令
+    parse_result = fp.parse_commands_from_messages(
+        group_id, today_msgs,
         get_name_by_wxid=chat.get_name_by_wxid
     )
-    return {"code": 200, "message": f"解析完成，处理 {result['events_processed']} 条指令",
-            "data": result}
+
+    # 自动结算
+    settle_result = fp.settle_all_fish(group_id, today)
+
+    # 构建详细日志
+    log_entries = []
+    for p in parse_result.get("processed", []):
+        entry = {
+            "time": p.get("time", ""),
+            "sender": p.get("display_name", ""),
+            "wxid": p.get("wxid", ""),
+            "command": p.get("content", ""),
+            "type": p.get("type", ""),
+        }
+        r = p.get("result", {})
+        if "check" in r:
+            c = r["check"]
+            entry["d20"] = {
+                "roll": c.get("roll"), "modifier": c.get("modifier"),
+                "total": c.get("total"), "dc": c.get("dc"),
+                "success": c.get("success"),
+                "critical_hit": c.get("critical_hit"),
+                "critical_miss": c.get("critical_miss"),
+            }
+        if r.get("growth_bonus"):
+            entry["growth"] = r["growth_bonus"]
+        if r.get("happiness_bonus"):
+            entry["happiness"] = r["happiness_bonus"]
+        if r.get("coin_amount"):
+            entry["coin_amount"] = r["coin_amount"]
+        if r.get("evolved"):
+            entry["evolved"] = True
+        if r.get("new_stage"):
+            entry["new_stage"] = r["new_stage"]
+        if "fish" in r:
+            entry["fish"] = {
+                "name": r["fish"].get("fish_name"),
+                "species": r["fish"].get("species"),
+                "rarity": r["fish"].get("rarity"),
+            }
+        if "error" in r:
+            entry["error"] = r["error"]
+        if r.get("winner"):
+            entry["battle_winner"] = r["winner"]
+        log_entries.append(entry)
+
+    # 错误
+    for e in parse_result.get("errors", []):
+        log_entries.append({
+            "time": "", "sender": "", "command": e.get("msg", ""),
+            "error": e.get("error", ""), "type": "error"
+        })
+
+    return {"code": 200,
+            "message": f"今日解析 {parse_result['events_processed']} 条指令，结算完成",
+            "data": {
+                "today": today,
+                "commands_found": parse_result["commands_found"],
+                "events_processed": parse_result["events_processed"],
+                "log": log_entries,
+                "settle": {
+                    "weather": settle_result.get("weather"),
+                    "fish_count": settle_result.get("fish_count"),
+                }
+            }}
