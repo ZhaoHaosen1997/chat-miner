@@ -151,6 +151,8 @@ export const renameFish = (gid, wxid, name) =>
   })
 export const settleFishPond = (gid) =>
   request(`/groups/${gid}/fishpond/settle`, { method: 'POST' })
+export const resettleFishPond = (gid, date) =>
+  request(`/groups/${gid}/fishpond/resettle?date=${encodeURIComponent(date)}`, { method: 'POST' })
 export const getFishLeaderboard = (gid, sort = 'growth') =>
   request(`/groups/${gid}/fishpond/leaderboard?sort=${sort}`)
 export const getFishEvents = (gid, wxid = '', limit = 20) =>

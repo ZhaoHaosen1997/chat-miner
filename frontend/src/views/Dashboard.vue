@@ -5,7 +5,7 @@ import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 
 const router = useRouter()
@@ -33,6 +33,8 @@ const portraits = ref([])
 const taskHistory = ref([])
 const trending = ref(null)
 const showUpload = ref(false)
+const dayPopup = ref(null)  // { date, count, analyzed }
+const dayPopupLoading = ref('')  // 'report' | 'settle'
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
 // 防止快速切群时的竞态条件
@@ -142,6 +144,39 @@ function onTaskDone(data) {
 
 function goReport(date) {
   router.push(`/report/${date}`)
+}
+
+function openDayPopup(day) {
+  dayPopup.value = day
+  dayPopupLoading.value = ''
+}
+
+async function handleGenerateReport() {
+  if (!dayPopup.value) return
+  dayPopupLoading.value = 'report'
+  try {
+    const result = await analyzeDateAsync(gid.value, dayPopup.value.date)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    }
+    dayPopup.value.analyzed = true
+    // Refresh dates after a moment
+    setTimeout(() => {
+      if (gid.value) loadDates()
+    }, 2000)
+  } catch (e) { alert('生成日报失败: ' + e.message) }
+  finally { dayPopupLoading.value = '' }
+}
+
+async function handleResettleDay() {
+  if (!dayPopup.value) return
+  dayPopupLoading.value = 'settle'
+  try {
+    const { resettleFishPond } = await import('../api/index.js')
+    await resettleFishPond(gid.value, dayPopup.value.date)
+    dayPopup.value = null
+  } catch (e) { alert('结算失败: ' + e.message) }
+  finally { dayPopupLoading.value = '' }
 }
 
 // ---- 月视图日历（分月翻页） ----
@@ -371,20 +406,6 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                 <span class="hidden sm:inline">导入数据</span>
               </button>
               <button
-                @click="analyzeLatest"
-                :disabled="!latestUnanalyzed || analyzing"
-                :class="[
-                  'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all',
-                  latestUnanalyzed && !analyzing
-                    ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
-                    : 'bg-slate-100 text-slate-400',
-                ]"
-              >
-                <Loader2 v-if="analyzing" class="w-4 h-4 animate-spin" />
-                <Sparkles v-else class="w-4 h-4" />
-                {{ analyzing ? 'AI 分析中...' : '分析最新一天' }}
-              </button>
-              <button
                 v-if="(stats?.total_days_with_data - (stats?.analyzed_count || 0)) > 1"
                 @click="startAnalyzeAll"
                 :disabled="analyzing"
@@ -442,7 +463,7 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                      day.hasData ? 'bg-indigo-50 text-indigo-400 cursor-pointer hover:bg-indigo-100' :
                      'bg-slate-50 text-transparent',
                    ]"
-                   @click="day?.analyzed && goReport(day.date)">
+                   @click="day?.hasData && openDayPopup(day)">
                 {{ day ? day.day : '' }}
               </div>
             </div>
@@ -689,5 +710,41 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
       @close="showUpload = false"
       @uploaded="showUpload = false; loadAll(); triggerRefresh?.()"
     />
+
+    <!-- 日历日期弹窗 -->
+    <Teleport to="body">
+      <div v-if="dayPopup" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="dayPopup = null">
+        <div class="bg-white rounded-2xl shadow-2xl w-[360px] overflow-hidden">
+          <div class="px-5 py-4 border-b border-slate-100">
+            <h3 class="font-bold text-slate-800 text-lg">{{ dayPopup.date }}</h3>
+            <p class="text-sm text-slate-400 mt-0.5">
+              {{ dayPopup.count }} 条消息
+              <span v-if="dayPopup.analyzed" class="text-emerald-500 ml-2">· 已分析</span>
+              <span v-else class="text-amber-500 ml-2">· 未分析</span>
+            </p>
+          </div>
+          <div class="px-5 py-4 space-y-3">
+            <button @click="handleGenerateReport" :disabled="!!dayPopupLoading"
+              class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium
+                     bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition shadow-sm">
+              <Sparkles :size="16" :class="{ 'animate-spin': dayPopupLoading === 'report' }" />
+              {{ dayPopupLoading === 'report' ? '提交中...' : dayPopup.analyzed ? '重新生成群聊日报' : '生成群聊日报' }}
+            </button>
+            <button @click="handleResettleDay" :disabled="!!dayPopupLoading"
+              class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium
+                     bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition shadow-sm">
+              <RefreshCw :size="16" :class="{ 'animate-spin': dayPopupLoading === 'settle' }" />
+              {{ dayPopupLoading === 'settle' ? '结算中...' : '结算鱼塘' }}
+            </button>
+          </div>
+          <div class="px-5 py-3 border-t border-slate-100">
+            <button @click="dayPopup = null"
+              class="w-full px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-lg transition">
+              关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

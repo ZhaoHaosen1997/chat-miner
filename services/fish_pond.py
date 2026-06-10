@@ -1089,6 +1089,106 @@ def parse_commands_from_messages(group_id: int, messages: list[dict],
     }
 
 
+def resettle_day(group_id: int, date_str: str, messages: list[dict],
+                 get_name_by_wxid) -> dict:
+    """重新结算指定日期：只处理该天尚未结算的指令 + 天结算
+
+    已结算判定：检查 fish_events 中当天该 wxid 该指令类型是否已达每日上限。
+    已达上限的指令直接跳过，未达上限的执行并可能触发新的限额。
+
+    Returns:
+        {date, skipped: N, processed: [...], settle: {...}}
+    """
+    skipped = []
+    processed = []
+    errors = []
+
+    for msg in sorted(messages, key=lambda m: m.get("createTime", 0)):
+        content = (msg.get("content") or "").strip()
+        if not is_game_command(content):
+            continue
+
+        cmd = parse_command(content)
+        if not cmd:
+            continue
+
+        wxid = msg.get("wxid", "")
+        if not wxid:
+            continue
+
+        # 检查当日该指令类型是否已达上限（已结算过）
+        limit = CMD_DAILY_LIMITS.get(cmd["type"])
+        if limit is not None:
+            count = _count_today_events(group_id, wxid, cmd["type"], date_str)
+            if count >= limit:
+                skipped.append({
+                    "wxid": wxid, "type": cmd["type"], "content": content,
+                    "reason": f"已达每日上限 ({count}/{limit})",
+                    "time": msg.get("formattedTime", ""),
+                })
+                continue
+
+        display_name = get_name_by_wxid(wxid)
+        seed = f"cmd_{group_id}_{msg.get('platformMessageId', '')}"
+
+        try:
+            result = _execute_command(cmd, group_id, wxid, display_name, seed)
+            processed.append({
+                "type": cmd["type"], "wxid": wxid,
+                "display_name": display_name, "content": content,
+                "result": result, "time": msg.get("formattedTime", ""),
+            })
+        except Exception as e:
+            logger.error(f"resettle 指令执行失败: {content} | {e}")
+            errors.append({"msg": content, "error": str(e)})
+
+    # 天结算
+    settle_result = settle_all_fish(group_id, date_str)
+
+    return {
+        "date": date_str,
+        "skipped": len(skipped),
+        "skipped_details": skipped,
+        "processed_count": len(processed),
+        "processed": processed,
+        "errors": errors,
+        "settle": {
+            "weather": settle_result.get("weather"),
+            "fish_count": settle_result.get("fish_count"),
+        },
+    }
+
+
+def _execute_command(cmd: dict, group_id: int, wxid: str,
+                     display_name: str, seed: str = None) -> dict:
+    """执行单条指令（内部共用）"""
+    if cmd["type"] == "adopt":
+        return cmd_adopt(group_id, wxid, display_name)
+    elif cmd["type"] == "feed":
+        return cmd_feed(group_id, wxid, seed=seed)
+    elif cmd["type"] == "clean":
+        return cmd_clean(group_id, wxid, seed=seed)
+    elif cmd["type"] == "touch":
+        return cmd_touch(group_id, wxid, seed=seed)
+    elif cmd["type"] == "explore":
+        return cmd_explore(group_id, wxid, seed=seed)
+    elif cmd["type"] == "treasure":
+        return cmd_treasure(group_id, wxid, seed=seed)
+    elif cmd["type"] == "showoff":
+        return cmd_showoff(group_id, wxid, seed=seed)
+    elif cmd["type"] == "battle":
+        target_wxid = _find_wxid_by_name(group_id, cmd.get("target_name", ""))
+        if target_wxid:
+            return cmd_battle(group_id, wxid, target_wxid, seed=seed)
+        return {"error": f"找不到目标: {cmd.get('target_name', '')}"}
+    elif cmd["type"] == "rename":
+        return cmd_rename(group_id, wxid, cmd.get("new_name", ""))
+    elif cmd["type"] == "pond":
+        db.add_fish_event(group_id, wxid, "pond_view", {})
+        return {"type": "pond", "status": "viewed"}
+    return {"error": f"未知指令类型: {cmd.get('type', '')}"}
+
+
 def _find_wxid_by_name(group_id: int, name: str) -> str | None:
     """通过显示名查找 wxid"""
     conn = db.get_conn()

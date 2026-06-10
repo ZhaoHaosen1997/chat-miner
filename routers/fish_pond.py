@@ -52,6 +52,28 @@ def settle_pond(group_id: int, body: SettleBody = SettleBody()):
     return {"code": 200, "message": "结算完成", "data": result}
 
 
+@router.post("/resettle")
+def resettle_pond(group_id: int, date: str = ""):
+    """重新结算指定日期：只处理该天未结算的指令 + 天结算"""
+    from datetime import datetime as dt
+    if not date:
+        date = dt.now().strftime("%Y-%m-%d")
+    try:
+        from routers.groups import get_chat_cache
+        chat = get_chat_cache(group_id)
+    except Exception:
+        raise HTTPException(400, "无法加载聊天数据，请先导入群")
+
+    # 只取指定日期的消息
+    day_msgs = [m for m in chat.messages
+                if (m.get("formattedTime") or "").startswith(date)]
+    day_msgs.sort(key=lambda m: m.get("createTime", 0))
+
+    result = fp.resettle_day(group_id, date, day_msgs,
+                             get_name_by_wxid=chat.get_name_by_wxid)
+    return {"code": 200, "message": f"{date} 结算完成", "data": result}
+
+
 # ---- 单鱼操作 ----
 
 @router.post("/fish/{wxid}/adopt")

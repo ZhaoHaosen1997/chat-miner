@@ -8,7 +8,7 @@ import FishTank from '../components/FishTank.vue'
 import FishCard from '../components/FishCard.vue'
 import FishLeaderboard from '../components/FishLeaderboard.vue'
 import ChatSimulator from '../components/ChatSimulator.vue'
-import { Fish, RefreshCw, Sparkles, Coins, Zap, Search, X } from 'lucide-vue-next'
+import { Fish, RefreshCw, Sparkles, Coins, Zap, Search, X, BookOpen } from 'lucide-vue-next'
 
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
@@ -19,8 +19,9 @@ const selectedFish = ref(null)
 const showCard = ref(false)
 const actionLoading = ref('')
 const leaderboardSort = ref('growth')
-const parseLog = ref(null)   // { today, commands_found, events_processed, log: [...], settle }
+const parseLog = ref(null)
 const showParseLog = ref(false)
+const showTutorial = ref(false)
 
 const gid = computed(() => currentGroup.value?.id)
 
@@ -120,16 +121,16 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
       </div>
       <div class="flex items-center gap-2">
         <button @click="handleParseCommands" :disabled="!!actionLoading"
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded-lg
-                 hover:bg-slate-50 disabled:opacity-50 transition">
+          class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500 text-white rounded-lg
+                 hover:bg-amber-600 disabled:opacity-50 transition shadow-sm">
           <Search :size="16" />
           {{ actionLoading === 'parse' ? '解析中...' : '今日解析+结算' }}
         </button>
-        <button @click="handleSettle" :disabled="!!actionLoading"
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500 text-white rounded-lg
-                 hover:bg-amber-600 disabled:opacity-50 transition">
-          <RefreshCw :size="16" :class="{ 'animate-spin': actionLoading === 'settle' }" />
-          结算
+        <button @click="showTutorial = true"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded-lg
+                 hover:bg-slate-50 transition text-slate-600">
+          <BookOpen :size="16" />
+          教程
         </button>
       </div>
     </div>
@@ -346,6 +347,69 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
             <button @click="showParseLog = false"
               class="px-4 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 transition">
               关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Tutorial Modal -->
+    <Teleport to="body">
+      <div v-if="showTutorial" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click.self="showTutorial = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto">
+          <div class="sticky top-0 bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h2 class="font-bold text-slate-800 text-lg">🐟 群鱼塘教程</h2>
+            <button @click="showTutorial = false" class="p-1 hover:bg-slate-100 rounded text-slate-400"><X :size="18" /></button>
+          </div>
+          <div class="px-5 py-4 space-y-4 text-sm text-slate-600">
+            <div>
+              <h3 class="font-semibold text-slate-800 mb-2">🎮 基本概念</h3>
+              <p>群鱼塘是基于群聊活跃度的<strong>养鱼游戏</strong>。每个群成员拥有一条水生生物，发言活跃度驱动鱼的成长。</p>
+              <p class="mt-1">鱼有 <strong>六维属性</strong>（力量/敏捷/体质/智力/感知/魅力）、<strong>成长阶段</strong>（鱼苗→幼鱼→成鱼→大鱼→传说）和 <strong>稀有度</strong>（普通/稀有/史诗/传说）。</p>
+            </div>
+            <div>
+              <h3 class="font-semibold text-slate-800 mb-2">📋 全部指令</h3>
+              <div class="space-y-1.5">
+                <div v-for="cmd in [
+                  {c:'/领养',d:'随机品种+稀有度+属性，创建你的第一条鱼',cl:'bg-green-50 text-green-700 border-green-200'},
+                  {c:'/喂食',d:'DEX检定 DC10 · +成长+幸福 · 每天3次',cl:'bg-sky-50 text-sky-700 border-sky-200'},
+                  {c:'/换水',d:'WIS检定 DC8 · +幸福+经验 · 每天3次',cl:'bg-teal-50 text-teal-700 border-teal-200'},
+                  {c:'/摸鱼',d:'CHA检定 DC12 · +亲密度 · 每天5次',cl:'bg-pink-50 text-pink-700 border-pink-200'},
+                  {c:'/探索',d:'WIS/INT检定 DC13 · 获得1d10鳞币 · 每天3次',cl:'bg-amber-50 text-amber-700 border-amber-200'},
+                  {c:'/寻宝',d:'INT检定 DC15 · 高回报2d10鳞币 · 每天2次',cl:'bg-yellow-50 text-yellow-700 border-yellow-200'},
+                  {c:'/晒鱼',d:'CHA检定 · 观众打赏鳞币 · 每天3次',cl:'bg-purple-50 text-purple-700 border-purple-200'},
+                  {c:'/斗鱼 @某人',d:'STR对抗检定 · 胜者+20成长+10鳞币 · 每天3次',cl:'bg-red-50 text-red-700 border-red-200'},
+                  {c:'/鱼塘',d:'查看鱼塘总览',cl:'bg-slate-100 text-slate-700 border-slate-200'},
+                  {c:'/改名 新名字',d:'给鱼改名（首次免费，之后需改名符）',cl:'bg-indigo-50 text-indigo-700 border-indigo-200'},
+                ]" :key="cmd.c" class="rounded-lg p-2.5 border" :class="cmd.cl">
+                  <span class="font-mono font-bold">{{ cmd.c }}</span>
+                  <span class="ml-2 opacity-80">{{ cmd.d }}</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <h3 class="font-semibold text-slate-800 mb-2">🎲 D20 检定</h3>
+              <p>所有互动通过 <strong>d20 掷骰</strong>判定成败：<code class="bg-slate-100 px-1 rounded">d20 + 属性调整值 + 熟练加值 ≥ DC</code></p>
+              <ul class="list-disc ml-5 mt-1 space-y-0.5 text-xs">
+                <li>自然 <strong class="text-amber-600">20</strong>：🎉 大成功！效果翻倍</li>
+                <li>自然 <strong class="text-red-500">1</strong>：💀 大失败！效果减半</li>
+                <li>属性调整值 = (属性值 - 10) ÷ 2</li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="font-semibold text-slate-800 mb-2">🪙 鳞币</h3>
+              <p>通过 /探索 /寻宝 /晒鱼 /斗鱼 赚取。可在商店购买道具。鳞币绑定到 (群聊+wxid)，与鱼的生命周期无关。</p>
+            </div>
+            <div>
+              <h3 class="font-semibold text-slate-800 mb-2">📅 每日结算</h3>
+              <p>每天点击<strong>今日解析+结算</strong>：扫描当天 / 指令并执行，触发天气效果、进化检查、连续活跃奖励。也可从<strong>仪表盘日历</strong>点击某天结算。</p>
+            </div>
+          </div>
+          <div class="sticky bottom-0 bg-white px-5 py-3 border-t border-slate-100">
+            <button @click="showTutorial = false"
+              class="w-full px-4 py-2 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition text-sm font-medium">
+              我知道了
             </button>
           </div>
         </div>
