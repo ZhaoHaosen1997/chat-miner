@@ -123,6 +123,8 @@ export const analyzeAll = async (gid) => {
 export const getFishPond = (gid) => request(`/groups/${gid}/fishpond/`)
 export const getFishDetail = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}`)
+export const deleteFish = (gid, wxid) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/delete`, { method: 'POST' })
 export const adoptFish = (gid, wxid, displayName = '') =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/adopt`, {
     method: 'POST', body: JSON.stringify({ display_name: displayName })
@@ -131,16 +133,40 @@ export const feedFish = (gid, wxid, fromWxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/feed`, {
     method: 'POST', body: JSON.stringify({ from_wxid: fromWxid })
   })
-export const cleanTank = (gid, wxid) =>
-  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/clean`, { method: 'POST' })
 export const touchFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/touch`, { method: 'POST' })
 export const exploreFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/explore`, { method: 'POST' })
-export const treasureFish = (gid, wxid) =>
-  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/treasure`, { method: 'POST' })
 export const showoffFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/showoff`, { method: 'POST' })
+export const trainFish = (gid, wxid, attrName) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/train`, {
+    method: 'POST', body: JSON.stringify({ attr_name: attrName })
+  })
+export const fishItems = (gid, wxid, action, itemKey = '', qty = 1) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/items`, {
+    method: 'POST', body: JSON.stringify({ action, item_key: itemKey, qty })
+  })
+export const buyFromMarket = (gid, wxid, itemKey) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/buy`, {
+    method: 'POST', body: JSON.stringify({ item_key: itemKey })
+  })
+export const giftItem = (gid, wxid, targetName, itemKey) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/gift`, {
+    method: 'POST', body: JSON.stringify({ target_name: targetName, item_key: itemKey })
+  })
+export const logSimCommand = (gid, entry) =>
+  request(`/groups/${gid}/fishpond/log-sim-command`, {
+    method: 'POST', body: JSON.stringify(entry)
+  })
+export const getBlackMarket = (gid, date = '') =>
+  request(`/groups/${gid}/fishpond/black-market?date=${encodeURIComponent(date)}`)
+export const generateFishReport = (gid, date = '') =>
+  request(`/groups/${gid}/fishpond/generate-report?date=${encodeURIComponent(date)}`, { method: 'POST' })
+export const getFishReport = (gid, date) =>
+  request(`/groups/${gid}/fishpond/report/${encodeURIComponent(date)}`)
+export const listFishReports = (gid) =>
+  request(`/groups/${gid}/fishpond/reports`)
 export const battleFish = (gid, wxid, targetWxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/battle`, {
     method: 'POST', body: JSON.stringify({ target_wxid: targetWxid })

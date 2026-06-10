@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { X, Dices, Droplets, Hand, Search, Gem, Sword, Share2, Edit3 } from 'lucide-vue-next'
+import { X, Dices, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   fish: Object,
@@ -10,10 +10,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'action', 'refresh'])
 
-const showRename = ref(false)
-const renameInput = ref('')
-const showBattle = ref(false)
-const battleTarget = ref('')
+const showDeleteConfirm = ref(false)
 
 const speciesEmoji = {
   goldfish: '🐟', koi: '🎏', clownfish: '🤡', betta: '🐠', arowana: '🐉',
@@ -60,8 +57,9 @@ const xpProgress = computed(() => {
   return { pct, next: nextLevelXp, current: xp }
 })
 
-function emitAction(action, extra) {
-  emit('action', action, props.fish.wxid, extra)
+function confirmDelete() {
+  emit('action', 'delete', props.fish.wxid)
+  showDeleteConfirm.value = false
 }
 </script>
 
@@ -179,71 +177,25 @@ function emitAction(action, extra) {
         </div>
       </div>
 
-      <!-- Actions -->
+      <!-- Delete -->
       <div class="px-6 pb-4">
-        <h3 class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">互动指令</h3>
-        <div class="grid grid-cols-3 gap-2">
-          <button @click="emitAction('feed')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-sky-50 text-sky-700 hover:bg-sky-100 disabled:opacity-50 border border-sky-200 transition">
-            🎲 /喂食
-          </button>
-          <button @click="emitAction('clean')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-teal-50 text-teal-700 hover:bg-teal-100 disabled:opacity-50 border border-teal-200 transition">
-            🪣 /换水
-          </button>
-          <button @click="emitAction('touch')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-pink-50 text-pink-700 hover:bg-pink-100 disabled:opacity-50 border border-pink-200 transition">
-            👆 /摸鱼
-          </button>
-          <button @click="emitAction('explore')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50 border border-amber-200 transition">
-            🔍 /探索
-          </button>
-          <button @click="emitAction('treasure')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-yellow-50 text-yellow-700 hover:bg-yellow-100 disabled:opacity-50 border border-yellow-200 transition">
-            💎 /寻宝
-          </button>
-          <button @click="emitAction('showoff')" :disabled="!!loading"
-            class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                   bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50 border border-purple-200 transition">
-            📸 /晒鱼
+        <div v-if="!showDeleteConfirm">
+          <button @click="showDeleteConfirm = true"
+            class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs
+                   text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 hover:border-red-200 transition">
+            <Trash2 :size="14" />
+            删除此鱼
           </button>
         </div>
-        <!-- Battle & Rename row -->
-        <div class="flex gap-2 mt-2">
-          <div class="flex-1">
-            <div v-if="!showBattle" class="flex gap-2">
-              <button @click="showBattle = true"
-                class="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                       bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 transition">
-                ⚔️ /斗鱼
-              </button>
-              <button @click="showRename = !showRename"
-                class="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium
-                       bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200 transition">
-                <Edit3 :size="12" />
-              </button>
-            </div>
-            <div v-else class="flex gap-1">
-              <input v-model="battleTarget" placeholder="对手wxid"
-                class="flex-1 px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-red-300" />
-              <button @click="emitAction('battle', battleTarget); showBattle = false; battleTarget = ''"
-                class="px-2 py-1.5 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600">GO</button>
-              <button @click="showBattle = false" class="px-2 py-1.5 text-xs border rounded-lg">取消</button>
-            </div>
-          </div>
-        </div>
-        <!-- Rename input -->
-        <div v-if="showRename" class="flex gap-1 mt-2">
-          <input v-model="renameInput" placeholder="新名字"
-            class="flex-1 px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-300" />
-          <button @click="emitAction('rename', renameInput); showRename = false; renameInput = ''"
-            class="px-3 py-1.5 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600">确认</button>
+        <div v-else class="flex gap-2">
+          <button @click="confirmDelete"
+            class="flex-1 px-3 py-2 rounded-lg text-xs font-medium bg-red-500 text-white hover:bg-red-600 transition">
+            确认删除
+          </button>
+          <button @click="showDeleteConfirm = false"
+            class="flex-1 px-3 py-2 rounded-lg text-xs border border-slate-200 text-slate-500 hover:bg-slate-50 transition">
+            取消
+          </button>
         </div>
       </div>
     </div>

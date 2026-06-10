@@ -248,9 +248,42 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
+
+        -- v0.9.3 道具库存
+        CREATE TABLE IF NOT EXISTS fish_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL DEFAULT '',
+            item_key TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, wxid, item_key),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+
+        -- v0.9.3 黑市
+        CREATE TABLE IF NOT EXISTS fish_black_market (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            price INTEGER NOT NULL,
+            stock INTEGER NOT NULL DEFAULT 1,
+            stock_remaining INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, date, item_key),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
+    # v0.9.3: 装备栏
+    cur = conn.execute("PRAGMA table_info(fish_pond)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "equipped_item" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN equipped_item TEXT DEFAULT ''")
+    if "active_consumable" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN active_consumable TEXT DEFAULT ''")
     conn.commit()
     conn.close()
     # 清理过期日志（不阻塞启动）
@@ -1049,3 +1082,105 @@ def get_coin_leaderboard(group_id: int, limit: int = 10) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ==================== 道具库存 v0.9.3 CRUD ====================
+
+def get_inventory(group_id: int, wxid: str) -> list[dict]:
+    """获取库存"""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM fish_inventory WHERE group_id=? AND wxid=? AND quantity > 0",
+        (group_id, wxid)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def add_item(group_id: int, wxid: str, item_key: str, qty: int = 1):
+    """添加道具到库存"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO fish_inventory (group_id, wxid, item_key, quantity)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(group_id, wxid, item_key) DO UPDATE SET
+           quantity = quantity + excluded.quantity""",
+        (group_id, wxid, item_key, qty)
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_item(group_id: int, wxid: str, item_key: str, qty: int = 1) -> bool:
+    """从库存移除道具，返回是否成功"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT quantity FROM fish_inventory WHERE group_id=? AND wxid=? AND item_key=?",
+        (group_id, wxid, item_key)
+    ).fetchone()
+    if not row or row["quantity"] < qty:
+        conn.close()
+        return False
+    new_qty = row["quantity"] - qty
+    if new_qty <= 0:
+        conn.execute(
+            "DELETE FROM fish_inventory WHERE group_id=? AND wxid=? AND item_key=?",
+            (group_id, wxid, item_key)
+        )
+    else:
+        conn.execute(
+            "UPDATE fish_inventory SET quantity=? WHERE group_id=? AND wxid=? AND item_key=?",
+            (new_qty, group_id, wxid, item_key)
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+
+# ==================== 黑市 v0.9.3 CRUD ====================
+
+def set_black_market(group_id: int, date: str, items: list[dict]):
+    """设置某天黑市商品"""
+    conn = get_conn()
+    conn.execute("DELETE FROM fish_black_market WHERE group_id=? AND date=?",
+                 (group_id, date))
+    for item in items:
+        conn.execute(
+            """INSERT INTO fish_black_market (group_id, date, item_key, price, stock, stock_remaining)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (group_id, date, item["key"], item["price"], item["stock"], item["stock"])
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_black_market(group_id: int, date: str) -> list[dict]:
+    """获取某天黑市商品"""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM fish_black_market WHERE group_id=? AND date=? AND stock_remaining > 0",
+        (group_id, date)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def buy_from_market(group_id: int, wxid: str, date: str,
+                    item_key: str) -> dict | None:
+    """从黑市购买，返回商品信息或 None"""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT * FROM fish_black_market
+           WHERE group_id=? AND date=? AND item_key=? AND stock_remaining > 0""",
+        (group_id, date, item_key)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+    conn.execute(
+        """UPDATE fish_black_market SET stock_remaining = stock_remaining - 1
+           WHERE id=?""", (row["id"],)
+    )
+    conn.commit()
+    conn.close()
+    return dict(row)

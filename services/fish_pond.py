@@ -180,14 +180,291 @@ STAGE_THRESHOLDS = [
 # XP 等级表
 XP_TABLE = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500]
 
-# 商店物品
+# 商店物品（旧版兼容，后续合并到 ITEMS）
 SHOP_ITEMS = {
     "premium_feed": {"name": "高级饲料", "price": 20, "desc": "/喂食 时额外 +15 成长，大成功阈值降为 18"},
     "lucky_charm":  {"name": "幸运符",   "price": 50, "desc": "下一次检定自动取 15（非大成功）"},
     "rename_tag":   {"name": "改名符",   "price": 30, "desc": "给鱼改名"},
     "ward":         {"name": "保护结界", "price": 80, "desc": "7 天内免疫鲨鱼"},
-    "compass":      {"name": "探宝罗盘", "price": 100, "desc": "下一次 /寻宝 检定获得优势"},
 }
+
+# ==================== 道具系统 v0.9.3 ====================
+
+ITEMS = {
+    # ---- 饲料类 ----
+    "normal_feed":  {"name": "普通饲料",   "category": "feed",  "rarity": "普通", "buy": 10,  "desc": "喂食额外 +5 成长"},
+    "shrimp_feed":  {"name": "磷虾饲料",   "category": "feed",  "rarity": "稀有", "buy": 50,  "desc": "喂食额外 +15 成长，幸福 +3"},
+    "deep_shrimp":  {"name": "深海磷虾",   "category": "feed",  "rarity": "史诗", "buy": 150, "desc": "喂食额外 +30 成长，幸福 +5，大成功阈值-2"},
+    "takoyaki":     {"name": "章鱼烧",     "category": "feed",  "rarity": "传说", "buy": 350, "desc": "喂食额外 +50 成长，必定大成功"},
+
+    # ---- 训练类 ----
+    "dumbbell":     {"name": "轻哑铃",     "category": "train", "rarity": "普通", "buy": 20,  "desc": "训练 DC -2"},
+    "protein":      {"name": "蛋白粉",     "category": "train", "rarity": "稀有", "buy": 80,  "desc": "训练 DC -5"},
+    "sea_essence":  {"name": "海神精华",   "category": "train", "rarity": "史诗", "buy": 180, "desc": "训练 DC -8，失败不扣属性"},
+    "dragon_elixir":{"name": "龙宫秘药",   "category": "train", "rarity": "传说", "buy": 400, "desc": "训练必定成功"},
+
+    # ---- 装备-武器 ----
+    "bone_dagger":  {"name": "鱼骨短剑",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "力量 +2", "stat": "strength", "bonus": 2},
+    "coral_sword":  {"name": "珊瑚长剑",   "category": "equip", "rarity": "史诗", "buy": 150, "desc": "力量 +3", "stat": "strength", "bonus": 3},
+    "trident":      {"name": "海神三叉戟", "category": "equip", "rarity": "传说", "buy": 350, "desc": "力量 +4，斗鱼胜率+10%", "stat": "strength", "bonus": 4, "special": "battle_boost"},
+    "squid_bow":    {"name": "鱿鱼骨弓",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "敏捷 +2", "stat": "dexterity", "bonus": 2},
+    "swift_fin":    {"name": "激流之鳍",   "category": "equip", "rarity": "史诗", "buy": 150, "desc": "敏捷 +3", "stat": "dexterity", "bonus": 3},
+    "eel_whip":     {"name": "电鳗尾鞭",   "category": "equip", "rarity": "传说", "buy": 350, "desc": "敏捷 +4，探索鳞币+20%", "stat": "dexterity", "bonus": 4, "special": "explore_boost"},
+
+    # ---- 装备-防具 ----
+    "turtle_shield":{"name": "龟甲盾",     "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "体质 +2", "stat": "constitution", "bonus": 2},
+    "crab_armor":   {"name": "巨蟹钳甲",   "category": "equip", "rarity": "史诗", "buy": 150, "desc": "体质 +3", "stat": "constitution", "bonus": 3},
+    "dragon_armor": {"name": "龙王鳞甲",   "category": "equip", "rarity": "传说", "buy": 350, "desc": "体质 +4，免疫鲨鱼", "stat": "constitution", "bonus": 4, "special": "shark_immune"},
+    "coral_charm":  {"name": "珊瑚护符",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "体质 +1，幸福值下限+10", "stat": "constitution", "bonus": 1, "special": "happy_floor"},
+
+    # ---- 装备-饰品 ----
+    "pearl_ring":   {"name": "珍珠指环",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "魅力 +2", "stat": "charisma", "bonus": 2},
+    "mermaid_crown":{"name": "人鱼之冠",   "category": "equip", "rarity": "史诗", "buy": 150, "desc": "魅力 +3", "stat": "charisma", "bonus": 3},
+    "siren_harp":   {"name": "海妖竖琴",   "category": "equip", "rarity": "传说", "buy": 350, "desc": "魅力 +4，晒鱼鳞币+30%", "stat": "charisma", "bonus": 4, "special": "showoff_boost"},
+    "deep_beads":   {"name": "深海念珠",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "感知 +2", "stat": "wisdom", "bonus": 2},
+    "crystal_ball": {"name": "先知水晶球", "category": "equip", "rarity": "史诗", "buy": 150, "desc": "感知 +3", "stat": "wisdom", "bonus": 3},
+    "abyss_eye":    {"name": "深渊之瞳",   "category": "equip", "rarity": "传说", "buy": 350, "desc": "感知 +4，探索成功率+15%", "stat": "wisdom", "bonus": 4, "special": "explore_success"},
+    "sea_chart":    {"name": "海图残卷",   "category": "equip", "rarity": "稀有", "buy": 70,  "desc": "智力 +2", "stat": "intelligence", "bonus": 2},
+    "alchemy_bladder":{"name":"炼金鱼鳔",  "category": "equip", "rarity": "史诗", "buy": 150, "desc": "智力 +3", "stat": "intelligence", "bonus": 3},
+    "ancient_core": {"name": "远古智慧之核","category":"equip","rarity": "传说", "buy": 350, "desc": "智力 +4，训练 DC -3", "stat": "intelligence", "bonus": 4, "special": "train_boost"},
+
+    # ---- 装备-全能 ----
+    "star_shell":   {"name": "星辉贝壳",   "category": "equip", "rarity": "史诗", "buy": 200, "desc": "全属性 +1", "stat": "all", "bonus": 1},
+    "dragon_soul":  {"name": "龙鱼之魂",   "category": "equip", "rarity": "传说", "buy": 500, "desc": "全属性 +2", "stat": "all", "bonus": 2},
+
+    # ---- 幸运类 ----
+    "clover_weed":  {"name": "四叶海草",   "category": "luck",  "rarity": "普通", "buy": 25,  "desc": "下次检定获得优势（掷两次取高）"},
+    "lucky_dice":   {"name": "幸运骰子",   "category": "luck",  "rarity": "稀有", "buy": 60,  "desc": "下次检定自动取15（非大成功）"},
+    "wishing_star": {"name": "流星许愿瓶", "category": "luck",  "rarity": "史诗", "buy": 150, "desc": "下次检定自动取19（非大成功）"},
+    "fate_pearl":   {"name": "命运重置珠", "category": "luck",  "rarity": "传说", "buy": 300, "desc": "重掷一次失败的检定（保留新结果）"},
+
+    # ---- 特殊类 ----
+    "ward":         {"name": "保护结界",   "category": "special","rarity":"稀有", "buy": 80,  "desc": "7天内免疫鲨鱼"},
+    "rename_tag":   {"name": "改名符",     "category": "special","rarity":"普通", "buy": 30,  "desc": "给鱼改名"},
+    "hourglass":    {"name": "时光沙漏",   "category": "special","rarity":"史诗", "buy": 120, "desc": "重置今日所有指令次数限制"},
+    "rebirth_seed": {"name": "轮回之种",   "category": "special","rarity":"传说", "buy": 300, "desc": "鱼死亡后使用，重生时保留一半属性"},
+
+    # ---- 收藏类 ----
+    "red_coral":    {"name": "红珊瑚",     "category": "collect","rarity":"稀有", "buy": 100, "desc": "稀有的海底珍宝"},
+    "deep_pearl":   {"name": "深海珍珠",   "category": "collect","rarity":"史诗", "buy": 250, "desc": "据说能听到大海的声音"},
+    "dragon_scale": {"name": "龙鳞碎片",   "category": "collect","rarity":"传说", "buy": 500, "desc": "远古龙鱼褪下的鳞片"},
+}
+
+def get_equip_bonus(group_id: int, wxid: str) -> dict:
+    """获取装备带来的属性加成 {attr_key: bonus}"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish or not fish.get("equipped_item"):
+        return {}
+    item_key = fish["equipped_item"]
+    item = ITEMS.get(item_key, {})
+    if item.get("category") != "equip":
+        return {}
+    stat = item.get("stat", "")
+    bonus = item.get("bonus", 0)
+    if stat == "all":
+        return {k: bonus for k in ["strength","dexterity","constitution","intelligence","wisdom","charisma"]}
+    if stat:
+        return {stat: bonus}
+    return {}
+
+def get_fish_with_equip(group_id: int, wxid: str) -> dict | None:
+    """获取鱼信息，属性已包含装备加成"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish:
+        return None
+    bonuses = get_equip_bonus(group_id, wxid)
+    for attr, b in bonuses.items():
+        fish[attr] = fish.get(attr, 0) + b
+    return fish
+
+# ==================== 黑市系统 ====================
+
+def generate_black_market(group_id: int, date_str: str) -> list[dict]:
+    """每天随机生成 3-5 件黑市商品"""
+    rng = random.Random(f"blackmarket_{group_id}_{date_str}")
+    count = rng.randint(3, 5)
+
+    # 按稀有度加权选品：普通40% 稀有30% 史诗20% 传说10%
+    pool = []
+    for key, item in ITEMS.items():
+        if item.get("category") == "collect":
+            continue  # 收藏品不进入黑市
+        w = {"普通": 40, "稀有": 30, "史诗": 20, "传说": 10}.get(item["rarity"], 10)
+        pool.extend([key] * w)
+
+    chosen = []
+    seen = set()
+    for _ in range(count * 3):  # 多试几次确保够
+        if len(chosen) >= count:
+            break
+        k = rng.choice(pool)
+        if k in seen:
+            continue
+        seen.add(k)
+        item = ITEMS[k]
+        base_price = item.get("buy", 50)
+        # 价格浮动 ±30%
+        price = max(5, int(base_price * rng.uniform(0.7, 1.3)))
+        price = (price // 5) * 5  # 取整到5的倍数
+        stock = rng.randint(1, 3)
+        chosen.append({"key": k, "price": price, "stock": stock})
+
+    # 存库
+    db.set_black_market(group_id, date_str, chosen)
+    return chosen
+
+
+def get_black_market_items(group_id: int, date_str: str) -> list[dict]:
+    """获取黑市商品（附带道具详情）"""
+    items = db.get_black_market(group_id, date_str)
+    result = []
+    for i in items:
+        info = ITEMS.get(i["item_key"], {})
+        result.append({**i, "name": info.get("name", ""),
+                       "rarity": info.get("rarity", ""),
+                       "desc": info.get("desc", ""),
+                       "category": info.get("category", "")})
+    return result
+
+
+def cmd_buy(group_id: int, wxid: str, item_key: str,
+            date_str: str = None) -> dict:
+    """/购买 <商品名>：从今日黑市购买"""
+    from datetime import datetime as dt
+    today = date_str or dt.now().strftime("%Y-%m-%d")
+
+    # 查黑市
+    market_item = db.buy_from_market(group_id, wxid, today, item_key)
+    if not market_item:
+        # 尝试模糊匹配
+        all_items = get_black_market_items(group_id, today)
+        for mi in all_items:
+            if mi["name"] == item_key:
+                market_item = mi
+                break
+        if not market_item:
+            available = ", ".join(f"{i['name']}({i['price']}币)" for i in all_items)
+            return {"error": f"今日黑市没有 '{item_key}'。当前: {available or '无'}"}
+
+    fish = db.get_fish(group_id, wxid)
+    if not fish or not fish["is_alive"]:
+        return {"error": "鱼不存在或已死亡"}
+
+    price = market_item["price"]
+    wallet = db.spend_coins(group_id, wxid, price, "buy_market",
+                           f"黑市购买 {item_key}")
+    if wallet is None:
+        return {"error": f"鳞币不足，需要 {price} 鳞币"}
+
+    db.add_item(group_id, wxid, item_key)
+    item_info = ITEMS.get(item_key, {})
+    db.add_fish_event(group_id, wxid, "market_buy",
+                      {"item": item_key, "price": price, "date": today})
+    return {"action": "buy", "item": item_info.get("name", item_key),
+            "price": price, "rarity": item_info.get("rarity", "")}
+
+
+def cmd_gift(group_id: int, wxid_from: str, target_name: str,
+             item_key: str) -> dict:
+    """/赠予 @XX <道具名>：把道具送给别人"""
+    # 找目标
+    target_wxid = _find_wxid_by_name(group_id, target_name)
+    if not target_wxid:
+        return {"error": f"找不到目标: {target_name}"}
+    if target_wxid == wxid_from:
+        return {"error": "不能赠予自己"}
+
+    target_fish = db.get_fish(group_id, target_wxid)
+    if not target_fish or not target_fish["is_alive"]:
+        return {"error": f"{target_name} 没有鱼"}
+
+    item = ITEMS.get(item_key)
+    item_name = item["name"] if item else item_key
+
+    if not db.remove_item(group_id, wxid_from, item_key):
+        return {"error": f"你没有 {item_name}"}
+
+    db.add_item(group_id, target_wxid, item_key)
+    db.add_fish_event(group_id, wxid_from, "gift_send",
+                      {"item": item_key, "to_wxid": target_wxid,
+                       "to_name": target_name})
+    db.add_fish_event(group_id, target_wxid, "gift_receive",
+                      {"item": item_key, "from_wxid": wxid_from})
+    return {"action": "gift", "item": item_name, "to": target_name}
+
+
+def cmd_item(group_id: int, wxid: str, action: str,
+             item_key: str = "", qty: int = 1) -> dict:
+    """/道具 [商店|购买|卖出|装备|卸下|使用] [道具名]"""
+    if action == "库存":
+        inventory = db.get_inventory(group_id, wxid)
+        enriched = []
+        for inv in inventory:
+            item = ITEMS.get(inv["item_key"], {})
+            enriched.append({
+                **inv, "name": item.get("name", inv["item_key"]),
+                "rarity": item.get("rarity", ""),
+                "category": item.get("category", ""),
+                "desc": item.get("desc", ""),
+                "buy_price": item.get("buy", 0),
+                "sell_price": item.get("buy", 0) // 2,
+            })
+        fish = db.get_fish(group_id, wxid)
+        equipped = fish.get("equipped_item", "") if fish else ""
+        equipped_info = None
+        if equipped:
+            ei = ITEMS.get(equipped, {})
+            equipped_info = {"key": equipped, "name": ei.get("name", ""), "desc": ei.get("desc", "")}
+        return {"action": "inventory", "inventory": enriched,
+                "equipped": equipped_info}
+
+    if action == "装备":
+        item = ITEMS.get(item_key)
+        if not item or item.get("category") != "equip":
+            return {"error": f"{item_key} 不是装备类道具"}
+        fish = db.get_fish(group_id, wxid)
+        if not fish or not fish["is_alive"]:
+            return {"error": "鱼不存在或已死亡"}
+        # 检查库存
+        inv = db.get_inventory(group_id, wxid)
+        has = any(i["item_key"] == item_key and i["quantity"] > 0 for i in inv)
+        if not has:
+            return {"error": f"你没有 {item['name']}"}
+        old_equip = fish.get("equipped_item", "")
+        db.update_fish_field(group_id, wxid, "equipped_item", item_key)
+        db.add_fish_event(group_id, wxid, "equip", {"item": item_key, "old": old_equip})
+        return {"action": "equip", "item": item["name"], "bonus": item.get("bonus", 0),
+                "stat": item.get("stat", ""), "old_equip": old_equip}
+
+    if action == "卸下":
+        fish = db.get_fish(group_id, wxid)
+        if not fish or not fish["is_alive"]:
+            return {"error": "鱼不存在或已死亡"}
+        old = fish.get("equipped_item", "")
+        if not old:
+            return {"error": "没有装备任何道具"}
+        db.update_fish_field(group_id, wxid, "equipped_item", "")
+        db.add_fish_event(group_id, wxid, "unequip", {"item": old})
+        return {"action": "unequip", "old_item": old}
+
+    if action == "使用":
+        item = ITEMS.get(item_key)
+        if not item:
+            return {"error": f"未知道具: {item_key}"}
+        cat = item.get("category", "")
+        if cat in ("equip", "collect"):
+            return {"error": f"{item['name']} 是{'装备' if cat == 'equip' else '收藏'}类，不能直接使用。请用 /道具 装备"}
+
+        if not db.remove_item(group_id, wxid, item_key, 1):
+            return {"error": f"没有 {item['name']}"}
+
+        # 饲料/训练/幸运类 → 存储到 active_consumable，下次对应指令自动触发
+        db.update_fish_field(group_id, wxid, "active_consumable", item_key)
+        db.add_fish_event(group_id, wxid, "item_use", {"item": item_key})
+        return {"action": "use", "item": item["name"], "desc": item["desc"],
+                "hint": "已激活，下次对应指令时自动生效"}
+
+    return {"error": f"未知操作: {action}。可用: 库存 装备 卸下 使用"}
 
 
 # ==================== 品种与属性 ====================
@@ -381,9 +658,9 @@ def create_fish(group_id: int, wxid: str, display_name: str,
 # ==================== 每日次数限制 ====================
 
 CMD_DAILY_LIMITS = {
-    "feed": 3, "clean": 3, "touch": 5,
-    "explore": 3, "treasure": 2, "showoff": 3,
-    "battle": 3,
+    "feed": 3, "touch": 5,
+    "explore": 3, "showoff": 3,
+    "battle": 3, "train": 1,
 }
 # /领养 不在此表，由 create_fish 内 is_alive 检查控制（有存活鱼则不可领养）
 
@@ -470,40 +747,6 @@ def cmd_feed(group_id: int, wxid: str, from_wxid: str = None,
         "happiness_bonus": happiness_bonus, "evolved": evolved,
         "new_stage": new_stage, "xp": xp_result
     }
-
-
-def cmd_clean(group_id: int, wxid: str, seed: str = None) -> dict:
-    """/换水：WIS 检定 DC8"""
-    fish = db.get_fish(group_id, wxid)
-    if not fish or not fish["is_alive"]:
-        return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "clean")
-    if limit_check:
-        return limit_check
-
-    result = ability_check(fish["wisdom"], dc=8,
-                          is_proficient="nature" in get_proficiencies(fish["species"]),
-                          level=fish["level"], seed=seed)
-
-    if result.critical_hit:
-        happiness_bonus = 10
-        xp_amount = 15
-    elif result.success:
-        happiness_bonus = 5
-        xp_amount = 5
-    else:
-        happiness_bonus = 2
-        xp_amount = 2
-
-    new_happiness = min(100, fish["happiness"] + happiness_bonus)
-    db.update_fish_field(group_id, wxid, "happiness", new_happiness)
-    xp_result = add_xp(group_id, wxid, xp_amount, "clean")
-
-    db.add_fish_event(group_id, wxid, "clean", {
-        **result.to_dict(), "happiness_bonus": happiness_bonus
-    })
-
-    return {"check": result.to_dict(), "happiness_bonus": happiness_bonus, "xp": xp_result}
 
 
 def cmd_touch(group_id: int, wxid: str, seed: str = None) -> dict:
@@ -637,46 +880,6 @@ def cmd_explore(group_id: int, wxid: str, seed: str = None) -> dict:
     return {"check": result.to_dict(), "coin_amount": coin_amount, "xp": xp_result}
 
 
-def cmd_treasure(group_id: int, wxid: str, advantage: bool = False,
-                 seed: str = None) -> dict:
-    """/寻宝：INT 检定 DC15，获得 2d10 鳞币"""
-    fish = db.get_fish(group_id, wxid)
-    if not fish or not fish["is_alive"]:
-        return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "treasure")
-    if limit_check:
-        return limit_check
-
-    result = ability_check(fish["intelligence"], dc=15,
-                          is_proficient="investigation" in get_proficiencies(fish["species"]),
-                          level=fish["level"], advantage=advantage, seed=seed)
-
-    if result.critical_hit:
-        coin_amount, _ = roll_dice("3d10", seed)
-        special = True
-    elif result.success:
-        coin_amount, _ = roll_dice("2d10", seed)
-        special = False
-    else:
-        coin_amount, _ = roll_dice("1d4", seed)
-        special = False
-
-    if coin_amount > 0:
-        db.earn_coins(group_id, wxid, coin_amount, "treasure",
-                     f"寻宝获得 {coin_amount} 鳞币")
-
-    xp_result = add_xp(group_id, wxid, 10 if result.success else 3, "treasure")
-
-    db.add_fish_event(group_id, wxid, "treasure", {
-        **result.to_dict(), "coin_amount": coin_amount, "special": special
-    })
-
-    return {
-        "check": result.to_dict(), "coin_amount": coin_amount,
-        "special": special, "xp": xp_result
-    }
-
-
 def cmd_showoff(group_id: int, wxid: str, seed: str = None) -> dict:
     """/晒鱼：CHA 检定，观众打赏"""
     fish = db.get_fish(group_id, wxid)
@@ -706,6 +909,84 @@ def cmd_showoff(group_id: int, wxid: str, seed: str = None) -> dict:
     })
 
     return {"check": result.to_dict(), "coin_amount": coin_amount}
+
+
+# 训练属性名映射
+TRAIN_ATTR_MAP = {
+    "力量": ("strength", "athletics"),
+    "敏捷": ("dexterity", "acrobatics"),
+    "体质": ("constitution", "endurance"),
+    "智力": ("intelligence", "investigation"),
+    "感知": ("wisdom", "nature"),
+    "魅力": ("charisma", "performance"),
+}
+TRAIN_COST = 30
+TRAIN_ATTR_CAP = 20
+
+
+def cmd_train(group_id: int, wxid: str, attr_name: str,
+              seed: str = None) -> dict:
+    """/训练 <属性名>：消耗鳞币训练单项属性，属值越高越难成功"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish or not fish["is_alive"]:
+        return {"error": "鱼不存在或已死亡"}
+
+    # 解析属性名
+    attr_info = TRAIN_ATTR_MAP.get(attr_name)
+    if not attr_info:
+        valid = "、".join(TRAIN_ATTR_MAP.keys())
+        return {"error": f"未知属性: {attr_name}，可选: {valid}"}
+
+    attr_key, proficiency = attr_info
+    current_val = fish[attr_key]
+    if current_val >= TRAIN_ATTR_CAP:
+        return {"error": f"{attr_name}已达上限({TRAIN_ATTR_CAP})"}
+
+    # 每天限1次
+    limit_check = check_daily_limit(group_id, wxid, "train")
+    if limit_check:
+        return limit_check
+
+    # 扣除鳞币
+    wallet = db.spend_coins(group_id, wxid, TRAIN_COST, "train",
+                           f"训练{attr_name}")
+    if wallet is None:
+        return {"error": f"鳞币不足，训练需要 {TRAIN_COST} 鳞币，当前余额不足"}
+
+    # DC = 12 + 当前属性值（越高越难）
+    dc = 12 + current_val
+    result = ability_check(current_val, dc=dc,
+                          is_proficient=proficiency in get_proficiencies(fish["species"]),
+                          level=fish["level"], seed=seed)
+
+    if result.success:
+        new_val = current_val + 1
+        db.update_fish_field(group_id, wxid, attr_key, new_val)
+        # 更新 HP（体质影响 HP）
+        if attr_key == "constitution":
+            new_hp = compute_max_hp(new_val, fish["level"], fish["stage"])
+            db.update_fish_field(group_id, wxid, "hp", new_hp)
+        xp_amount = 15
+        xp_result = add_xp(group_id, wxid, xp_amount, "train")
+        attr_increased = True
+    else:
+        xp_amount = 3
+        xp_result = add_xp(group_id, wxid, xp_amount, "train")
+        attr_increased = False
+        new_val = current_val
+
+    db.add_fish_event(group_id, wxid, "train", {
+        **result.to_dict(), "attr_name": attr_name, "attr_key": attr_key,
+        "old_val": current_val, "new_val": new_val,
+        "dc": dc, "coin_cost": TRAIN_COST, "success": result.success,
+    })
+
+    return {
+        "check": result.to_dict(), "attr_name": attr_name, "attr_key": attr_key,
+        "old_val": current_val, "new_val": new_val,
+        "increased": attr_increased, "dc": dc, "coin_cost": TRAIN_COST,
+        "xp": xp_result,
+    }
 
 
 def cmd_rename(group_id: int, wxid: str, new_name: str,
@@ -917,12 +1198,23 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
             results.append({"wxid": victim["wxid"], "shark_attack": True,
                            "victim": victim["fish_name"]})
 
+    # 生成黑市
+    black_market = generate_black_market(group_id, date_str)
+
     return {
         "settled": True,
         "date": date_str,
         "weather": weather,
         "results": results,
         "fish_count": len(alive_fish),
+        "black_market": [{
+            "key": bm["key"],
+            "name": ITEMS.get(bm["key"], {}).get("name", bm["key"]),
+            "price": bm["price"],
+            "stock": bm["stock"],
+            "rarity": ITEMS.get(bm["key"], {}).get("rarity", ""),
+            "desc": ITEMS.get(bm["key"], {}).get("desc", ""),
+        } for bm in black_market],
     }
 
 
@@ -972,13 +1264,16 @@ def get_pond_state(group_id: int, reference_date: str = None) -> dict:
 _COMMAND_PATTERNS = [
     (r"^/领养$", "adopt"),
     (r"^/喂食$", "feed"),
-    (r"^/换水$", "clean"),
     (r"^/摸鱼$", "touch"),
     (r"^/斗鱼\s*@(.+)$", "battle"),
     (r"^/探索$", "explore"),
-    (r"^/寻宝$", "treasure"),
     (r"^/晒鱼$", "showoff"),
     (r"^/鱼塘$", "pond"),
+    (r"^/购买\s+(.+)$", "buy"),
+    (r"^/赠予\s*@(.+?)\s+(.+)$", "gift"),
+    (r"^/道具$", "item_list"),
+    (r"^/道具\s+(.+)$", "item_action"),
+    (r"^/训练\s+(.+)$", "train"),
     (r"^/改名\s+(.+)$", "rename"),
 ]
 
@@ -997,8 +1292,22 @@ def parse_command(content: str) -> dict | None:
             result = {"type": cmd_type, "raw": text}
             if cmd_type == "battle":
                 result["target_name"] = m.group(1).strip()
+            elif cmd_type == "buy":
+                result["item_key"] = m.group(1).strip()
+            elif cmd_type == "gift":
+                result["target_name"] = m.group(1).strip()
+                result["item_key"] = m.group(2).strip()
             elif cmd_type == "rename":
                 result["new_name"] = m.group(1).strip()
+            elif cmd_type == "train":
+                result["attr_name"] = m.group(1).strip()
+            elif cmd_type == "item_action":
+                parts = m.group(1).strip().split(None, 1)
+                result["item_action"] = parts[0] if parts else ""
+                result["item_key"] = parts[1] if len(parts) > 1 else ""
+            elif cmd_type == "item_list":
+                result["item_action"] = "库存"
+                result["item_key"] = ""
             return result
     return None
 
@@ -1042,8 +1351,6 @@ def parse_commands_from_messages(group_id: int, messages: list[dict],
                 result = cmd_adopt(group_id, wxid, display_name)
             elif cmd["type"] == "feed":
                 result = cmd_feed(group_id, wxid, seed=seed)
-            elif cmd["type"] == "clean":
-                result = cmd_clean(group_id, wxid, seed=seed)
             elif cmd["type"] == "touch":
                 result = cmd_touch(group_id, wxid, seed=seed)
             elif cmd["type"] == "battle":
@@ -1057,10 +1364,20 @@ def parse_commands_from_messages(group_id: int, messages: list[dict],
                     continue
             elif cmd["type"] == "explore":
                 result = cmd_explore(group_id, wxid, seed=seed)
-            elif cmd["type"] == "treasure":
-                result = cmd_treasure(group_id, wxid, seed=seed)
             elif cmd["type"] == "showoff":
                 result = cmd_showoff(group_id, wxid, seed=seed)
+            elif cmd["type"] == "buy":
+                result = cmd_buy(group_id, wxid, cmd.get("item_key", ""))
+            elif cmd["type"] == "gift":
+                result = cmd_gift(group_id, wxid,
+                                  cmd.get("target_name", ""),
+                                  cmd.get("item_key", ""))
+            elif cmd["type"] in ("item_list", "item_action"):
+                result = cmd_item(group_id, wxid,
+                                  cmd.get("item_action", "库存"),
+                                  cmd.get("item_key", ""))
+            elif cmd["type"] == "train":
+                result = cmd_train(group_id, wxid, cmd.get("attr_name", ""), seed=seed)
             elif cmd["type"] == "rename":
                 result = cmd_rename(group_id, wxid, cmd["new_name"])
             elif cmd["type"] == "pond":
@@ -1166,14 +1483,10 @@ def _execute_command(cmd: dict, group_id: int, wxid: str,
         return cmd_adopt(group_id, wxid, display_name)
     elif cmd["type"] == "feed":
         return cmd_feed(group_id, wxid, seed=seed)
-    elif cmd["type"] == "clean":
-        return cmd_clean(group_id, wxid, seed=seed)
     elif cmd["type"] == "touch":
         return cmd_touch(group_id, wxid, seed=seed)
     elif cmd["type"] == "explore":
         return cmd_explore(group_id, wxid, seed=seed)
-    elif cmd["type"] == "treasure":
-        return cmd_treasure(group_id, wxid, seed=seed)
     elif cmd["type"] == "showoff":
         return cmd_showoff(group_id, wxid, seed=seed)
     elif cmd["type"] == "battle":
@@ -1181,6 +1494,18 @@ def _execute_command(cmd: dict, group_id: int, wxid: str,
         if target_wxid:
             return cmd_battle(group_id, wxid, target_wxid, seed=seed)
         return {"error": f"找不到目标: {cmd.get('target_name', '')}"}
+    elif cmd["type"] == "buy":
+        return cmd_buy(group_id, wxid, cmd.get("item_key", ""))
+    elif cmd["type"] == "gift":
+        return cmd_gift(group_id, wxid,
+                        cmd.get("target_name", ""),
+                        cmd.get("item_key", ""))
+    elif cmd["type"] in ("item_list", "item_action"):
+        return cmd_item(group_id, wxid,
+                        cmd.get("item_action", "库存"),
+                        cmd.get("item_key", ""))
+    elif cmd["type"] == "train":
+        return cmd_train(group_id, wxid, cmd.get("attr_name", ""), seed=seed)
     elif cmd["type"] == "rename":
         return cmd_rename(group_id, wxid, cmd.get("new_name", ""))
     elif cmd["type"] == "pond":

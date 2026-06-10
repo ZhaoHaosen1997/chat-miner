@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import {
-  getMembers, adoptFish, feedFish, cleanTank, touchFish,
-  exploreFish, treasureFish, showoffFish, battleFish, renameFish,
-  getFishDetail
+  getMembers, adoptFish, feedFish, touchFish,
+  exploreFish, showoffFish, trainFish, battleFish, renameFish,
+  fishItems, buyFromMarket, giftItem, logSimCommand, getFishDetail
 } from '../api/index.js'
 import {
   MessageCircle, Send, User, ChevronDown, X, Terminal,
@@ -30,11 +30,13 @@ const gid = computed(() => currentGroup.value?.id)
 const COMMANDS = [
   { cmd: '/领养', desc: '随机品种+稀有度+属性，创建你的鱼', icon: '🐟', color: 'text-green-600 bg-green-50' },
   { cmd: '/喂食', desc: 'DEX检定 DC10，+成长+幸福', icon: '🎲', color: 'text-sky-600 bg-sky-50' },
-  { cmd: '/换水', desc: 'WIS检定 DC8，+幸福+CON XP', icon: '🪣', color: 'text-teal-600 bg-teal-50' },
-  { cmd: '/摸鱼', desc: 'CHA检定 DC12，+亲密度+CHA XP', icon: '👆', color: 'text-pink-600 bg-pink-50' },
-  { cmd: '/探索', desc: 'WIS/INT检定 DC13，获得鳞币', icon: '🔍', color: 'text-amber-600 bg-amber-50' },
-  { cmd: '/寻宝', desc: 'INT检定 DC15，高回报鳞币', icon: '💎', color: 'text-yellow-600 bg-yellow-50' },
-  { cmd: '/晒鱼', desc: 'CHA检定，观众打赏鳞币', icon: '📸', color: 'text-purple-600 bg-purple-50' },
+  { cmd: '/摸鱼', desc: '魅力检定 · +亲密度', icon: '👆', color: 'text-pink-600 bg-pink-50' },
+  { cmd: '/探索', desc: '感知/智力检定 · 获得鳞币', icon: '🔍', color: 'text-amber-600 bg-amber-50' },
+  { cmd: '/晒鱼', desc: '魅力检定 · 观众打赏鳞币', icon: '📸', color: 'text-purple-600 bg-purple-50' },
+  { cmd: '/购买 商品名', desc: '从今日黑市抢购道具', icon: '🛒', color: 'text-cyan-600 bg-cyan-50' },
+  { cmd: '/赠予 @XX 道具名', desc: '把道具送给群友', icon: '🎁', color: 'text-pink-600 bg-pink-50' },
+  { cmd: '/道具 库存', desc: '查看库存/装备/卸下/使用', icon: '🎒', color: 'text-slate-600 bg-slate-50' },
+  { cmd: '/训练 力量', desc: '消耗30鳞币 · 训练属性 · 每天1次', icon: '🏋️', color: 'text-orange-600 bg-orange-50' },
   { cmd: '/斗鱼 @', desc: 'STR对抗检定，胜者+鳞币', icon: '⚔️', color: 'text-red-600 bg-red-50' },
   { cmd: '/鱼塘', desc: '查看鱼塘总览', icon: '🐟', color: 'text-slate-600 bg-slate-50' },
   { cmd: '/改名 ', desc: '给鱼改名（首次免费）', icon: '✏️', color: 'text-indigo-600 bg-indigo-50' },
@@ -129,10 +131,6 @@ async function sendCommand() {
       result = await feedFish(gid.value, wxid)
       d20Result = result.check
       msgEntry.resultType = 'feed'
-    } else if (text === '/换水') {
-      result = await cleanTank(gid.value, wxid)
-      d20Result = result.check
-      msgEntry.resultType = 'clean'
     } else if (text === '/摸鱼') {
       result = await touchFish(gid.value, wxid)
       d20Result = result.check
@@ -141,14 +139,41 @@ async function sendCommand() {
       result = await exploreFish(gid.value, wxid)
       d20Result = result.check
       msgEntry.resultType = 'explore'
-    } else if (text === '/寻宝') {
-      result = await treasureFish(gid.value, wxid)
-      d20Result = result.check
-      msgEntry.resultType = 'treasure'
     } else if (text === '/晒鱼') {
       result = await showoffFish(gid.value, wxid)
       d20Result = result.check
       msgEntry.resultType = 'showoff'
+    } else if (text.startsWith('/购买')) {
+      const itemKey = text.replace('/购买', '').trim()
+      result = await buyFromMarket(gid.value, wxid, itemKey)
+      msgEntry.resultType = 'buy_market'
+      msgEntry.buyResult = result
+    } else if (text.startsWith('/赠予')) {
+      const args = text.replace('/赠予', '').trim()
+      const match = args.match(/@(\S+)\s+(.+)/)
+      if (match) {
+        result = await giftItem(gid.value, wxid, match[1], match[2].trim())
+        msgEntry.resultType = 'gift'
+        msgEntry.giftResult = result
+      } else {
+        msgEntry.error = '格式: /赠予 @XX 道具名'
+      }
+    } else if (text === '/道具' || text.startsWith('/道具 ')) {
+      const args = text.replace('/道具', '').trim()
+      const parts = args ? args.split(/\s+/) : []
+      const action = parts[0] || '库存'
+      const itemKey = parts.slice(1).join(' ')
+      result = await fishItems(gid.value, wxid, action, itemKey)
+      msgEntry.resultType = 'item'
+      msgEntry.itemAction = action
+      msgEntry.itemResult = result
+    } else if (text.startsWith('/训练')) {
+      const attrName = text.replace('/训练', '').trim()
+      result = await trainFish(gid.value, wxid, attrName)
+      d20Result = result.check
+      msgEntry.resultType = 'train'
+      msgEntry.trainAttr = attrName
+      msgEntry.trainResult = result
     } else if (text.startsWith('/斗鱼')) {
       const targetName = text.replace('/斗鱼', '').replace('@', '').trim()
       // 精准匹配：display_name > nickname > group_nickname > wxid前缀
@@ -219,6 +244,23 @@ async function sendCommand() {
       const log = document.getElementById('simulator-log')
       if (log) log.scrollTop = log.scrollHeight
     })
+  }
+
+  // Log to backend (outside try-catch, fires even if the command itself had an error in processing)
+  if (gid.value) {
+    logSimCommand(gid.value, {
+      wxid: selectedWxid.value,
+      command: text,
+      display_name: selectedMember.value?.display_name || selectedWxid.value?.slice(0, 12) || '',
+      d20: msgEntry.d20 || null,
+      growth: msgEntry.growthBonus || 0,
+      coin_amount: msgEntry.coinAmount || 0,
+      happiness: msgEntry.happinessBonus || 0,
+      evolved: msgEntry.evolved || false,
+      fish_info: msgEntry.result?.fish || null,
+      battle_winner: msgEntry.battleWinner || '',
+      error: msgEntry.error || '',
+    }).catch(() => {})
   }
 }
 
@@ -397,6 +439,69 @@ function quickCommand(cmd) {
                     bg-purple-50 text-purple-700 border border-purple-200">
                     <Zap :size="10" /> 进化!
                   </span>
+                </div>
+
+                <!-- Buy from market -->
+                <div v-if="msg.resultType === 'buy_market' && !msg.error"
+                  class="px-3 py-2 rounded-xl rounded-tl-sm bg-cyan-50 border border-cyan-200 text-xs">
+                  <span class="font-medium text-cyan-700">🛒 购买 {{ msg.buyResult.item }}</span>
+                  <span class="text-cyan-600"> · {{ msg.buyResult.rarity }} · 花费{{ msg.buyResult.price }}鳞币</span>
+                </div>
+                <!-- Gift -->
+                <div v-if="msg.resultType === 'gift' && !msg.error"
+                  class="px-3 py-2 rounded-xl rounded-tl-sm bg-pink-50 border border-pink-200 text-xs">
+                  <span class="font-medium text-pink-700">🎁 赠予 {{ msg.giftResult.item }}</span>
+                  <span class="text-pink-600"> → {{ msg.giftResult.to }}</span>
+                </div>
+
+                <!-- Item result -->
+                <div v-if="msg.resultType === 'item' && !msg.error"
+                  class="px-3 py-2 rounded-xl rounded-tl-sm bg-cyan-50 border border-cyan-200 text-xs">
+                  <span class="font-medium text-cyan-700">🎒 {{ {buy:'购买',sell:'卖出',equip:'装备',unequip:'卸下',use:'使用',inventory:'库存',shop:'商店'}[msg.itemAction] || msg.itemAction }}</span>
+                  <!-- Buy/Sell -->
+                  <span v-if="msg.itemAction === 'buy' || msg.itemAction === 'sell'" class="text-cyan-600">
+                    {{ msg.itemResult.item }} x{{ msg.itemResult.qty }}
+                    {{ msg.itemAction === 'buy' ? '花费' + msg.itemResult.cost : '获得' + msg.itemResult.earned }}鳞币
+                  </span>
+                  <!-- Equip/Unequip -->
+                  <span v-else-if="msg.itemAction === 'equip'" class="text-cyan-600">
+                    {{ msg.itemResult.item }} · {{ msg.itemResult.stat ? (msg.itemResult.stat==='all'?'全属性':{strength:'力量',dexterity:'敏捷',constitution:'体质',intelligence:'智力',wisdom:'感知',charisma:'魅力'}[msg.itemResult.stat]) : '' }}+{{ msg.itemResult.bonus }}
+                  </span>
+                  <!-- Use -->
+                  <span v-else-if="msg.itemAction === 'use'" class="text-cyan-600">
+                    {{ msg.itemResult.item }} · {{ msg.itemResult.hint }}
+                  </span>
+                  <!-- Shop -->
+                  <div v-else-if="msg.itemAction === '商店' && msg.itemResult.shop" class="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                    <div v-for="(items, cat) in msg.itemResult.shop" :key="cat" class="text-[10px]">
+                      <span class="font-medium text-slate-600">{{ cat }}</span>
+                      <span v-for="it in items.slice(0,3)" :key="it.key" class="ml-1 text-slate-400">{{ it.name }}({{ it.buy }}币)</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">共{{ Object.values(msg.itemResult.shop).flat().length }}件道具，/道具 库存 查看已拥有</div>
+                  </div>
+                  <!-- Inventory -->
+                  <div v-else-if="msg.itemAction === '库存'" class="mt-1 text-[10px]">
+                    <div v-if="msg.itemResult.equipped" class="text-green-600 font-medium">装备中: {{ msg.itemResult.equipped.name }}</div>
+                    <div v-if="msg.itemResult.inventory.length === 0" class="text-slate-400">空空如也，从黑市 /购买 或等群友 /赠予</div>
+                    <div v-for="inv in msg.itemResult.inventory.slice(0,8)" :key="inv.item_key" class="text-slate-500">
+                      {{ inv.name }} x{{ inv.quantity }} · {{ inv.rarity }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Train result -->
+                <div v-if="msg.resultType === 'train' && !msg.error"
+                  class="px-3 py-2 rounded-xl rounded-tl-sm text-xs"
+                  :class="msg.trainResult?.increased
+                    ? 'bg-orange-50 border border-orange-200'
+                    : 'bg-slate-100 border border-slate-200'">
+                  <span class="font-medium"
+                    :class="msg.trainResult?.increased ? 'text-orange-700' : 'text-slate-500'">
+                    🏋️ 训练{{ msg.trainAttr }}
+                    {{ msg.trainResult?.increased ? '成功!' : '失败' }}
+                    ({{ msg.trainResult?.old_val }}→{{ msg.trainResult?.new_val }})
+                  </span>
+                  <span class="text-slate-400 ml-1">消耗{{ msg.trainResult?.coin_cost }}鳞币</span>
                 </div>
 
                 <!-- Battle result -->

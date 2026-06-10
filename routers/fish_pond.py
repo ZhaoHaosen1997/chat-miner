@@ -52,6 +52,61 @@ def settle_pond(group_id: int, body: SettleBody = SettleBody()):
     return {"code": 200, "message": "结算完成", "data": result}
 
 
+# ---- 鱼塘日报 ----
+
+@router.post("/generate-report")
+async def generate_fish_report(group_id: int, date: str = ""):
+    """生成鱼塘日报 (DeepSeek)"""
+    from datetime import datetime as dt
+    from services import fish_report
+    if not date:
+        date = dt.now().strftime("%Y-%m-%d")
+
+    try:
+        from routers.groups import get_chat_cache
+        chat = get_chat_cache(group_id)
+    except Exception:
+        raise HTTPException(400, "无法加载聊天数据")
+
+    # 拿当日消息解析
+    day_msgs = [m for m in chat.messages
+                if (m.get("formattedTime") or "").startswith(date)]
+    day_msgs.sort(key=lambda m: m.get("createTime", 0))
+    parse_result = fp.parse_commands_from_messages(
+        group_id, day_msgs,
+        get_name_by_wxid=chat.get_name_by_wxid
+    )
+    settle_result = fp.settle_all_fish(group_id, date)
+    parse_log = parse_result.get("processed", [])
+
+    result = await fish_report.generate_fish_daily_report(
+        group_id, date, parse_log, settle_result
+    )
+    if not result["success"]:
+        raise HTTPException(500, result.get("error", "生成失败"))
+    return {"code": 200, "message": "日报生成完成", "data": result}
+
+
+@router.get("/report/{date}")
+def get_fish_report(group_id: int, date: str):
+    """获取某天鱼塘日报"""
+    from models.database import get_periodic_report
+    r = get_periodic_report(group_id, "fish_daily", date)
+    if not r:
+        raise HTTPException(404, "该日无鱼塘日报")
+    import json
+    r["report_json"] = json.loads(r["report_json"])
+    return {"code": 200, "message": "ok", "data": r}
+
+
+@router.get("/reports")
+def list_fish_reports(group_id: int):
+    """列出所有鱼塘日报"""
+    from models.database import list_periodic_reports
+    reports = list_periodic_reports(group_id, "fish_daily")
+    return {"code": 200, "message": "ok", "data": reports}
+
+
 @router.post("/resettle")
 def resettle_pond(group_id: int, date: str = ""):
     """重新结算指定日期：只处理该天未结算的指令 + 天结算"""
@@ -76,6 +131,21 @@ def resettle_pond(group_id: int, date: str = ""):
 
 # ---- 单鱼操作 ----
 
+@router.post("/fish/{wxid}/delete")
+def delete_fish(group_id: int, wxid: str):
+    """删除鱼（硬删除，用于测试清理）"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish:
+        raise HTTPException(404, "鱼不存在")
+    conn = db.get_conn()
+    conn.execute("DELETE FROM fish_events WHERE group_id=? AND wxid=?", (group_id, wxid))
+    conn.execute("DELETE FROM fish_inventory WHERE group_id=? AND wxid=?", (group_id, wxid))
+    conn.execute("DELETE FROM fish_pond WHERE group_id=? AND wxid=?", (group_id, wxid))
+    conn.commit()
+    conn.close()
+    return {"code": 200, "message": f"已删除 {fish.get('fish_name', wxid)}", "data": None}
+
+
 @router.post("/fish/{wxid}/adopt")
 def adopt_fish(group_id: int, wxid: str, body: AdoptBody = AdoptBody()):
     """/领养：创建鱼"""
@@ -89,16 +159,24 @@ def adopt_fish(group_id: int, wxid: str, body: AdoptBody = AdoptBody()):
 @router.get("/fish/{wxid}")
 def get_fish_detail(group_id: int, wxid: str):
     """鱼详情"""
-    fish = db.get_fish(group_id, wxid)
+    fish = fp.get_fish_with_equip(group_id, wxid)
     if not fish:
         raise HTTPException(404, "鱼不存在，请先 /领养")
     species_info = fp.get_species_info(fish["species"])
     proficiencies = fp.get_proficiencies(fish["species"])
     coins = db.get_coin_wallet(group_id, wxid)
     events = db.get_fish_events(group_id, wxid, 10)
+    bonuses = fp.get_equip_bonus(group_id, wxid)
+    equipped = fish.get("equipped_item", "")
+    equipped_info = None
+    if equipped:
+        ei = fp.ITEMS.get(equipped, {})
+        equipped_info = {"key": equipped, "name": ei.get("name", ""), "desc": ei.get("desc", ""),
+                         "bonus": ei.get("bonus", 0), "stat": ei.get("stat", "")}
     return {"code": 200, "message": "ok", "data": {
         "fish": fish, "species_info": species_info,
-        "proficiencies": proficiencies, "coins": coins, "recent_events": events
+        "proficiencies": proficiencies, "coins": coins, "recent_events": events,
+        "equip_bonuses": bonuses, "equipped": equipped_info,
     }}
 
 
@@ -109,15 +187,6 @@ def feed_fish(group_id: int, wxid: str, body: FeedBody = FeedBody()):
     if "error" in result:
         raise HTTPException(400, result["error"])
     return {"code": 200, "message": result["check"].get("describe", "喂食完成"), "data": result}
-
-
-@router.post("/fish/{wxid}/clean")
-def clean_tank(group_id: int, wxid: str):
-    """/换水"""
-    result = fp.cmd_clean(group_id, wxid)
-    if "error" in result:
-        raise HTTPException(400, result["error"])
-    return {"code": 200, "message": "换水完成", "data": result}
 
 
 @router.post("/fish/{wxid}/touch")
@@ -138,15 +207,6 @@ def explore(group_id: int, wxid: str):
     return {"code": 200, "message": "探索完成", "data": result}
 
 
-@router.post("/fish/{wxid}/treasure")
-def treasure(group_id: int, wxid: str):
-    """/寻宝"""
-    result = fp.cmd_treasure(group_id, wxid)
-    if "error" in result:
-        raise HTTPException(400, result["error"])
-    return {"code": 200, "message": "寻宝完成", "data": result}
-
-
 @router.post("/fish/{wxid}/showoff")
 def showoff(group_id: int, wxid: str):
     """/晒鱼"""
@@ -154,6 +214,104 @@ def showoff(group_id: int, wxid: str):
     if "error" in result:
         raise HTTPException(400, result["error"])
     return {"code": 200, "message": "晒鱼完成", "data": result}
+
+
+class TrainBody(BaseModel):
+    attr_name: str
+
+class ItemBody(BaseModel):
+    action: str = "库存"
+    item_key: str = ""
+    qty: int = 1
+
+class SimLogBody(BaseModel):
+    wxid: str
+    command: str
+    display_name: str = ""
+    d20: dict = None
+    growth: float = 0
+    coin_amount: int = 0
+    happiness: int = 0
+    evolved: bool = False
+    fish_info: dict = None
+    battle_winner: str = ""
+    error: str = ""
+
+
+class BuyBody(BaseModel):
+    item_key: str
+
+class GiftBody(BaseModel):
+    target_name: str
+    item_key: str
+
+
+@router.get("/black-market")
+def get_black_market(group_id: int, date: str = ""):
+    """查看黑市"""
+    from datetime import datetime as dt
+    if not date:
+        date = dt.now().strftime("%Y-%m-%d")
+    items = fp.get_black_market_items(group_id, date)
+    return {"code": 200, "message": "ok", "data": {"date": date, "items": items}}
+
+
+@router.post("/log-sim-command")
+def log_sim_command(group_id: int, body: SimLogBody):
+    """记录模拟器发出的指令到 fish_events，供日志和日报使用"""
+    from datetime import datetime as dt
+    import json
+    db.add_fish_event(group_id, body.wxid, "sim_command", {
+        "command": body.command,
+        "display_name": body.display_name,
+        "d20": body.d20,
+        "growth": body.growth,
+        "coin_amount": body.coin_amount,
+        "happiness": body.happiness,
+        "evolved": body.evolved,
+        "fish_info": body.fish_info,
+        "battle_winner": body.battle_winner,
+        "error": body.error,
+        "time": dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    return {"code": 200, "message": "logged"}
+
+
+@router.post("/fish/{wxid}/buy")
+def buy_item(group_id: int, wxid: str, body: BuyBody):
+    """/购买 <商品名>"""
+    result = fp.cmd_buy(group_id, wxid, body.item_key)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return {"code": 200, "message": f"购买成功", "data": result}
+
+
+@router.post("/fish/{wxid}/gift")
+def gift_item(group_id: int, wxid: str, body: GiftBody):
+    """/赠予 @XX <道具名>"""
+    result = fp.cmd_gift(group_id, wxid, body.target_name, body.item_key)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return {"code": 200, "message": f"赠予成功", "data": result}
+
+
+@router.post("/fish/{wxid}/items")
+def fish_items(group_id: int, wxid: str, body: ItemBody = ItemBody()):
+    """/道具 [操作] [道具名]"""
+    result = fp.cmd_item(group_id, wxid, body.action, body.item_key, body.qty)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return {"code": 200, "message": "ok", "data": result}
+
+
+@router.post("/fish/{wxid}/train")
+def train_fish(group_id: int, wxid: str, body: TrainBody):
+    """/训练 <属性>"""
+    result = fp.cmd_train(group_id, wxid, body.attr_name)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    msg = f"训练{body.attr_name}{'成功' if result.get('increased') else '失败'}"
+    return {"code": 200, "message": msg, "data": result}
 
 
 @router.post("/fish/{wxid}/rename")
@@ -252,7 +410,7 @@ def parse_commands(group_id: int):
     # 按时间排序
     today_msgs.sort(key=lambda m: m.get("createTime", 0))
 
-    # 解析指令
+    # 解析指令（聊天记录中的 / 指令）
     parse_result = fp.parse_commands_from_messages(
         group_id, today_msgs,
         get_name_by_wxid=chat.get_name_by_wxid
@@ -261,8 +419,82 @@ def parse_commands(group_id: int):
     # 自动结算
     settle_result = fp.settle_all_fish(group_id, today)
 
-    # 构建详细日志
+    # 捞取今日所有指令事件（sim_command + 各 cmd 直接调用产生的 fish_events）
+    import json
+    cmd_event_types = ("feed", "touch", "explore", "showoff", "battle", "train",
+                       "born", "rename", "buy", "gift", "sim_command", "evolve",
+                       "level_up", "market_buy")
+    conn = db.get_conn()
+    placeholders = ",".join("?" * len(cmd_event_types))
+    event_rows = conn.execute(
+        f"""SELECT * FROM fish_events WHERE group_id=? AND event_type IN ({placeholders})
+           AND date(created_at)=? ORDER BY created_at""",
+        (group_id, *cmd_event_types, today)
+    ).fetchall()
+    conn.close()
+
+    today_events = []
+    for evt in event_rows:
+        evt = dict(evt)
+        try:
+            ed = json.loads(evt["event_data"]) if isinstance(evt["event_data"], str) else evt["event_data"]
+        except Exception:
+            ed = {}
+        # 从 event_data 还原指令信息
+        cmd_text = ed.get("command", "")
+        if not cmd_text:
+            # 无 sim_command 标记时，从 event_type 反推
+            cmd_text = {
+                "feed": "/喂食", "touch": "/摸鱼", "explore": "/探索",
+                "showoff": "/晒鱼", "battle": "/斗鱼", "train": "/训练",
+                "born": "/领养", "rename": "/改名", "buy": "/购买", "gift": "/赠予",
+                "evolve": "进化!", "level_up": "升级!", "market_buy": "/购买",
+            }.get(evt["event_type"], f"/{evt['event_type']}")
+
+        entry = {
+            "time": ed.get("time", (evt.get("created_at") or "")[11:19]),
+            "sender": ed.get("display_name", evt["wxid"]),
+            "wxid": evt["wxid"],
+            "command": cmd_text,
+            "type": evt["event_type"],
+        }
+        # D20 结果
+        if "check" in ed:
+            c = ed["check"]
+            entry["d20"] = {"roll": c.get("roll"), "modifier": c.get("modifier"),
+                           "total": c.get("total"), "dc": c.get("dc"),
+                           "success": c.get("success"),
+                           "critical_hit": c.get("critical_hit"),
+                           "critical_miss": c.get("critical_miss")}
+        elif "d20" in ed and ed["d20"]:
+            entry["d20"] = ed["d20"]
+        if ed.get("growth") or ed.get("growth_bonus"):
+            entry["growth"] = ed.get("growth") or ed.get("growth_bonus", 0)
+        if ed.get("happiness") or ed.get("happiness_bonus"):
+            entry["happiness"] = ed.get("happiness") or ed.get("happiness_bonus", 0)
+        if ed.get("coin_amount"):
+            entry["coin_amount"] = ed["coin_amount"]
+        if ed.get("evolved"):
+            entry["evolved"] = True
+        if ed.get("fish_info"):
+            entry["fish"] = ed["fish_info"]
+        if ed.get("battle_winner"):
+            entry["battle_winner"] = ed["battle_winner"]
+        if ed.get("error"):
+            entry["error"] = ed["error"]
+        today_events.append(entry)
+
+    # 构建详细日志（优先 fish_events，因为它们是已经执行过的）
     log_entries = []
+    seen_keys = set()
+
+    # 先加入 fish_events 中的指令（已执行的真实记录）
+    for e in today_events:
+        key = (e["wxid"], e["command"], e.get("time", ""))
+        seen_keys.add(key)
+        log_entries.append(e)
+
+    # 再补入聊天消息中解析的新指令（去重）
     for p in parse_result.get("processed", []):
         entry = {
             "time": p.get("time", ""),
@@ -301,7 +533,11 @@ def parse_commands(group_id: int):
             entry["error"] = r["error"]
         if r.get("winner"):
             entry["battle_winner"] = r["winner"]
-        log_entries.append(entry)
+        # 去重
+        key = (entry["wxid"], entry["command"], entry.get("time", ""))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            log_entries.append(entry)
 
     # 错误
     for e in parse_result.get("errors", []):
@@ -309,6 +545,9 @@ def parse_commands(group_id: int):
             "time": "", "sender": "", "command": e.get("msg", ""),
             "error": e.get("error", ""), "type": "error"
         })
+
+    # 按时间排序
+    log_entries.sort(key=lambda e: e.get("time", ""))
 
     return {"code": 200,
             "message": f"今日解析 {parse_result['events_processed']} 条指令，结算完成",
@@ -320,5 +559,7 @@ def parse_commands(group_id: int):
                 "settle": {
                     "weather": settle_result.get("weather"),
                     "fish_count": settle_result.get("fish_count"),
-                }
+                    "black_market": settle_result.get("black_market", []),
+                },
+                "report_url": f"/#/fish-report/{today}",
             }}
