@@ -7,6 +7,7 @@ import { getFishPond, adoptFish, settleFishPond, feedFish, cleanTank,
 import FishTank from '../components/FishTank.vue'
 import FishCard from '../components/FishCard.vue'
 import FishLeaderboard from '../components/FishLeaderboard.vue'
+import ChatSimulator from '../components/ChatSimulator.vue'
 import { Fish, RefreshCw, Sparkles, Coins, Zap, Search } from 'lucide-vue-next'
 
 const currentGroup = inject('currentGroup')
@@ -239,5 +240,8 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
         @refresh="loadPond"
       />
     </Teleport>
+
+    <!-- Chat Simulator -->
+    <ChatSimulator @pond-refresh="loadPond" />
   </div>
 </template>
