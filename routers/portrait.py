@@ -709,7 +709,7 @@ async def api_group_relations(group_id: int):
     for m in members:
         wxid = m["wxid"]
         name = m["display_name"] or m["nickname"]
-        nodes.append({"wxid": wxid, "name": name, "msg_count": m["message_count"]})
+        nodes.append({"id": m["id"], "wxid": wxid, "name": name, "msg_count": m["message_count"]})
 
         relations = compute_social_relations(
             chat.messages, wxid, chat.get_sender_name, chat.get_name_by_wxid

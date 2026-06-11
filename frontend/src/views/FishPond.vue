@@ -112,26 +112,28 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+  <div class="space-y-6">
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <h1 class="text-2xl font-bold text-slate-800">群鱼塘</h1>
-        <span class="text-3xl">🐟</span>
-        <span v-if="pondState" class="text-sm text-slate-500">
+        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center">
+          <Fish class="w-4 h-4 text-cyan-600" />
+        </span>
+        <h1 class="text-xl font-bold text-slate-800">群鱼塘</h1>
+        <span v-if="pondState" class="text-sm text-slate-400">
           {{ pondState.alive_count }} 条活鱼 · {{ pondState.dead_count }} 条亡鱼
         </span>
       </div>
       <div class="flex items-center gap-2">
         <button @click="handleParseCommands" :disabled="!!actionLoading"
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500 text-white rounded-lg
-                 hover:bg-amber-600 disabled:opacity-50 transition shadow-sm">
+          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl
+                 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 transition-all shadow-lg shadow-amber-200 active:scale-[0.98]">
           <Search :size="16" />
           {{ actionLoading === 'parse' ? '解析中...' : '今日解析+结算' }}
         </button>
         <button @click="showTutorial = true"
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded-lg
-                 hover:bg-slate-50 transition text-slate-600">
+          class="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-200 rounded-xl
+                 hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-500 font-medium">
           <BookOpen :size="16" />
           教程
         </button>
@@ -162,10 +164,20 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
     </div>
 
     <!-- Empty State -->
-    <div v-else-if="!pondState || pondState.alive_count === 0" class="text-center py-20">
-      <span class="text-6xl">🐟</span>
-      <h2 class="text-xl font-semibold text-slate-600 mt-4">鱼塘里还没有鱼</h2>
-      <p class="text-slate-400 mt-2">点击"解析指令"从聊天记录中寻找 /领养 指令，或点击"结算"自动为活跃成员创建鱼</p>
+    <div v-else-if="!pondState || pondState.alive_count === 0" class="card p-16 text-center animate-scale-in">
+      <span class="text-7xl mb-4 block">🐟</span>
+      <h2 class="text-xl font-semibold text-slate-600">鱼塘里还没有鱼</h2>
+      <p class="text-slate-400 mt-2 mb-6 max-w-sm mx-auto">点击"解析指令"从聊天记录中寻找 /领养 指令，或点击"结算"自动为活跃成员创建鱼</p>
+      <div class="flex items-center justify-center gap-3">
+        <button @click="handleParseCommands" :disabled="!!actionLoading"
+          class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg shadow-amber-200 flex items-center gap-2">
+          <Search :size="16" /> 解析指令
+        </button>
+        <button @click="handleSettle" :disabled="!!actionLoading"
+          class="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition-all flex items-center gap-2">
+          <RefreshCw :size="16" /> 结算
+        </button>
+      </div>
     </div>
 
     <!-- Main Content -->
@@ -189,19 +201,20 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
           @fish-click="handleFishClick"
         />
 
-        <!-- Quick Stats -->
-        <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <!-- Quick Stats -->
+        <div class="card p-4">
           <h3 class="text-sm font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
             <Coins :size="14" class="text-amber-500" /> 稀有度分布
           </h3>
-          <div class="space-y-1.5">
+          <div class="space-y-2">
             <div v-for="(color, rarity) in rarityColors" :key="rarity"
               class="flex items-center justify-between text-xs">
-              <div class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full" :class="color"></span>
-                <span class="text-slate-600">{{ rarity }}({{ rarityLabels[rarity] }})</span>
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="color"></span>
+                <span class="text-slate-600 font-medium">{{ rarity }}</span>
+                <span class="text-[10px] text-slate-300">{{ rarityLabels[rarity] }}</span>
               </div>
-              <span class="text-slate-400 font-mono">
+              <span class="text-slate-500 font-semibold stat-ticker">
                 {{ aliveFish.filter(f => f.rarity === rarity).length }}
               </span>
             </div>
@@ -209,26 +222,26 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
         </div>
 
         <!-- Recent Events -->
-        <div v-if="recentEvents.length" class="bg-white rounded-xl border border-slate-200 p-4">
+        <div v-if="recentEvents.length" class="card p-4">
           <h3 class="text-sm font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
             <Zap :size="14" class="text-amber-500" /> 最近事件
           </h3>
-          <div class="space-y-1.5 max-h-48 overflow-y-auto">
+          <div class="space-y-1 max-h-48 overflow-y-auto">
             <div v-for="evt in recentEvents.slice(0, 8)" :key="evt.id"
-              class="text-xs text-slate-500 flex items-center gap-1.5">
-              <span class="text-slate-300 flex-shrink-0">{{ evt.created_at?.slice(11, 16) || '' }}</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+              class="text-xs text-slate-500 flex items-center gap-2 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+              <span class="text-slate-300 flex-shrink-0 font-mono text-[10px]">{{ evt.created_at?.slice(11, 16) || '' }}</span>
+              <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0"
                 :class="{
-                  'bg-green-100 text-green-700': evt.event_type === 'born' || evt.event_type === 'evolve',
-                  'bg-blue-100 text-blue-700': evt.event_type === 'feed' || evt.event_type === 'explore',
-                  'bg-red-100 text-red-700': evt.event_type === 'battle' || evt.event_type === 'shark_attack',
-                  'bg-slate-100 text-slate-600': true,
+                  'bg-emerald-50 text-emerald-600 border border-emerald-100': evt.event_type === 'born' || evt.event_type === 'evolve',
+                  'bg-sky-50 text-sky-600 border border-sky-100': evt.event_type === 'feed' || evt.event_type === 'explore',
+                  'bg-rose-50 text-rose-600 border border-rose-100': evt.event_type === 'battle' || evt.event_type === 'shark_attack',
+                  'bg-slate-50 text-slate-500 border border-slate-100': true,
                 }">
                 {{ {born:'诞生', evolve:'进化', feed:'喂食', battle:'斗鱼', explore:'探索',
                     treasure:'寻宝', showoff:'晒鱼', shark_attack:'鲨鱼', level_up:'升级',
                     clean:'换水', touch:'摸鱼', rename:'改名'}[evt.event_type] || evt.event_type }}
               </span>
-              <span class="truncate">{{ evt.wxid?.slice(0, 12) }}</span>
+              <span class="truncate text-slate-400">{{ evt.wxid?.slice(0, 12) }}</span>
             </div>
           </div>
         </div>

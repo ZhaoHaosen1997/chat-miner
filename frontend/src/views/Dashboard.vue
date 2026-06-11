@@ -5,7 +5,7 @@ import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 
 const router = useRouter()
@@ -326,53 +326,60 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
 
     <template v-else>
       <!-- 数据日期横幅 -->
-      <div v-if="stats?.group?.date_range_start" class="card p-3 mb-5 flex items-center gap-2 text-sm text-slate-500">
+      <div v-if="stats?.group?.date_range_start" class="card p-3 mb-5 flex items-center gap-2 text-sm text-slate-500 flex-wrap">
         <span class="text-base">📅</span>
         <span class="font-medium text-slate-700">数据范围：{{ stats.group.date_range_start }} ~ {{ stats.group.date_range_end }}</span>
-        <span class="text-slate-300">·</span>
+        <span class="text-slate-200">|</span>
         <span>共 <strong class="text-slate-700">{{ stats.total_days_with_data }}</strong> 天有消息</span>
-        <span class="text-slate-300">·</span>
+        <span class="text-slate-200">|</span>
         <span>已分析 <strong class="text-emerald-600">{{ stats.analyzed_count }}</strong> 天</span>
-        <span v-if="stats.analyzed_count > 0" class="text-slate-300">·</span>
-        <span v-if="stats.analyzed_count > 0">
-          进度 <strong class="text-indigo-600">{{ stats.progress_pct }}%</strong>
-        </span>
+        <template v-if="stats.analyzed_count > 0">
+          <span class="text-slate-200">|</span>
+          <span class="flex items-center gap-1.5">
+            进度
+            <span class="inline-block w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <span class="block h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-500"
+                :style="{ width: `${stats.progress_pct}%` }"></span>
+            </span>
+            <strong class="text-indigo-600">{{ stats.progress_pct }}%</strong>
+          </span>
+        </template>
       </div>
 
       <!-- 概览卡片 -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div class="card p-4 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 stagger">
+        <div class="card p-4 flex items-center gap-3 group cursor-default">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center group-hover:scale-105 transition-transform">
             <MessageSquare class="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <div class="text-2xl font-bold text-slate-800">{{ (stats?.group?.message_count || 0).toLocaleString() }}</div>
+            <div class="text-2xl font-bold text-slate-800 stat-ticker">{{ (stats?.group?.message_count || 0).toLocaleString() }}</div>
             <div class="text-xs text-slate-400">总消息数</div>
           </div>
         </div>
 
-        <div class="card p-4 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+        <div class="card p-4 flex items-center gap-3 group cursor-default">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center group-hover:scale-105 transition-transform">
             <Calendar class="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <div class="text-2xl font-bold text-slate-800">{{ stats?.analyzed_count || 0 }}<span class="text-base font-normal text-slate-400">/{{ dates.length }}</span></div>
+            <div class="text-2xl font-bold text-slate-800 stat-ticker">{{ stats?.analyzed_count || 0 }}<span class="text-base font-normal text-slate-400">/{{ dates.length }}</span></div>
             <div class="text-xs text-slate-400">已分析天数</div>
           </div>
         </div>
 
-        <div class="card p-4 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+        <div class="card p-4 flex items-center gap-3 group cursor-default">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center group-hover:scale-105 transition-transform">
             <Users class="w-5 h-5 text-amber-600" />
           </div>
           <div>
-            <div class="text-2xl font-bold text-slate-800">{{ stats?.member_count || 0 }}</div>
+            <div class="text-2xl font-bold text-slate-800 stat-ticker">{{ stats?.member_count || 0 }}</div>
             <div class="text-xs text-slate-400">群成员</div>
           </div>
         </div>
 
-        <div class="card p-4 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center">
+        <div class="card p-4 flex items-center gap-3 group cursor-default">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center group-hover:scale-105 transition-transform">
             <Sparkles class="w-5 h-5 text-rose-600" />
           </div>
           <div>
@@ -390,10 +397,14 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
           <!-- 操作按钮行 -->
           <div class="card p-4 flex items-center justify-between gap-4">
             <div class="flex-1 min-w-0">
-              <div class="font-semibold text-slate-700">每日分析</div>
+              <div class="font-semibold text-slate-700 flex items-center gap-2">
+                每日分析
+                <span v-if="latestUnanalyzed" class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-dot"></span>
+                <span v-else class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              </div>
               <div class="text-sm text-slate-400 mt-0.5 truncate">
                 最新未分析：
-                <span class="font-medium text-slate-600">{{ latestUnanalyzed?.date || '全部已分析' }}</span>
+                <span class="font-medium text-slate-600">{{ latestUnanalyzed?.date || '全部已分析 ✅' }}</span>
                 <span v-if="latestUnanalyzed" class="ml-2">({{ latestUnanalyzed.text_messages }} 条文本)</span>
               </div>
             </div>
@@ -411,9 +422,9 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                 @click="startAnalyzeAll"
                 :disabled="analyzing"
                 :class="[
-                  'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all',
+                  'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-[0.98]',
                   !analyzing
-                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700 shadow-lg shadow-emerald-200'
                     : 'bg-slate-100 text-slate-400',
                 ]"
                 title="从新到旧逐天分析全部未分析日期"
@@ -484,18 +495,22 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
 
           <!-- 最近报告列表 -->
           <div class="card p-4">
-            <h3 class="font-semibold text-slate-700 mb-3">最近报告</h3>
-            <div v-if="recentReports.length === 0" class="text-sm text-slate-400 py-8 text-center">
-              还没有分析过，点击"分析最新一天"开始吧 ✨
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-semibold text-slate-700">最近报告</h3>
+              <span class="text-[10px] text-slate-300">{{ recentReports.length }}篇</span>
             </div>
-            <div v-else class="space-y-2">
+            <div v-if="recentReports.length === 0" class="text-sm text-slate-400 py-8 text-center">
+              <div class="text-3xl mb-2">📝</div>
+              还没有分析过，点击"分析最新一天"开始吧
+            </div>
+            <div v-else class="space-y-1.5">
               <button
                 v-for="r in recentReports.slice(0, 7)"
                 :key="r.date"
                 @click="goReport(r.date)"
-                class="w-full text-left card p-3 hover:border-indigo-200 transition-colors flex items-center gap-3 group"
+                class="w-full text-left card p-3 hover:border-indigo-200 transition-all flex items-center gap-3 group hover:shadow-md"
               >
-                <span class="text-2xl">{{ r.mood_emoji || '💬' }}</span>
+                <span class="text-2xl flex-shrink-0 group-hover:scale-110 transition-transform">{{ r.mood_emoji || '💬' }}</span>
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium text-slate-700 truncate group-hover:text-indigo-600 transition-colors">
                     {{ r.one_line || r.date }}
@@ -504,13 +519,14 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
                     {{ r.date }} · {{ r.message_count }} 条消息 · {{ r.active_members }} 人活跃
                   </div>
                 </div>
-                <div class="flex gap-1">
+                <div class="flex gap-1 flex-shrink-0">
                   <span
                     v-for="kw in (r.keywords || []).slice(0, 3)"
                     :key="kw"
-                    class="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[11px]"
+                    class="px-2 py-0.5 bg-slate-50 text-slate-400 rounded-full text-[10px] font-medium border border-slate-100"
                   >{{ kw }}</span>
                 </div>
+                <ArrowRight class="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
             </div>
           </div>
@@ -549,88 +565,103 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
           <div class="card p-4">
             <button
               @click="togglePeriods"
-              class="w-full flex items-center justify-between text-sm"
+              class="w-full flex items-center justify-between"
             >
-              <h3 class="font-semibold text-slate-700 flex items-center gap-1.5">
-                <FileText class="w-4 h-4 text-indigo-400" /> 周报/月报
+              <h3 class="font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center">
+                  <FileText class="w-4 h-4 text-indigo-500" />
+                </span>
+                周报/月报
+                <span v-if="weeklyPeriods.length + monthlyPeriods.length > 0"
+                  class="text-[10px] text-slate-300 font-normal ml-1"
+                >{{ weeklyPeriods.filter(p=>p.status==='ready').length + monthlyPeriods.filter(p=>p.status==='ready').length }}篇待生成</span>
               </h3>
-              <span class="text-xs text-slate-400">{{ showPeriods ? '收起 ▲' : '展开 ▼' }}</span>
+              <span class="text-[10px] text-slate-300 px-2 py-0.5 rounded-full bg-slate-50 transition-colors">
+                {{ showPeriods ? '收起 ▲' : '展开 ▼' }}
+              </span>
             </button>
 
-            <div v-if="showPeriods" class="mt-3 space-y-4">
-              <div v-if="periodsLoading" class="text-xs text-slate-400 py-2 text-center">
-                <Loader2 class="w-3 h-3 animate-spin inline mr-1" /> 加载中...
+            <div v-if="showPeriods" class="mt-4 space-y-5 animate-slide-down">
+              <div v-if="periodsLoading" class="text-xs text-slate-400 py-4 text-center">
+                <Loader2 class="w-3.5 h-3.5 animate-spin inline mr-1.5" /> 加载时段列表...
               </div>
 
               <!-- 周报列表 -->
               <div v-if="weeklyPeriods.length > 0">
-                <div class="text-xs text-slate-400 mb-2 font-medium">📊 自然周</div>
-                <div class="space-y-1 max-h-40 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-2.5">
+                  <span class="text-xs font-semibold text-slate-500 tracking-wide">📊 自然周</span>
+                  <span class="text-[10px] text-slate-300">{{ weeklyPeriods.filter(p=>p.status==='generated').length }}/{{ weeklyPeriods.length }}已生成</span>
+                </div>
+                <div class="space-y-1 max-h-48 overflow-y-auto">
                   <div
                     v-for="p in weeklyPeriods.slice(0, 8)"
                     :key="'w'+p.period_key"
-                    class="flex items-center gap-2 text-xs py-1 px-2 rounded-lg"
-                    :class="p.status === 'generated' ? 'hover:bg-indigo-50 cursor-pointer' : p.status === 'ready' ? 'bg-amber-50/50' : 'opacity-30'"
+                    class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg transition-all"
+                    :class="p.status === 'generated' ? 'hover:bg-indigo-50 cursor-pointer border border-transparent hover:border-indigo-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
                     @click="p.status === 'generated' ? goWeekly(p.period_key) : null"
                   >
-                    <span class="font-mono text-slate-500 w-16 flex-shrink-0">{{ p.period_key }}</span>
+                    <span class="font-mono font-medium text-slate-600 w-16 flex-shrink-0">{{ p.period_key }}</span>
                     <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
                     <template v-if="p.status === 'generated'">
-                      <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded cursor-pointer" @click.stop="goWeekly(p.period_key)">已生成</span>
+                      <span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium cursor-pointer border border-emerald-100" @click.stop="goWeekly(p.period_key)">已生成</span>
                       <button
                         @click.stop="doGenerateWeekly(p.period_key, true)"
                         :disabled="!!generatingPeriod || !!activeTaskId"
-                        class="text-[10px] bg-amber-100 text-amber-600 px-1 rounded hover:bg-amber-200 disabled:opacity-50"
+                        class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40 transition-colors font-medium border border-amber-100"
                         title="重新生成"
-                      >↻</button>
+                      >↻ 重生成</button>
                     </template>
                     <button
                       v-else-if="p.status === 'ready'"
                       @click.stop="doGenerateWeekly(p.period_key)"
                       :disabled="!!generatingPeriod || !!activeTaskId"
-                      class="text-[10px] bg-indigo-100 text-indigo-600 px-1 rounded hover:bg-indigo-200 disabled:opacity-50"
+                      class="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full hover:bg-indigo-600 disabled:opacity-40 transition-colors font-medium"
                     >生成</button>
-                    <span v-else class="text-[10px] text-slate-300">不足</span>
+                    <span v-else class="text-[10px] text-slate-300 font-medium">不足</span>
                   </div>
                 </div>
               </div>
 
               <!-- 月报列表 -->
               <div v-if="monthlyPeriods.length > 0">
-                <div class="text-xs text-slate-400 mb-2 font-medium">📅 自然月</div>
-                <div class="space-y-1 max-h-40 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-2.5">
+                  <span class="text-xs font-semibold text-slate-500 tracking-wide">📅 自然月</span>
+                  <span class="text-[10px] text-slate-300">{{ monthlyPeriods.filter(p=>p.status==='generated').length }}/{{ monthlyPeriods.length }}已生成</span>
+                </div>
+                <div class="space-y-1 max-h-48 overflow-y-auto">
                   <div
                     v-for="p in monthlyPeriods.slice(0, 8)"
                     :key="'m'+p.period_key"
-                    class="flex items-center gap-2 text-xs py-1 px-2 rounded-lg"
-                    :class="p.status === 'generated' ? 'hover:bg-purple-50 cursor-pointer' : p.status === 'ready' ? 'bg-amber-50/50' : 'opacity-30'"
+                    class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg transition-all"
+                    :class="p.status === 'generated' ? 'hover:bg-purple-50 cursor-pointer border border-transparent hover:border-purple-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
                     @click="p.status === 'generated' ? goMonthly(p.period_key) : null"
                   >
-                    <span class="font-mono text-slate-500 w-16 flex-shrink-0">{{ p.period_key }}</span>
+                    <span class="font-mono font-medium text-slate-600 w-16 flex-shrink-0">{{ p.period_key }}</span>
                     <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
                     <template v-if="p.status === 'generated'">
-                      <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1 rounded cursor-pointer" @click.stop="goMonthly(p.period_key)">已生成</span>
+                      <span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium cursor-pointer border border-emerald-100" @click.stop="goMonthly(p.period_key)">已生成</span>
                       <button
                         @click.stop="doGenerateMonthly(p.period_key, true)"
                         :disabled="!!generatingPeriod || !!activeTaskId"
-                        class="text-[10px] bg-amber-100 text-amber-600 px-1 rounded hover:bg-amber-200 disabled:opacity-50"
+                        class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40 transition-colors font-medium border border-amber-100"
                         title="重新生成"
-                      >↻</button>
+                      >↻ 重生成</button>
                     </template>
                     <button
                       v-else-if="p.status === 'ready'"
                       @click.stop="doGenerateMonthly(p.period_key)"
                       :disabled="!!generatingPeriod || !!activeTaskId"
-                      class="text-[10px] bg-purple-100 text-purple-600 px-1 rounded hover:bg-purple-200 disabled:opacity-50"
+                      class="text-[10px] bg-purple-500 text-white px-2 py-0.5 rounded-full hover:bg-purple-600 disabled:opacity-40 transition-colors font-medium"
                     >生成</button>
-                    <span v-else class="text-[10px] text-slate-300">不足</span>
+                    <span v-else class="text-[10px] text-slate-300 font-medium">不足</span>
                   </div>
                 </div>
               </div>
 
               <div v-if="!periodsLoading && weeklyPeriods.length === 0 && monthlyPeriods.length === 0"
-                   class="text-xs text-slate-400 py-2 text-center">
-                暂无足够的日报数据，至少需要3天日报才能生成周报
+                   class="text-xs text-slate-400 py-4 text-center bg-slate-50 rounded-xl">
+                📭 暂无足够的日报数据<br>
+                <span class="text-[10px] text-slate-300">至少需要3天日报才能生成周报</span>
               </div>
             </div>
           </div>
@@ -725,6 +756,13 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
             </p>
           </div>
           <div class="px-5 py-4 space-y-3">
+            <!-- 已分析：查看日报（主按钮） -->
+            <button v-if="dayPopup.analyzed" @click="dayPopup = null; goReport(dayPopup.date)"
+              class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold
+                     bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition shadow-lg shadow-indigo-200 active:scale-[0.98]">
+              <FileText :size="16" />
+              查看群聊日报
+            </button>
             <button @click="handleGenerateReport" :disabled="!!dayPopupLoading"
               class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium
                      bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition shadow-sm">

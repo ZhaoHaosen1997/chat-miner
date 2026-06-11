@@ -95,8 +95,8 @@ watch(stats, (s) => {
 <template>
   <div>
     <!-- 返回 -->
-    <button @click="goBack" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 mb-4 transition-colors">
-      <ArrowLeft class="w-4 h-4" /> 返回仪表盘
+    <button @click="goBack" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 mb-5 transition-colors group">
+      <ArrowLeft class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" /> 返回仪表盘
     </button>
 
     <!-- 加载 -->
@@ -127,10 +127,10 @@ watch(stats, (s) => {
     <!-- 报告内容 -->
     <template v-else-if="report">
       <!-- 头部 -->
-      <div class="card p-6 mb-6 text-center">
-        <div class="text-5xl mb-3">{{ report.mood_emoji }}</div>
-        <h2 class="text-2xl font-bold text-slate-800 mb-1">{{ report.one_line }}</h2>
-        <p v-if="report.headline && report.headline !== report.one_line" class="text-sm text-indigo-500 font-medium mb-1">📺 {{ report.headline }}</p>
+      <div class="card p-8 mb-6 text-center animate-scale-in">
+        <div class="text-5xl mb-4">{{ report.mood_emoji }}</div>
+        <h2 class="text-2xl font-bold text-slate-800 mb-2">{{ report.one_line }}</h2>
+        <p v-if="report.headline && report.headline !== report.one_line" class="text-sm text-indigo-500 font-medium mb-2">📺 {{ report.headline }}</p>
         <div class="flex items-center justify-center gap-3">
           <p class="text-slate-400 text-sm">{{ props.date }} · {{ report.mood }}</p>
           <button
@@ -143,11 +143,11 @@ watch(stats, (s) => {
             {{ reanalyzing ? '分析中...' : '重新分析' }}
           </button>
         </div>
-        <div class="flex justify-center gap-2 mt-3">
+        <div class="flex justify-center gap-2 mt-4">
           <span
             v-for="kw in report.keywords"
             :key="kw"
-            class="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-sm"
+            class="px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 rounded-full text-sm font-medium border border-indigo-100"
           >#{{ kw }}</span>
         </div>
       </div>

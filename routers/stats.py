@@ -29,11 +29,13 @@ async def api_health():
         if not gpu_free:
             gpu_status["locked_by"] = await get_lock_owner()
 
+    from main import app
     return {
         "code": 200,
         "message": "服务正常运行",
         "data": {
             "status": "ok",
+            "version": app.version,
             "ollama": ollama,
             "deepseek": deepseek,
             "gpu_lock": gpu_status,

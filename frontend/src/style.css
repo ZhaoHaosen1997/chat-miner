@@ -1,29 +1,247 @@
 @import "tailwindcss";
 
-/* 简洁亮色主题 */
+/* ===== Chat-Miner Design System =====
+   "群聊杂志" — Group Chat Magazine
+   Editorial report design with mood-responsive theming
+   ======================================== */
+
+:root {
+  /* Core palette */
+  --color-page: #F2F3F7;
+  --color-surface: #FFFFFF;
+  --color-ink: #111827;
+  --color-ink-secondary: #6B7280;
+  --color-accent: #6366F1;
+  --color-accent-soft: #EEF2FF;
+  --color-chat-green: #059669;
+  --color-chat-green-soft: #ECFDF5;
+  --color-amber: #F59E0B;
+  --color-amber-soft: #FFFBEB;
+  --color-coral: #EF4444;
+  --color-coral-soft: #FEF2F2;
+  --color-hairline: #E5E7EB;
+  --color-hairline-soft: #F3F4F6;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px 0 rgba(0,0,0,0.04), 0 1px 2px -1px rgba(0,0,0,0.03);
+  --shadow-card-hover: 0 10px 25px -5px rgba(0,0,0,0.08), 0 4px 10px -6px rgba(0,0,0,0.04);
+  --shadow-hero: 0 20px 60px -12px rgba(0,0,0,0.15);
+  --shadow-float: 0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.05);
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+
+  /* Transitions */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ===== Base ===== */
 body {
-  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f1f5f9;
-  color: #1e293b;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+  background: var(--color-page);
+  color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
+  line-height: 1.6;
 }
 
-/* 卡片 */
+/* ===== Card system ===== */
 .card {
-  background: #fff;
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  transition: box-shadow 0.2s;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-hairline);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.25s var(--ease-out-expo), border-color 0.25s ease;
 }
-.card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+.card:hover {
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--color-hairline);
+}
 
-/* 滚动条 */
-::-webkit-scrollbar { width: 5px; }
+.card-ghost {
+  background: transparent;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--color-hairline);
+}
+
+.card-flat {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: none;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* vue transition */
-.fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
+/* ===== Vue transitions ===== */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* ===== Animation utilities ===== */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-slide-up    { animation: slideUp 0.5s var(--ease-out-expo) both; }
+.animate-slide-down  { animation: slideDown 0.4s var(--ease-out-expo) both; }
+.animate-fade-in     { animation: fadeIn 0.4s ease both; }
+.animate-scale-in    { animation: scaleIn 0.35s var(--ease-out-back) both; }
+
+/* Stagger children */
+.stagger > * {
+  opacity: 0;
+  animation: slideUp 0.5s var(--ease-out-expo) forwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.3s; }
+.stagger > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger > *:nth-child(8) { animation-delay: 0.4s; }
+
+/* Shimmer loading */
+.shimmer {
+  background: linear-gradient(90deg, var(--color-hairline-soft) 25%, var(--color-hairline) 50%, var(--color-hairline-soft) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ===== Report-specific styles ===== */
+
+/* Hero section — mood-responsive gradient base */
+.hero-gloss {
+  position: relative;
+  overflow: hidden;
+}
+.hero-gloss::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.12) 0%, transparent 50%),
+              radial-gradient(circle at 70% 80%, rgba(255,255,255,0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Section divider ornament */
+.section-ornament {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.section-ornament::before,
+.section-ornament::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-hairline);
+}
+.section-ornament > .ornament-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+/* Award card ribbon effect */
+.award-card {
+  position: relative;
+  transition: transform 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
+}
+.award-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Quote mark for narrative sections */
+.quote-mark {
+  font-size: 3rem;
+  line-height: 1;
+  color: var(--color-chat-green);
+  opacity: 0.25;
+  font-family: Georgia, "Times New Roman", serif;
+  user-select: none;
+}
+
+/* Film strip perforation effect */
+.film-strip {
+  position: relative;
+}
+.film-strip::before,
+.film-strip::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background:
+    radial-gradient(circle 4px, var(--color-page) 100%, transparent 100%);
+  background-size: 16px 8px;
+  background-repeat: repeat-x;
+  z-index: 1;
+}
+.film-strip::before { top: 0; }
+.film-strip::after  { bottom: 0; }
+
+/* Pulse dot for live indicators */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(0.85); }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Number ticker style for big stats */
+.stat-ticker {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Health gauge */
+.health-gauge {
+  display: flex;
+  gap: 3px;
+}
+.health-gauge > .gauge-pip {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-hairline);
+  transition: background 0.4s var(--ease-out-expo);
+}
+.health-gauge > .gauge-pip.filled {
+  background: var(--color-chat-green);
+}

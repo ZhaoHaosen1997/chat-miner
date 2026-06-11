@@ -4,6 +4,13 @@
  */
 const BASE = '/api'
 
+export async function apiGet(url) {
+  const res = await fetch(`${BASE}${url}`)
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data
+}
+
 async function request(url, options = {}) {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },

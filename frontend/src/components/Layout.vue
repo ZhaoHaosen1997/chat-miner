@@ -1,10 +1,10 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
+import { ref, inject, watch, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
 import { MessageCircle, Users, LayoutDashboard, Loader2, Fish } from 'lucide-vue-next'
-import { listGroups } from '../api/index.js'
+import { listGroups, apiGet } from '../api/index.js'
 
 const props = defineProps({ currentGroup: Object })
 const emit = defineEmits(['group-change'])
@@ -15,6 +15,41 @@ const showUpload = ref(false)
 const importLoading = ref(false)
 const activeTaskId = inject('activeTaskId', ref(''))
 const groupSelectorRef = ref(null)
+const appVersion = ref('')
+
+// 页面标题映射
+const pageTitles = {
+  '/': '仪表盘',
+  '/portraits': '群友画像',
+  '/portrait': '群友画像详情',
+  '/fishpond': '群鱼塘',
+  '/fish-report': '鱼塘日报',
+  '/report': '群聊日报',
+  '/weekly': '群聊周报',
+  '/monthly': '群聊月报',
+}
+
+// 动态标题
+const pageTitle = computed(() => {
+  const path = route.path
+  for (const [key, title] of Object.entries(pageTitles)) {
+    if (path.startsWith(key)) return title
+  }
+  return 'Chat-Miner'
+})
+
+// 更新浏览器标题
+watch(pageTitle, (t) => {
+  document.title = `${t} · Chat-Miner`
+}, { immediate: true })
+
+// 获取版本号
+onMounted(async () => {
+  try {
+    const health = await apiGet('/health')
+    appVersion.value = health?.data?.version || ''
+  } catch (e) { /* ignore */ }
+})
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
@@ -53,15 +88,23 @@ async function onUploaded(data) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-100">
+  <div class="min-h-screen" style="background: var(--color-page)">
     <!-- 顶部导航 -->
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-30">
       <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
         <div class="flex items-center gap-6">
           <!-- Logo -->
-          <div class="flex items-center gap-2 text-indigo-600 font-bold text-lg">
-            <MessageCircle class="w-5 h-5" />
-            <span class="hidden sm:inline">Chat-Miner</span>
+          <div class="flex items-center gap-2 font-bold text-lg relative group cursor-default">
+            <span class="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+              <MessageCircle class="w-4 h-4 text-white" />
+            </span>
+            <span class="hidden sm:inline text-slate-800">Chat-Miner</span>
+            <span v-if="appVersion"
+              class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg"
+            >
+              {{ appVersion }}
+              <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-0 w-2 h-2 bg-slate-800 rotate-45"></span>
+            </span>
           </div>
           <!-- 群选择器 -->
           <GroupSelector
