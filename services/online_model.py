@@ -30,6 +30,9 @@ def _get_deepseek_client(timeout: int = 90) -> httpx.AsyncClient:
                 "Content-Type": "application/json",
             },
         )
+    else:
+        # 更新超时（避免首次创建后沿用旧值）
+        _deepseek_client.timeout = timeout
     return _deepseek_client
 
 

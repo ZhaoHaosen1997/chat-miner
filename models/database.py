@@ -275,6 +275,26 @@ def init_db():
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
     """)
+    # v0.11.0: 年度奖项
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS annual_awards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            member_id INTEGER NOT NULL,
+            award_name TEXT NOT NULL,
+            award_reason TEXT,
+            award_emoji TEXT DEFAULT '🏆',
+            ceremony_version INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (member_id) REFERENCES group_members(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_annual_awards_group_year
+            ON annual_awards(group_id, year);
+        CREATE INDEX IF NOT EXISTS idx_annual_awards_member
+            ON annual_awards(member_id);
+    """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
     # v0.9.3: 装备栏
@@ -811,6 +831,71 @@ def delete_periodic_report(group_id: int, report_type: str,
         """DELETE FROM periodic_reports
            WHERE group_id=? AND report_type=? AND period_key=?""",
         (group_id, report_type, period_key)
+    )
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+# ==================== 年度奖项 v0.11 CRUD ====================
+
+def save_annual_awards(group_id: int, year: int, awards: list[dict],
+                        ceremony_version: int = 1):
+    """保存年度奖项列表。先删旧奖项再批量插入"""
+    conn = get_conn()
+    conn.execute(
+        "DELETE FROM annual_awards WHERE group_id=? AND year=?",
+        (group_id, year)
+    )
+    for a in awards:
+        conn.execute(
+            """INSERT INTO annual_awards
+               (group_id, year, member_id, award_name, award_reason,
+                award_emoji, ceremony_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (group_id, year, a["member_id"], a["award_name"],
+             a.get("award_reason", ""), a.get("award_emoji", "🏆"),
+             ceremony_version)
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_annual_awards(group_id: int, year: int) -> list[dict]:
+    """获取某群某年的所有奖项"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT aa.*, gm.display_name, gm.wxid
+           FROM annual_awards aa
+           LEFT JOIN group_members gm ON aa.member_id = gm.id
+           WHERE aa.group_id=? AND aa.year=?
+           ORDER BY aa.id""",
+        (group_id, year)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_member_awards(group_id: int, member_id: int) -> list[dict]:
+    """获取某成员的所有年份奖项"""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM annual_awards
+           WHERE group_id=? AND member_id=?
+           ORDER BY year DESC, id""",
+        (group_id, member_id)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_annual_awards(group_id: int, year: int) -> bool:
+    """删除某群某年的所有奖项"""
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM annual_awards WHERE group_id=? AND year=?",
+        (group_id, year)
     )
     conn.commit()
     deleted = cur.rowcount > 0

@@ -227,3 +227,21 @@ export const generateMonthly = async (gid, periodKey = '', force = false) => {
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
 }
+
+// --- 年度报告 v0.11 ---
+export const getAnnualReport = (gid, year) =>
+  request(`/groups/${gid}/annual/${year}`)
+export const getAnnualAwards = (gid, year) =>
+  request(`/groups/${gid}/annual-awards/${year}`)
+export const getMemberAwards = (gid, memberId) =>
+  request(`/groups/${gid}/member/${memberId}/awards`)
+export async function generateAnnual(gid, year = 0, force = false) {
+  const params = new URLSearchParams()
+  if (year) params.set('year', year)
+  if (force) params.set('force', 'true')
+  const qs = params.toString()
+  const res = await fetch(`${BASE}/groups/${gid}/annual/generate${qs ? '?' + qs : ''}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}

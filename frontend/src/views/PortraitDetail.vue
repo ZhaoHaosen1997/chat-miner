@@ -9,7 +9,7 @@ import {
   ArrowLeft, Loader2, Sparkles, RefreshCw, User,
   MessageSquare, Clock, Tag, TrendingUp,
   ChevronRight, Hash, Smile, BarChart3, Users2,
-  Search, MessageCircle, Activity, Zap, Quote,
+  Search, MessageCircle, Activity, Zap, Quote, Trophy,
 } from 'lucide-vue-next'
 
 const props = defineProps({ memberId: String })
@@ -268,6 +268,23 @@ const currentVersion = computed(() => {
             <div>
               <p class="text-sm font-bold text-amber-700">{{ portrait.portrait.fun_title }}</p>
               <p v-if="portrait.portrait.fun_relation" class="text-xs text-amber-500 mt-0.5">{{ portrait.portrait.fun_relation }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 年度荣誉 v0.11 -->
+        <div v-if="portrait.awards?.length" class="card p-4">
+          <div class="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
+            <Trophy class="w-3.5 h-3.5 text-amber-400" /> 年度荣誉
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <div v-for="(award, i) in portrait.awards" :key="i"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border"
+              style="background: linear-gradient(135deg, #FFFBEB, #FEF3C7); border-color: #FCD34D; color: #92400E;"
+            >
+              <span class="text-base leading-none">{{ award.emoji || '🏆' }}</span>
+              <span>{{ award.name }}</span>
+              <span class="text-[10px] opacity-50">{{ award.year }}</span>
             </div>
           </div>
         </div>

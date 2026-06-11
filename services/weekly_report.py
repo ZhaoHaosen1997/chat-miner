@@ -131,7 +131,10 @@ def compute_available_periods(
     if not dates:
         return []
 
-    min_days = 3 if period_type == "weekly" else 5  # 月报 5 天即可
+    if period_type == "annual":
+        min_days = 30
+    else:
+        min_days = 3 if period_type == "weekly" else 5  # 月报 5 天即可
     groups = {}  # period_key -> {day_count, date_start, date_end}
 
     for date_str in dates:
@@ -139,6 +142,9 @@ def compute_available_periods(
         if period_type == "weekly":
             key = get_week_key(d)
             start, end = iso_week_dates(d.year, int(key.split("-W")[1]))
+        elif period_type == "annual":
+            key = str(d.year)
+            start, end = f"{d.year}-01-01", f"{d.year}-12-31"
         else:
             key = get_month_key(d)
             start, end = month_dates(d.year, d.month)

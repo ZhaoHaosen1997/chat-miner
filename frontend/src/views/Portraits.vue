@@ -532,6 +532,14 @@ const unanalyzedCount = computed(() =>
           >{{ tag }}</span>
         </div>
 
+        <!-- 年度奖项徽章 -->
+        <div v-if="p.awards?.count" class="flex items-center gap-1 mb-2 text-[10px]">
+          <span class="flex items-center gap-0.5 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-700 px-1.5 py-0.5 rounded-full font-medium border border-amber-200">
+            🏆 {{ p.awards.count }}项大奖
+          </span>
+          <span v-if="p.awards.latest?.[0]?.name" class="text-slate-400 truncate">{{ p.awards.latest[0].name }}</span>
+        </div>
+
         <!-- 刷新 -->
         <div class="flex items-center justify-end">
           <button

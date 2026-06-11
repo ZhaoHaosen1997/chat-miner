@@ -665,3 +665,103 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
         "message": f"月报生成任务已创建: {period_key}",
         "data": {"task_id": task.task_id, "period_key": period_key},
     }
+
+
+# ==================== 年度报告 v0.11.0 ====================
+
+@router.get("/annual/{year}")
+async def api_get_annual(group_id: int, year: int):
+    """获取年度报告"""
+    from models.database import get_periodic_report
+    report = get_periodic_report(group_id, "annual", str(year))
+    if not report:
+        raise HTTPException(404, detail=f"{year}年度报告尚未生成")
+    try:
+        report["report_json"] = json.loads(report["report_json"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {"code": 200, "message": "获取成功", "data": report}
+
+
+@router.post("/annual/generate")
+async def api_generate_annual(group_id: int, year: int = 0, force: bool = False):
+    """生成年度报告（异步任务）
+
+    Args:
+        year: 年份，0表示生成最新可用年份
+        force: 强制重新生成，跳过缓存
+    """
+    from services.weekly_report import compute_available_periods
+    from services.annual_report import generate_annual_report
+
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    if not year:
+        all_dates = chat.all_dates()
+        periods = compute_available_periods(all_dates, "annual")
+        ready = [p for p in periods if p["status"] == "ready"]
+        if not ready:
+            return {
+                "code": 200,
+                "message": "暂无足够数据的年份（至少需要30天聊天数据）",
+                "data": None,
+            }
+        year = int(ready[-1]["period_key"])
+
+    # 数据量预检
+    all_dates = chat.all_dates()
+    year_dates = [d for d in all_dates if d.startswith(str(year))]
+    if len(year_dates) < 30:
+        return {
+            "code": 200,
+            "message": f"{year}年数据不足（仅{len(year_dates)}天有消息，需要≥30天）",
+            "data": None,
+        }
+
+    task = task_manager.create("generate_annual", group_id,
+                               {"period_key": str(year)})
+    task.update("pending", f"开始{'重新' if force else ''}生成{year}年度报告...")
+
+    async def _run():
+        try:
+            result = await generate_annual_report(
+                group_id, year, chat, task=task, force=force)
+            if result["success"]:
+                task.update("done", f"{year}年度报告生成完成")
+                task.finish(success=True)
+            else:
+                task.finish(success=False,
+                            error={"type": "annual_failed", "detail": result.get("error", "")})
+        except Exception as e:
+            logger.error(f"年度报告生成异常: {e}")
+            task.finish(success=False, error={"type": "unknown", "detail": str(e)})
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": f"年度报告生成任务已创建: {year}",
+        "data": {"task_id": task.task_id, "period_key": str(year)},
+    }
+
+
+@router.get("/annual-awards/{year}")
+async def api_get_annual_awards(group_id: int, year: int):
+    """获取某年所有奖项列表"""
+    from models.database import get_annual_awards
+    awards = get_annual_awards(group_id, year)
+    return {"code": 200, "message": "获取成功", "data": awards}
+
+
+@router.get("/member/{member_id}/awards")
+async def api_get_member_awards(group_id: int, member_id: int):
+    """获取某成员的历年奖项"""
+    from models.database import get_member_awards as db_get_member_awards
+    awards = db_get_member_awards(group_id, member_id)
+    return {"code": 200, "message": "获取成功", "data": awards}

@@ -30,6 +30,8 @@ async def api_get_portraits(group_id: int):
     from models.database import get_portraits as db_get_portraits
     portraits = db_get_portraits(group_id)
 
+    from models.database import get_member_awards as db_get_member_awards
+
     result = []
     for p in portraits:
         try:
@@ -39,12 +41,24 @@ async def api_get_portraits(group_id: int):
 
         # 合并成员信息
         member = get_member(group_id, p["member_id"])
+
+        # 获取该成员奖项（最多返回最近3个）
+        awards = db_get_member_awards(group_id, p["member_id"])
+        award_summary = None
+        if awards:
+            award_summary = {
+                "count": len(awards),
+                "latest": [{"name": a["award_name"], "emoji": a.get("award_emoji", "🏆"),
+                            "year": a["year"]} for a in awards[:3]]
+            }
+
         result.append({
             "member_id": p["member_id"],
             "display_name": p["display_name"],
             "avatar": member["avatar"] if member else "",
             "total_messages": p["total_analyzed_messages"],
             "portrait": pj,
+            "awards": award_summary,
             "data_start_date": p.get("data_start_date") or "",
             "data_end_date": p.get("data_end_date") or "",
             "last_updated": p["last_updated"],
@@ -66,6 +80,11 @@ async def api_get_single_portrait(group_id: int, member_id: int):
         pj = {}
 
     member = get_member(group_id, member_id)
+
+    # 获取该成员历年奖项
+    from models.database import get_member_awards as db_get_member_awards
+    awards = db_get_member_awards(group_id, member_id)
+
     return {
         "code": 200,
         "message": "获取成功",
@@ -75,6 +94,9 @@ async def api_get_single_portrait(group_id: int, member_id: int):
             "avatar": member["avatar"] if member else "",
             "total_messages": portrait["total_analyzed_messages"],
             "portrait": pj,
+            "awards": [{"name": a["award_name"], "emoji": a.get("award_emoji", "🏆"),
+                        "reason": a.get("award_reason", ""), "year": a["year"]}
+                       for a in awards],
             "data_start_date": portrait.get("data_start_date") or "",
             "data_end_date": portrait.get("data_end_date") or "",
             "last_updated": portrait["last_updated"],
