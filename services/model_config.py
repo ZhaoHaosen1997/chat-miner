@@ -162,3 +162,20 @@ def is_online_available() -> bool:
     """检查是否有可用的在线模型配置（有 API Key 即可用）"""
     effective = get_effective_model("online")
     return bool(effective.get("api_key"))
+
+
+# v0.13.0: API Key 脱敏
+def mask_api_key(key: str) -> str:
+    """脱敏 API Key，保留前后各 3 字符"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return key[:2] + "***" if len(key) > 2 else key
+    return key[:3] + "***" + key[-4:]
+
+
+def _row_to_response(row: dict) -> dict:
+    """DB 行转前端安全响应（API Key 脱敏）"""
+    cfg = _row_to_config(row)
+    cfg["api_key"] = mask_api_key(cfg["api_key"])
+    return cfg

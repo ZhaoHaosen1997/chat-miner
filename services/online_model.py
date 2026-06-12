@@ -15,23 +15,28 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-# 模块级 httpx 客户端复用（仅用于旧 call_deepseek_chat 兼容）
-_deepseek_client: httpx.AsyncClient | None = None
+# v0.13.0: 模块级 httpx 连接池，按 (endpoint, api_key) 缓存复用
+_online_clients: dict[str, httpx.AsyncClient] = {}
 
 
-def _get_deepseek_client(timeout: int = 90) -> httpx.AsyncClient:
-    global _deepseek_client
-    if _deepseek_client is None or _deepseek_client.is_closed:
-        _deepseek_client = httpx.AsyncClient(
-            timeout=timeout,
+def _get_online_client(endpoint: str, api_key: str, timeout: int = 90) -> httpx.AsyncClient:
+    """获取或创建缓存的 httpx 客户端（按端点+Key 缓存）"""
+    cache_key = f"{endpoint}|{api_key[:8] if api_key else 'nokey'}"
+    client = _online_clients.get(cache_key)
+    if client is None or client.is_closed:
+        _online_clients[cache_key] = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout),
             headers={
-                "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-            },
+            } if api_key else {"Content-Type": "application/json"},
         )
-    else:
-        _deepseek_client.timeout = timeout
-    return _deepseek_client
+    return _online_clients[cache_key]
+
+
+# 保留旧兼容函数（内部转调连接池）
+def _get_deepseek_client(timeout: int = 90) -> httpx.AsyncClient:
+    return _get_online_client(config.DEEPSEEK_API_URL, config.DEEPSEEK_API_KEY, timeout)
 
 
 def _build_api_url(endpoint: str) -> str:
@@ -118,51 +123,46 @@ async def call_online_chat(
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
     start_time = time.time()
     try:
-        async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-            resp = await client.post(api_url, json=payload)
-            duration_ms = int((time.time() - start_time) * 1000)
+        client = _get_online_client(endpoint, api_key, timeout)
+        resp = await client.post(api_url, json=payload)
+        duration_ms = int((time.time() - start_time) * 1000)
 
-            if resp.status_code == 401:
-                return {
-                    "success": False, "data": None,
-                    "error": f"API Key 无效 ({model_name})",
-                    "model": model_name, "duration_ms": duration_ms,
-                }
-            if resp.status_code == 402:
-                return {
-                    "success": False, "data": None,
-                    "error": f"API 余额不足 ({model_name})",
-                    "model": model_name, "duration_ms": duration_ms,
-                }
-            if resp.status_code == 429:
-                return {
-                    "success": False, "data": None,
-                    "error": f"API 请求太频繁，请稍后重试 ({model_name})",
-                    "model": model_name, "duration_ms": duration_ms,
-                }
-
-            resp.raise_for_status()
-            result = resp.json()
-            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            logger.info(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
-
-            if content.strip():
-                return {
-                    "success": True, "data": content.strip(),
-                    "error": None, "model": model_name, "duration_ms": duration_ms,
-                }
+        if resp.status_code == 401:
             return {
                 "success": False, "data": None,
-                "error": f"{model_name} 返回空内容",
+                "error": f"API Key 无效 ({model_name})",
                 "model": model_name, "duration_ms": duration_ms,
             }
+        if resp.status_code == 402:
+            return {
+                "success": False, "data": None,
+                "error": f"API 余额不足 ({model_name})",
+                "model": model_name, "duration_ms": duration_ms,
+            }
+        if resp.status_code == 429:
+            return {
+                "success": False, "data": None,
+                "error": f"API 请求太频繁，请稍后重试 ({model_name})",
+                "model": model_name, "duration_ms": duration_ms,
+            }
+
+        resp.raise_for_status()
+        result = resp.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        logger.info(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
+
+        if content.strip():
+            return {
+                "success": True, "data": content.strip(),
+                "error": None, "model": model_name, "duration_ms": duration_ms,
+            }
+        return {
+            "success": False, "data": None,
+            "error": f"{model_name} 返回空内容",
+            "model": model_name, "duration_ms": duration_ms,
+        }
 
     except httpx.TimeoutException:
         duration_ms = int((time.time() - start_time) * 1000)

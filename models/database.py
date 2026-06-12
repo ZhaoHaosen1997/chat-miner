@@ -1071,8 +1071,20 @@ def mark_fish_dead(group_id: int, wxid: str) -> bool:
     return True
 
 
+# v0.13.0: 白名单校验，防止 SQL 注入
+_FISH_FIELD_WHITELIST = {
+    "fish_name", "species", "rarity",
+    "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
+    "experience", "level", "growth", "happiness", "hp", "stage",
+    "consecutive_days", "last_active_date", "last_fed_date", "is_alive",
+    "equipped_item", "active_consumable",
+}
+
+
 def update_fish_field(group_id: int, wxid: str, field: str, value):
-    """更新鱼的单字段"""
+    """更新鱼的单字段（白名单校验防注入）"""
+    if field not in _FISH_FIELD_WHITELIST:
+        raise ValueError(f"非法字段名: {field}")
     conn = get_conn()
     conn.execute(
         f"""UPDATE fish_pond SET {field}=?, updated_at=datetime('now')

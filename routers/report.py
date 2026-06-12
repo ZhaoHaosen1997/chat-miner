@@ -59,6 +59,18 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task,
 
     v0.12.0: 支持 model_id 选择模型（本地或在线均可）。None=使用本地默认模型。
     """
+    try:
+        await _do_run_analyze_and_save(group_id, group_name, date, task, model_id)
+    except Exception as e:
+        logger.error(f"日报分析异常 [{group_name} {date}]: {e}", exc_info=True)
+        try:
+            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+        except Exception:
+            pass  # finish 本身失败则忽略
+
+
+async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, task, model_id: int = None):
+    """_run_analyze_and_save 的实际实现（由 try/except 包裹调用）"""
     from services.model_config import get_effective_model, _row_to_config
     from models.database import get_model_config
 
@@ -243,6 +255,18 @@ async def _run_analyze_all(group_id: int, group_name: str, task, model_id: int =
 
     v0.12.0: 支持 model_id 选择模型（本地或在线均可）。
     """
+    try:
+        await _do_run_analyze_all(group_id, group_name, task, model_id)
+    except Exception as e:
+        logger.error(f"批量分析异常 [{group_name}]: {e}", exc_info=True)
+        try:
+            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+        except Exception:
+            pass
+
+
+async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: int = None):
+    """_run_analyze_all 的实际实现（由 try/except 包裹调用）"""
     from services.model_config import get_effective_model, _row_to_config
     from models.database import get_model_config
 

@@ -109,7 +109,19 @@ async def api_get_single_portrait(group_id: int, member_id: int):
 
 
 async def _run_portrait_and_save(group_id: int, member_id: int, task):
-    """后台执行：画像生成 + 保存"""
+    """后台执行：画像生成 + 保存（v0.13.0: 加 try/except 防任务挂起）"""
+    try:
+        await _do_run_portrait_and_save(group_id, member_id, task)
+    except Exception as e:
+        logger.error(f"画像生成异常 [member_id={member_id}]: {e}", exc_info=True)
+        try:
+            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+        except Exception:
+            pass
+
+
+async def _do_run_portrait_and_save(group_id: int, member_id: int, task):
+    """_run_portrait_and_save 的实际实现"""
     group = get_group(group_id)
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)

@@ -10,7 +10,7 @@ from models.database import (
     list_model_configs, get_model_config, create_model_config,
     update_model_config, delete_model_config
 )
-from services.model_config import _row_to_config, get_effective_model
+from services.model_config import _row_to_config, _row_to_response, get_effective_model, mask_api_key
 from services.online_model import check_online_model_health
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ async def api_list_models():
     return {
         "code": 200,
         "message": "获取成功",
-        "data": [_row_to_config(c) for c in configs],
+        "data": [_row_to_response(c) for c in configs],
     }
 
 
@@ -77,7 +77,7 @@ async def api_get_model(config_id: int):
     return {
         "code": 200,
         "message": "获取成功",
-        "data": _row_to_config(cfg),
+        "data": _row_to_response(cfg),
     }
 
 
@@ -98,7 +98,7 @@ async def api_create_model(body: ModelConfigCreate):
         return {
             "code": 200,
             "message": f"模型 '{body.name}' 创建成功",
-            "data": _row_to_config(cfg),
+            "data": _row_to_response(cfg),
         }
     except Exception as e:
         if "UNIQUE" in str(e):
@@ -121,7 +121,7 @@ async def api_update_model(config_id: int, body: ModelConfigUpdate):
     return {
         "code": 200,
         "message": "更新成功",
-        "data": _row_to_config(cfg),
+        "data": _row_to_response(cfg),
     }
 
 
@@ -163,7 +163,7 @@ async def api_check_health(config_id: int):
     if not cfg:
         raise HTTPException(404, detail="模型配置不存在")
 
-    model_cfg = _row_to_config(cfg)
+    model_cfg = _row_to_config(cfg)  # 需要真实 API Key 做连通测试
 
     if model_cfg["model_type"] == "local":
         # Ollama: 检查 /api/tags
@@ -213,6 +213,9 @@ async def api_get_defaults():
     """获取当前各类型的默认模型（用于前端初始化）"""
     local = get_effective_model("local")
     online = get_effective_model("online")
+    # v0.13.0: 返回时脱敏 API Key
+    local["api_key"] = mask_api_key(local.get("api_key", ""))
+    online["api_key"] = mask_api_key(online.get("api_key", ""))
     return {
         "code": 200,
         "message": "获取成功",
