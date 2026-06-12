@@ -59,6 +59,15 @@ class TaskInfo:
         except asyncio.QueueFull:
             logger.warning(f"SSE 队列已满，丢弃事件: task={self.task_id} status={status}")
 
+    def clear_fallback(self):
+        """清除降级标记（当在线模型恢复时调用）"""
+        if self.fallback:
+            self.fallback = False
+            try:
+                self._queue.put_nowait(self.to_event())
+            except asyncio.QueueFull:
+                pass
+
     def finish(self, success: bool = True, error: dict = None):
         if success:
             self.update("done", "完成")

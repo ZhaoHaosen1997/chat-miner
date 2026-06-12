@@ -707,6 +707,7 @@ async def run_daily_pipeline_online(
                 report = _normalize_online_report(data)
                 if task:
                     task.model_used = result.get("model", mname)
+                    task.clear_fallback()  # v1.0.1: 在线模型恢复，清除降级标记
                     if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
                         task.finish(success=True)
                     _save_pipeline_record(task, group_name, date)
@@ -1091,6 +1092,7 @@ async def run_portrait_pipeline_online(
                 portrait = _normalize_online_portrait(data, sender_name, is_private)
                 if task:
                     task.model_used = result.get("model", mname)
+                    task.clear_fallback()  # v1.0.1: 在线模型恢复，清除降级标记
                 return portrait
             else:
                 logger.warning(f"在线模型画像 JSON 解析失败，降级到本地管线")

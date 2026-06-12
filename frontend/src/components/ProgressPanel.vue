@@ -16,6 +16,7 @@ const duration = ref(0)
 const modelUsed = ref('')
 const fallback = ref(false)
 const expanded = ref(true)
+const showCancelConfirm = ref(false)
 let eventSource = null
 
 function connect() {
@@ -31,7 +32,7 @@ function connect() {
       if (data.steps) steps.value = data.steps
       if (data.error) error.value = data.error
       if (data.model_used) modelUsed.value = data.model_used
-      if (data.fallback) fallback.value = true
+      fallback.value = !!data.fallback
       duration.value = data.duration_ms || 0
 
       if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
@@ -55,8 +56,22 @@ function closePanel() {
 }
 
 function cancelTask() {
-  fetch(`/api/tasks/${props.taskId}`, { method: 'DELETE' })
-  eventSource?.close()
+  showCancelConfirm.value = true
+}
+
+async function confirmCancel() {
+  showCancelConfirm.value = false
+  try {
+    await fetch(`/api/tasks/${props.taskId}`, { method: 'DELETE' })
+  } catch { /* ignore network errors */ }
+  // 不主动关闭 EventSource，等待后端推送 cancelled 事件
+  // 兜底：3s 后若未收到 cancelled，强制清理
+  setTimeout(() => {
+    if (status.value !== 'cancelled') {
+      emit('done', { status: 'cancelled', type: '', step: '已取消' })
+      eventSource?.close()
+    }
+  }, 3000)
 }
 
 const stepLabels = {
@@ -120,7 +135,7 @@ onUnmounted(() => eventSource?.close())
       </div>
       <div class="flex items-center gap-1">
         <span v-if="duration > 0" class="text-xs text-slate-400">{{ formatDuration(duration) }}</span>
-        <button v-if="status !== 'done' && status !== 'failed'" @click="cancelTask"
+        <button v-if="status !== 'done' && status !== 'failed' && status !== 'cancelled'" @click="cancelTask"
                 class="text-xs text-slate-400 hover:text-red-500 px-1">取消</button>
         <button @click="status === 'done' ? closePanel() : expanded = !expanded"
                 class="p-0.5 rounded hover:bg-black/5 text-slate-400">
@@ -179,5 +194,29 @@ onUnmounted(() => eventSource?.close())
       </div>
     </div>
   </div>
+
+    <!-- 取消确认弹窗 (Teleported to body) -->
+    <Teleport to="body">
+      <div v-if="showCancelConfirm" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+           @click.self="showCancelConfirm = false">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center space-y-4">
+          <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto">
+            <AlertTriangle :size="22" class="text-amber-600" />
+          </div>
+          <p class="text-gray-700 text-sm">确定要取消当前分析任务吗？</p>
+          <p class="text-xs text-gray-400">任务将被终止，已完成的部分不会丢失</p>
+          <div class="flex gap-2">
+            <button @click="showCancelConfirm = false"
+                    class="flex-1 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+              继续分析
+            </button>
+            <button @click="confirmCancel"
+                    class="flex-1 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
+              确认取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

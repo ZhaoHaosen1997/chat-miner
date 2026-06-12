@@ -63,7 +63,7 @@ function onGroupChange(group) {
 }
 
 function onTaskDone(data) {
-  if (data.status === 'done' || data.status === 'failed') {
+  if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
     // 记录到历史
     addTaskHistoryEntry(activeTaskId.value, data)
     activeTaskId.value = ''

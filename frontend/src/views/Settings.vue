@@ -162,9 +162,8 @@ async function doHealthCheck(id) {
   healthChecking.value[id] = true
   healthResults.value[id] = ''
   try {
-    // 用 apiGet 获取完整响应（含 message），而不是 request 只返回 data
     const res = await apiGet(`/settings/models/${id}/health`)
-    healthResults.value[id] = res.message || (res.data?.online ? '连通成功' : '连通失败')
+    healthResults.value[id] = res.online ? '连通成功' : '连通失败'
   } catch (e) {
     healthResults.value[id] = '检查失败: ' + e.message
   } finally {
