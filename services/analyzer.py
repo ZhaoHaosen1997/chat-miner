@@ -25,7 +25,10 @@ _ollama_client: httpx.AsyncClient | None = None
 def _get_ollama_client(timeout: int = 120) -> httpx.AsyncClient:
     global _ollama_client
     if _ollama_client is None or _ollama_client.is_closed:
-        _ollama_client = httpx.AsyncClient(timeout=timeout)
+        _ollama_client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
+    else:
+        # v0.13.4: 每次调用更新超时，避免缓存的客户端使用过期超时值
+        _ollama_client.timeout = httpx.Timeout(timeout)
     return _ollama_client
 
 

@@ -907,6 +907,27 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
     Args:
         model_config: v0.12.0 模型配置 dict。若为 None 则使用旧版 DeepSeek 逻辑。
     """
+    import asyncio as _asyncio
+    try:
+        return await _asyncio.wait_for(
+            _do_ai_generate(system_prompt, user_prompt, model, json_mode,
+                          temperature, max_tokens, thinking, model_config),
+            timeout=300  # v0.13.4: 硬兜底 5 分钟总超时
+        )
+    except _asyncio.TimeoutError:
+        logger.error("_ai_generate 总超时 (300s)")
+        return {"success": False, "data": None,
+                "error": "AI 生成总超时 (300s)，请尝试使用更小的模型或缩短数据范围",
+                "model": model_config.get("model_name", "") if model_config else model,
+                "duration_ms": 300000}
+
+
+async def _do_ai_generate(system_prompt: str, user_prompt: str,
+                           model: str, json_mode: bool,
+                           temperature: float, max_tokens: int,
+                           thinking: bool,
+                           model_config: dict | None) -> dict:
+    """_ai_generate 的实际实现（由 asyncio.wait_for 包裹调用）"""
     # v0.12.0: 使用 model_config 路由
     if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
         from services.online_model import call_online_chat

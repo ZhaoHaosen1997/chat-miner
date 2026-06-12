@@ -31,6 +31,9 @@ def _get_online_client(endpoint: str, api_key: str, timeout: int = 90) -> httpx.
                 "Content-Type": "application/json",
             } if api_key else {"Content-Type": "application/json"},
         )
+    else:
+        # v0.13.4: 每次调用更新超时
+        client.timeout = httpx.Timeout(timeout)
     return _online_clients[cache_key]
 
 
