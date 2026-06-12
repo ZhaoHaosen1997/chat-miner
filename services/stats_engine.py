@@ -40,8 +40,14 @@ _META_TOKENS = {
 
 def _load_user_stopwords() -> set[str]:
     """从项目根目录 stopwords.txt 加载用户自定义过滤词"""
+    import sys
     from pathlib import Path
-    stopwords_file = Path(__file__).resolve().parent.parent / "stopwords.txt"
+
+    if getattr(sys, 'frozen', False):
+        # PyInstaller one-folder: stopwords.txt 在 _MEIPASS 根目录
+        stopwords_file = Path(sys._MEIPASS) / "stopwords.txt"
+    else:
+        stopwords_file = Path(__file__).resolve().parent.parent / "stopwords.txt"
     words = set()
     if stopwords_file.exists():
         try:

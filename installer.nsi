@@ -1,0 +1,89 @@
+; Chat-Miner v1.0 Installer
+; NSIS 3.x script — generates setup.exe
+;
+; Build: makensis installer.nsi
+; Output: ChatMiner-v1.0-setup.exe
+
+!include "MUI2.nsh"
+!include "FileFunc.nsh"
+
+; --- General ---
+Name "ChatMiner"
+OutFile "ChatMiner-v1.0-setup.exe"
+InstallDir "$LOCALAPPDATA\ChatMiner"
+RequestExecutionLevel user
+SetCompressor /SOLID lzma
+
+; --- Interface ---
+!define MUI_ABORTWARNING
+!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
+!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+
+; --- Pages ---
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "SimpChinese"
+
+; --- Install Section ---
+Section "Install"
+    SetOutPath "$INSTDIR"
+    File /r "releases\ChatMiner\*.*"
+    CreateDirectory "$INSTDIR\data"
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+
+    ; Start Menu
+    CreateDirectory "$SMPROGRAMS\ChatMiner"
+    CreateShortcut "$SMPROGRAMS\ChatMiner\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe"
+    CreateShortcut "$SMPROGRAMS\ChatMiner\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+
+    ; Desktop
+    CreateShortcut "$DESKTOP\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe"
+
+    ; Registry (uninstall info)
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "DisplayName" "ChatMiner"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "UninstallString" "$INSTDIR\uninstall.exe"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "DisplayVersion" "1.0.0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "Publisher" "ChatMiner"
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "NoModify" 1
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "NoRepair" 1
+
+    ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+    IntFmt $0 "0x%08X" $0
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
+        "EstimatedSize" "$0"
+SectionEnd
+
+; --- Uninstall Section ---
+Section "Uninstall"
+    Delete "$DESKTOP\ChatMiner.lnk"
+    RMDir /r "$SMPROGRAMS\ChatMiner"
+
+    MessageBox MB_YESNO|MB_ICONQUESTION \
+        "Delete all data (chat records, database, logs)?$\n$\nChoose 'No' to keep your data." \
+        IDYES delete_data IDNO keep_data
+
+    delete_data:
+        RMDir /r "$INSTDIR"
+        Goto done
+
+    keep_data:
+        Delete "$INSTDIR\ChatMiner.exe"
+        Delete "$INSTDIR\uninstall.exe"
+        RMDir /r "$INSTDIR\_internal"
+        Goto done
+
+    done:
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner"
+SectionEnd

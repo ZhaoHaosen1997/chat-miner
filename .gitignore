@@ -25,4 +25,12 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
-deploy.tar.gz
+# Build artifacts (PyInstaller)
+build/
+dist/
+releases/
+*.spec.bak
+
+# Release packages
+*.zip
+*.exe

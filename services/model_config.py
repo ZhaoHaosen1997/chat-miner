@@ -12,7 +12,7 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
-def _build_env_fallback(model_type: str) -> dict:
+def _build_hardcoded_fallback(model_type: str) -> dict:
     """从 .env 构造兜底模型 dict（用于 DB 无配置时）"""
     if model_type == "local":
         return {
@@ -79,7 +79,7 @@ def get_effective_model(model_type: str) -> dict:
 
     # 3. .env 兜底
     logger.info(f"模型类型 {model_type} 无数据库配置，使用 .env 兜底")
-    return _build_env_fallback(model_type)
+    return _build_hardcoded_fallback(model_type)
 
 
 def resolve_model_for_report(model_type: str, requested_model_id: int | None = None) -> dict:
@@ -154,7 +154,7 @@ def resolve_model_with_fallback(
         try:
             fallback = get_effective_model("local")
         except Exception:
-            fallback = _build_env_fallback("local")
+            fallback = _build_hardcoded_fallback("local")
 
     return primary, fallback
 

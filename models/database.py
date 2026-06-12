@@ -53,8 +53,23 @@ def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
             conn.close()
 
 
+def _backup_db_if_exists():
+    """启动前自动备份数据库（仅首次，防止迁移损坏旧数据）"""
+    import shutil
+    db_path = get_db_path()
+    backup_path = db_path.with_suffix(".db.bak")
+    if db_path.exists() and db_path.stat().st_size > 0 and not backup_path.exists():
+        try:
+            shutil.copy2(db_path, backup_path)
+        except Exception:
+            pass  # 备份失败不影响启动
+
+
 def init_db():
-    """初始化所有表"""
+    """初始化所有表 + 兼容旧版本数据库迁移"""
+    # v1.0: 启动前创建备份，防止迁移损坏旧数据
+    _backup_db_if_exists()
+
     conn = get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS chat_groups (
@@ -295,7 +310,7 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    _seed_model_configs_from_env(conn)
+    _seed_default_model_configs(conn)
     # v0.11.0: 年度奖项
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS annual_awards (
@@ -350,26 +365,25 @@ def init_db():
     cleanup_old_logs()
 
 
-def _seed_model_configs_from_env(conn):
-    """首次启动时，如果 model_configs 为空，从 .env 播种默认模型配置"""
+def _seed_default_model_configs(conn):
+    """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
     if count > 0:
         return  # 已有配置，不覆盖
 
-    # 播种 Ollama 本地默认模型
+    # 1. 在线模型（DeepSeek）— 用户只需粘贴 API Key
+    conn.execute(
+        """INSERT INTO model_configs (name, model_type, endpoint, api_key, model_name, is_default)
+           VALUES (?, 'online', ?, '', ?, 1)""",
+        ("在线模型", config.DEEPSEEK_API_URL, config.DEEPSEEK_MODEL)
+    )
+
+    # 2. 本地模型（Ollama）— 高级用户可选
     conn.execute(
         """INSERT INTO model_configs (name, model_type, endpoint, model_name, is_default)
            VALUES (?, 'local', ?, ?, 1)""",
-        ("Ollama (env)", config.OLLAMA_HOST, config.OLLAMA_MODEL)
+        ("Ollama (本地)", config.OLLAMA_HOST, config.OLLAMA_MODEL)
     )
-
-    # 如果配置了 DeepSeek API Key，播种在线默认模型
-    if config.DEEPSEEK_API_KEY:
-        conn.execute(
-            """INSERT INTO model_configs (name, model_type, endpoint, api_key, model_name, is_default)
-               VALUES (?, 'online', ?, ?, ?, 1)""",
-            ("DeepSeek (env)", config.DEEPSEEK_API_URL, config.DEEPSEEK_API_KEY, config.DEEPSEEK_MODEL)
-        )
     conn.commit()
 
 

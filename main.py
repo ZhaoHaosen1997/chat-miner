@@ -1,9 +1,17 @@
 """
-Chat-Miner — 群聊内容分析应用
+Chat-Miner — 群聊内容分析应用 v1.0
 FastAPI 入口，端口 8856
 """
+import os
 import logging
 import sys
+
+# PyInstaller console=False 兼容：重定向 None 流到 devnull
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,6 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from config import config
 from models.database import init_db
 from routers import groups, report, portrait, stats, tasks, fish_pond, settings
+
+
+# --- PyInstaller 兼容：获取静态资源路径 ---
+def _get_dist_path() -> str:
+    """获取前端 dist 目录路径。兼容开发模式和 PyInstaller one-folder 打包。"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller: 资源在 _MEIPASS
+        return os.path.join(sys._MEIPASS, "frontend", "dist")
+    return os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 
 # --- 日志配置 ---
@@ -42,7 +59,10 @@ async def lifespan(app: FastAPI):
     config.ensure_dirs()
     init_db()
     logger.info(f"数据库: {config.DATABASE_PATH}")
-    logger.info(f"Ollama: {config.OLLAMA_HOST} | 模型: {config.OLLAMA_MODEL}")
+    if config.GPU_LOCK_ENABLED:
+        logger.info(f"Ollama: {config.OLLAMA_HOST} | 模型: {config.OLLAMA_MODEL}")
+    else:
+        logger.info("GPU 锁已禁用（单机模式）")
     logger.info(f"端口: {config.PORT}")
 
     # 预加载群数据到内存，避免首次请求等待（使用 pickle 缓存加速）
@@ -66,8 +86,8 @@ async def lifespan(app: FastAPI):
 # --- FastAPI 应用 ---
 app = FastAPI(
     title="Chat-Miner",
-    description="微信群聊内容分析 — 基于本地 Ollama AI",
-    version="0.13.5",
+    description="微信群聊内容分析 — 基于 AI 大模型",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -90,8 +110,7 @@ app.include_router(fish_pond.router)
 app.include_router(settings.router)
 
 # 挂载前端静态文件（API 路由优先，未匹配的走静态文件）
-import os
-dist_path = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+dist_path = _get_dist_path()
 if os.path.exists(dist_path):
     app.mount("/", StaticFiles(directory=dist_path, html=True), name="frontend")
 
@@ -99,6 +118,20 @@ if os.path.exists(dist_path):
 # --- 入口 ---
 if __name__ == "__main__":
     import uvicorn
+    import threading
+    import webbrowser
+    import time
+
+    def _open_browser():
+        """服务启动后自动打开浏览器"""
+        time.sleep(1.5)
+        try:
+            webbrowser.open(f"http://localhost:{config.PORT}")
+        except Exception:
+            pass  # 无浏览器也不崩溃
+
+    threading.Thread(target=_open_browser, daemon=True).start()
+
     uvicorn.run(
         "main:app",
         host=config.HOST,
