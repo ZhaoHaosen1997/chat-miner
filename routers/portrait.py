@@ -419,7 +419,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
 
     if is_online:
         # v0.12.2: 在线模型单次调用画像管线
-        task.update("inference", "在线模型生成画像中...")
+        task.update("inference", f"🎨 {model_config.get('model_name', 'AI')} 正在描绘 {sender_name} 的群聊人格...")
         from services.pipelines import run_portrait_pipeline_online
         try:
             portrait_data = await run_portrait_pipeline_online(
@@ -433,7 +433,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
             return
     else:
         # 本地模型：原有 4 步子任务管线
-        task.update("inference", "基础画像分析中...")
+        task.update("inference", "🎭 基础画像分析中...")
         from services.pipelines import run_portrait_pipeline
         try:
             portrait_data = await run_portrait_pipeline(
@@ -452,7 +452,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     portrait_data["_data_end"] = data_end
 
     # ---- Step 2: Python 统计 ----
-    task.update("inference", "数据分析中...")
+    task.update("inference", "📊 数据分析中...")
     task.add_step(name="统计数据", status="running")
     from services.stats_engine import (
         compute_activity_stats, compute_language_stats,
@@ -484,7 +484,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
             for s in task.steps:
                 if s["name"] == "统计数据" and s["status"] == "running":
                     s["status"] = "done"
-        task.update("inference", "深度分析中...")
+        task.update("inference", "🔬 深度分析中...")
         from services.pipelines import run_deep_portrait_pipeline
         deep_data = await run_deep_portrait_pipeline(
             chat_text="",
@@ -539,7 +539,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
         language.get("top_emojis", [{}])[0].get("emoji", "") if language.get("top_emojis") else ""
     )
     # ---- 趣味功能 (v0.5.1, v0.12.2: 在线模型时走在线调用) ----
-    task.update("inference", "趣味分析中...")
+    task.update("inference", "🏆 趣味称号生成中...")
     from services.stats_engine import compute_fun_title_basis
     from services.pipelines import FUN_TITLE_PROMPTS, FUN_RELATION_PROMPTS
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onUnmounted } from 'vue'
-import { Loader2, CheckCircle2, XCircle, X, Clock } from 'lucide-vue-next'
+import { Loader2, CheckCircle2, XCircle, X, Clock, AlertTriangle } from 'lucide-vue-next'
 
 const props = defineProps({
   taskId: { type: String, required: true },
@@ -13,6 +13,8 @@ const progress = ref({ current: 0, total: 0 })
 const steps = ref([])
 const error = ref(null)
 const duration = ref(0)
+const modelUsed = ref('')
+const fallback = ref(false)
 const expanded = ref(true)
 let eventSource = null
 
@@ -28,6 +30,8 @@ function connect() {
       if (data.progress) progress.value = data.progress
       if (data.steps) steps.value = data.steps
       if (data.error) error.value = data.error
+      if (data.model_used) modelUsed.value = data.model_used
+      if (data.fallback) fallback.value = true
       duration.value = data.duration_ms || 0
 
       if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
@@ -114,6 +118,14 @@ onUnmounted(() => eventSource?.close())
 
     <!-- Body -->
     <div class="p-3 space-y-2 text-sm">
+      <!-- v0.12.4: 模型信息 + 降级警告 -->
+      <div v-if="modelUsed" class="text-xs text-slate-400 flex items-center gap-1">
+        <span>模型：{{ modelUsed }}</span>
+      </div>
+      <div v-if="fallback" class="flex items-center gap-1.5 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+        <AlertTriangle :size="12" class="flex-shrink-0" />
+        <span>在线模型未能响应，已自动切换本地模型</span>
+      </div>
       <!-- 批量进度条 -->
       <div v-if="progress.total > 0" class="mb-2">
         <div class="flex justify-between text-xs text-slate-500 mb-1">

@@ -508,7 +508,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 1. 话题（每行一个）
     if _cancelled(): return {}
-    topics_data = await _run_sub(task, "提取话题", 1, total,
+    topics_data = await _run_sub(task, "🔍 挖掘今日话题", 1, total,
                                   _p("topics")["system"],
                                   f"{chat_text}\n\n{_p('topics')['user']}",
                                   model=p_model)
@@ -519,7 +519,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 2. 搞笑发言（发言人|原话|吐槽）
     if _cancelled(): return {}
-    quotes_data = await _run_sub(task, "找搞笑发言", 2, total,
+    quotes_data = await _run_sub(task, "😂 捕捉名场面", 2, total,
                                   _p("quotes")["system"],
                                   f"{chat_text}\n\n{_p('quotes')['user']}",
                                   model=p_model)
@@ -529,7 +529,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 3. 情绪（一个词）
     if _cancelled(): return {}
-    mood_data = await _run_sub(task, "判断情绪", 3, total,
+    mood_data = await _run_sub(task, "🎭 感知群聊情绪", 3, total,
                                 _p("mood")["system"],
                                 f"{chat_text}\n\n{_p('mood')['user']}",
                                 model=p_model)
@@ -539,7 +539,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 4. 关键词（逗号分隔）
     if _cancelled(): return {}
-    kw_data = await _run_sub(task, "提取关键词", 4, total,
+    kw_data = await _run_sub(task, "🏷️ 提取热词", 4, total,
                               _p("keywords")["system"],
                               f"{chat_text}\n\n{_p('keywords')['user']}",
                               model=p_model)
@@ -549,7 +549,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 5. 一句话总结（两行：总结+高光）
     if _cancelled(): return {}
-    ol_data = await _run_sub(task, "一句话总结", 5, total,
+    ol_data = await _run_sub(task, "✍️ 写一句话总结", 5, total,
                               _p("oneline")["system"],
                               f"{chat_text}\n\n{_p('oneline')['user']}",
                               model=p_model)
@@ -561,7 +561,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     hs = (hourly_stats or "(无小时分布数据)").replace("{", "{{").replace("}", "}}")
     hs_user = PROMPTS["active_hours"]["user"].replace("{hourly_stats}", hs)
-    ah_data = await _run_sub(task, "活跃时段分析", 6, total,
+    ah_data = await _run_sub(task, "⏰ 分析活跃时段", 6, total,
                               _p("active_hours")["system"], hs_user,
                               model=p_model)
     ah = _parse_active_hours(ah_data)
@@ -570,7 +570,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
 
     # 7. 趣味标题（UC震惊体/综艺预告片风）
     if _cancelled(): return {}
-    headline_data = await _run_sub(task, "趣味标题", 7, total,
+    headline_data = await _run_sub(task, "📺 编导起标题", 7, total,
                                     _p("headline")["system"],
                                     f"{chat_text}\n\n{_p('headline')['user']}",
                                     model=p_model)
@@ -583,7 +583,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         scene_text = f"{best_quote.get('speaker','某人')}：「{best_quote.get('quote','')}」"
         sc = _p("scene_commentary")
         scene_user = sc["user"].format(scene=scene_text)
-        scene_data = await _run_sub(task, "名场面吐槽", 8, total,
+        scene_data = await _run_sub(task, "🎙️ 花字吐槽", 8, total,
                                      sc["system"], scene_user,
                                      model=p_model)
         scene_commentary = str(scene_data).strip() if scene_data else ""
@@ -669,8 +669,9 @@ async def run_daily_pipeline_online(
     from services.model_config import get_effective_model
     import asyncio
 
+    model_name = model_config.get("model_name", "在线模型")
     if task:
-        task.update("inference", "(1/1) 在线模型生成日报...")
+        task.update("inference", f"🎬 {model_name} 正在解读今日群聊...")
 
     # 适配私聊话术
     chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
@@ -715,7 +716,7 @@ async def run_daily_pipeline_online(
     # 降级：使用本地 8 子任务管线
     logger.info(f"降级到本地管线为 {group_name} {date} 生成日报")
     if task:
-        task.update("inference", "在线模型失败，切换到本地模型...")
+        task.update("inference", "⚠️ 在线模型未能响应，切换本地模型接力...", fallback=True)
     try:
         local_config = get_effective_model("local")
         return await run_daily_pipeline(
@@ -866,7 +867,7 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
     # 1. 性格+角色（三行文本）
     if _cancelled_portrait(): return {}
-    p_data = await _run_sub(task, "分析性格角色", 1, total,
+    p_data = await _run_sub(task, "🧠 分析性格角色", 1, total,
                              _pp("persona")["system"],
                              f"{prompt_user}{_pp('persona')['user'].replace('{name}', sender_name)}")
     p_lines = _parse_lines(p_data)
@@ -882,7 +883,7 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         failed_steps.append("persona")
 
     # 2. 兴趣+活跃时段（两行文本）
-    i_data = await _run_sub(task, "分析兴趣爱好", 2, total,
+    i_data = await _run_sub(task, "🎯 挖掘兴趣爱好", 2, total,
                              _pp("interests")["system"],
                              f"{prompt_user}{_pp('interests')['user'].replace('{name}', sender_name)}")
     i_lines = _parse_lines(i_data)
@@ -892,7 +893,7 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
         failed_steps.append("interests")
 
     # 3. 口头禅（v0.6.4: 支持多条，逗号分隔）
-    ph_data = await _run_sub(task, "检测口头禅", 3, total,
+    ph_data = await _run_sub(task, "💬 检测口头禅", 3, total,
                               _pp("phrase")["system"],
                               f"{prompt_user}{_pp('phrase')['user'].replace('{name}', sender_name)}")
     ph_text = str(ph_data or "").strip()
@@ -912,7 +913,7 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     emoji_style = ""  # 空字符串表示待填充，调用方可传入 stats 兜底
     ol_prompt_user = f"{prompt_user}{_pp('oneline_portrait')['user'].replace('{name}', sender_name)}"
     for ol_attempt in range(2):
-        ol_data = await _run_sub(task, "一句话素描", 4, total,
+        ol_data = await _run_sub(task, "🖼️ 素描人设", 4, total,
                                   _pp("oneline_portrait")["system"],
                                   ol_prompt_user)
         # 用 _parse_lines 提取第一行（人设描述）
@@ -1055,8 +1056,9 @@ async def run_portrait_pipeline_online(
     from services.online_model import call_online_chat
     from services.model_config import get_effective_model
 
+    model_name = model_config.get("model_name", "在线模型")
     if task:
-        task.update("inference", "(1/1) 在线模型生成画像...")
+        task.update("inference", f"🎨 {model_name} 正在描绘 {sender_name} 的群聊人格...")
 
     # 私聊模式适配
     chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
@@ -1092,7 +1094,7 @@ async def run_portrait_pipeline_online(
     # 降级：使用本地 4 步子任务管线
     logger.info(f"降级到本地管线为 {sender_name} 生成画像")
     if task:
-        task.update("inference", "在线模型失败，切换到本地模型...")
+        task.update("inference", f"⚠️ 在线模型未能响应，切换本地模型继续描绘 {sender_name}...", fallback=True)
     try:
         return await run_portrait_pipeline(
             chat_text=chat_text,

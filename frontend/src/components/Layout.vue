@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, onMounted, computed } from 'vue'
+import { ref, inject, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
@@ -17,33 +17,10 @@ const activeTaskId = inject('activeTaskId', ref(''))
 const groupSelectorRef = ref(null)
 const appVersion = ref('')
 
-// 页面标题映射
-const pageTitles = {
-  '/': '仪表盘',
-  '/portraits': '群友画像',
-  '/portrait': '群友画像详情',
-  '/fishpond': '群鱼塘',
-  '/fish-report': '鱼塘日报',
-  '/report': '群聊日报',
-  '/weekly': '群聊周报',
-  '/monthly': '群聊月报',
-}
+// 浏览器标题
+	document.title = 'Chat-Miner'
 
-// 动态标题
-const pageTitle = computed(() => {
-  const path = route.path
-  for (const [key, title] of Object.entries(pageTitles)) {
-    if (path.startsWith(key)) return title
-  }
-  return 'Chat-Miner'
-})
-
-// 更新浏览器标题
-watch(pageTitle, (t) => {
-  document.title = `${t} · Chat-Miner`
-}, { immediate: true })
-
-// 获取版本号
+	// 获取版本号
 onMounted(async () => {
   try {
     const health = await apiGet('/health')

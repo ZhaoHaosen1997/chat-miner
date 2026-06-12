@@ -34,19 +34,23 @@ class TaskInfo:
         self._queue: asyncio.Queue = asyncio.Queue()
         # 取消标志
         self._cancelled = False
+        # v0.12.4: 降级标记
+        self.fallback = False
 
     def start(self):
         self._start_time = time.time()
         self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.status = "pending"
 
-    def update(self, status: str, step: str, progress: dict = None, error: dict = None):
+    def update(self, status: str, step: str, progress: dict = None, error: dict = None, fallback: bool = False):
         self.status = status
         self.step = step
         if progress:
             self.progress = progress
         if error:
             self.error = error
+        if fallback:
+            self.fallback = True
         if self._start_time:
             self.duration_ms = int((time.time() - self._start_time) * 1000)
         # 推送到 SSE 队列
@@ -87,6 +91,7 @@ class TaskInfo:
             "progress": self.progress,
             "error": self.error,
             "model_used": self.model_used,
+            "fallback": self.fallback,
             "started_at": self.started_at,
             "duration_ms": self.duration_ms,
             "steps": self.steps,

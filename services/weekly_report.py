@@ -1180,7 +1180,7 @@ async def generate_weekly_report(
     if use_new_pipeline:
         # 新版 prompt
         if task:
-            task.update("inference", "DeepSeek 生成周报中...")
+            task.update("inference", f"📋 {model_config.get('model_name', 'AI')} 生成周报中...")
 
         user_prompt = _build_weekly_prompt_v2(raw_data, date_start, date_end)
         ai_result = await _ai_generate(
@@ -1257,7 +1257,7 @@ async def generate_weekly_report(
         aggregated = _aggregate_daily_reports(group_id, analyzed_week_dates)
 
         if task:
-            task.update("inference", "DeepSeek 生成周报中...")
+            task.update("inference", f"📋 {model_config.get('model_name', 'AI')} 生成周报中...")
 
         user_prompt = _build_weekly_prompt(aggregated, date_start, date_end)
         ai_result = await _ai_generate(
@@ -1486,7 +1486,7 @@ async def generate_monthly_report(
 
     if use_new_pipeline:
         if task:
-            task.update("inference", "DeepSeek 生成月报中...")
+            task.update("inference", f"📅 {model_config.get('model_name', 'AI')} 生成月报中...")
 
         user_prompt = _build_monthly_prompt_v2(
             raw_data, date_start, date_end, prev_month_summary, weekly_context, bursting_words
@@ -1575,7 +1575,7 @@ async def generate_monthly_report(
         aggregated = _aggregate_daily_reports(group_id, analyzed_month_dates)
 
         if task:
-            task.update("inference", "DeepSeek 生成月报中...")
+            task.update("inference", f"📅 {model_config.get('model_name', 'AI')} 生成月报中...")
 
         user_prompt = _build_monthly_prompt(
             aggregated, date_start, date_end, prev_month_summary, weekly_context

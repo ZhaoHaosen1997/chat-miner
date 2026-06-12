@@ -7,7 +7,7 @@ import {
 } from '../api/index.js'
 import {
   Plus, Pencil, Trash2, Check, X, Loader2,
-  Monitor, Cloud, Wifi, Star, Zap, Globe, Users
+  Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -175,7 +175,7 @@ function onTypeChange() {
     if (!form.value.endpoint) form.value.endpoint = 'http://localhost:11434'
     form.value.api_key = ''
   } else {
-    if (!form.value.endpoint) form.value.endpoint = 'https://api.deepseek.com'
+    if (!form.value.endpoint) form.value.endpoint = 'https://api.openai.com'
   }
 }
 
@@ -222,62 +222,47 @@ onMounted(loadConfigs)
     </section>
 
     <!-- 每日分析默认模型 -->
+    <!-- AI 模型分配 v0.12.4 -->
     <section>
       <div class="flex items-center gap-2 mb-4">
-        <Zap :size="20" class="text-gray-600" />
-        <h2 class="text-lg font-semibold text-gray-800">每日分析默认模型</h2>
+        <Sparkles :size="20" class="text-gray-600" />
+        <h2 class="text-lg font-semibold text-gray-800">AI 模型分配</h2>
       </div>
-      <div class="card p-4">
-        <p class="text-sm text-gray-500 mb-3">
-          生成日报时使用的默认模型。在线模型使用单次调用模式（更快），本地模型使用分步管线模式。
-        </p>
-        <select
-          :value="dailyModelId"
-          @change="dailyModelId = $event.target.value; saveDailyModel()"
-          class="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-        >
-          <option value="">本地默认 (Ollama)</option>
-          <optgroup label="本地模型">
-            <option v-for="m in localConfigs" :key="'daily-local-'+m.id" :value="m.id">
-              🖥️ {{ m.name }} ({{ m.model_name }})
-            </option>
-          </optgroup>
-          <optgroup label="在线模型">
-            <option v-for="m in onlineConfigs" :key="'daily-online-'+m.id" :value="m.id">
-              ☁️ {{ m.name }} ({{ m.model_name }})
-            </option>
-          </optgroup>
-        </select>
-      </div>
-    </section>
-
-    <!-- 画像分析默认模型 v0.12.2 -->
-    <section>
-      <div class="flex items-center gap-2 mb-4">
-        <Users :size="20" class="text-gray-600" />
-        <h2 class="text-lg font-semibold text-gray-800">画像分析默认模型</h2>
-      </div>
-      <div class="card p-4">
-        <p class="text-sm text-gray-500 mb-3">
-          生成群友画像时使用的默认模型。在线模型将一次生成完整画像（含深度分析），更快更深入。
-        </p>
-        <select
-          :value="portraitModelId"
-          @change="portraitModelId = $event.target.value; savePortraitModel()"
-          class="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-        >
-          <option value="">本地默认 (Ollama)</option>
-          <optgroup label="本地模型">
-            <option v-for="m in localConfigs" :key="'pt-local-'+m.id" :value="m.id">
-              🖥️ {{ m.name }} ({{ m.model_name }})
-            </option>
-          </optgroup>
-          <optgroup label="在线模型">
-            <option v-for="m in onlineConfigs" :key="'pt-online-'+m.id" :value="m.id">
-              ☁️ {{ m.name }} ({{ m.model_name }})
-            </option>
-          </optgroup>
-        </select>
+      <div class="card p-4 space-y-4">
+        <div>
+          <label class="text-sm font-medium text-gray-700">每日分析</label>
+          <p class="text-xs text-gray-400 mb-2">在线模型单次调用更快，本地模型分步管线更稳定</p>
+          <select
+            :value="dailyModelId"
+            @change="dailyModelId = $event.target.value; saveDailyModel()"
+            class="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+          >
+            <option value="">本地默认 (Ollama)</option>
+            <optgroup label="本地模型">
+              <option v-for="m in localConfigs" :key="'dl-'+m.id" :value="m.id">🖥️ {{ m.name }} ({{ m.model_name }})</option>
+            </optgroup>
+            <optgroup label="在线模型">
+              <option v-for="m in onlineConfigs" :key="'do-'+m.id" :value="m.id">☁️ {{ m.name }} ({{ m.model_name }})</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="border-t border-gray-100 pt-4">
+          <label class="text-sm font-medium text-gray-700">画像分析</label>
+          <p class="text-xs text-gray-400 mb-2">在线模型一次生成完整画像（含深度洞察），质量更高</p>
+          <select
+            :value="portraitModelId"
+            @change="portraitModelId = $event.target.value; savePortraitModel()"
+            class="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+          >
+            <option value="">本地默认 (Ollama)</option>
+            <optgroup label="本地模型">
+              <option v-for="m in localConfigs" :key="'pl-'+m.id" :value="m.id">🖥️ {{ m.name }} ({{ m.model_name }})</option>
+            </optgroup>
+            <optgroup label="在线模型">
+              <option v-for="m in onlineConfigs" :key="'po-'+m.id" :value="m.id">☁️ {{ m.name }} ({{ m.model_name }})</option>
+            </optgroup>
+          </select>
+        </div>
       </div>
     </section>
 
@@ -441,7 +426,7 @@ onMounted(loadConfigs)
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">端点 URL</label>
             <input v-model="form.endpoint" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-                   :placeholder="form.model_type === 'local' ? 'http://localhost:11434' : 'https://api.deepseek.com'" />
+                   :placeholder="form.model_type === 'local' ? 'http://localhost:11434' : 'https://api.openai.com/v1'" />
           </div>
 
           <div v-if="form.model_type === 'online'">
@@ -453,7 +438,7 @@ onMounted(loadConfigs)
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">模型名</label>
             <input v-model="form.model_name" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-                   placeholder="如：qwen2.5:14b 或 deepseek-v4-flash" />
+                   placeholder="如：qwen2.5:14b 或 gpt-4o" />
           </div>
 
           <div>

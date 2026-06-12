@@ -36,6 +36,7 @@ const trending = ref(null)
 const showUpload = ref(false)
 const dayPopup = ref(null)  // { date, count, analyzed }
 const dayPopupLoading = ref('')  // 'report' | 'settle'
+const dayPopupError = ref('')  // v0.12.4: 内联错误提示
 const monthOffset = ref(0)  // 日历翻页偏移：0=当月
 
 // 防止快速切群时的竞态条件
@@ -178,12 +179,11 @@ async function handleGenerateReport() {
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
-    dayPopup.value.analyzed = true
-    // Refresh dates after a moment
+    dayPopup.value = null  // v0.12.4: 生成后自动关闭弹窗
     setTimeout(() => {
       if (gid.value) loadDates()
     }, 2000)
-  } catch (e) { alert('生成日报失败: ' + e.message) }
+  } catch (e) { dayPopupError.value = e.message }
   finally { dayPopupLoading.value = '' }
 }
 
@@ -820,7 +820,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <div class="flex-1 min-w-0">
                   <div class="text-slate-600 truncate">{{ t.target }}</div>
                   <div class="text-slate-400">
-                    {{ t.task_type === 'analyze_day' ? '日分析' : t.task_type === 'analyze_all' ? '全量' : '画像' }}
+                    {{ t.task_type === 'analyze_day' ? '日报' : t.task_type === 'analyze_all' ? '批量日报' : t.task_type === 'generate_weekly' ? '周报' : t.task_type === 'generate_monthly' ? '月报' : t.task_type === 'generate_annual' ? '年报' : t.task_type === 'full_portrait' ? '画像' : t.task_type === 'analyze_all_portraits' ? '批量画像' : t.task_type || '分析' }}
                     <span v-if="t.total_duration_ms"> · {{ (t.total_duration_ms / 1000).toFixed(0) }}s</span>
                     <span v-if="t.error_summary" class="text-red-400"> · {{ t.error_summary }}</span>
                   </div>
@@ -853,6 +853,14 @@ async function _executeAnnualGenerate(periodKey, force = false) {
             </p>
           </div>
           <div class="px-5 py-4 space-y-3">
+            <!-- v0.12.4: 内联错误提示 -->
+            <div v-if="dayPopupError" class="mx-5 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex items-center gap-2">
+              <XCircle :size="14" class="flex-shrink-0" />
+              {{ dayPopupError }}
+              <button @click="dayPopupError = ''" class="ml-auto text-red-400 hover:text-red-600">
+                <X :size="14" />
+              </button>
+            </div>
             <!-- 已分析：查看日报（主按钮） -->
             <button v-if="dayPopup.analyzed" @click="viewReportFromPopup"
               class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold
