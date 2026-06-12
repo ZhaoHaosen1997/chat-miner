@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
-  generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport,
+  generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
 } from '../api/index.js'
 import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
@@ -193,10 +193,20 @@ function viewReportFromPopup() {
   goReport(d)
 }
 
-function openDayPopup(day) {
+async function openDayPopup(day) {
   dayPopup.value = day
-  dayPopupLoading.value = ''
+  dayPopupLoading.value = day.analyzed ? 'report' : ''
   dayPopupError.value = ''
+  if (day.analyzed && gid.value) {
+    try {
+      const data = await getReport(gid.value, day.date)
+      dayPopup.value = { ...day, report: data.report }
+    } catch (e) {
+      dayPopupError.value = '加载报告失败'
+    } finally {
+      dayPopupLoading.value = ''
+    }
+  }
 }
 
 async function handleGenerateReport() {
@@ -660,8 +670,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
             <div class="flex items-center justify-between mb-4"><h3 class="font-semibold text-slate-800">{{ dayPopup.date }}</h3><button @click="dayPopup = null" class="p-1 rounded-full hover:bg-slate-100"><XCircle :size="16" class="text-slate-400"/></button></div>
             <div class="space-y-3">
               <div class="grid grid-cols-2 gap-2 text-xs"><div class="bg-slate-50 rounded-lg p-2"><span class="text-slate-400">消息数</span><br><strong>{{ dayPopup.count }}</strong></div><div class="bg-slate-50 rounded-lg p-2"><span class="text-slate-400">活跃成员</span><br><strong>{{ dayPopup.active_members || '—' }}</strong></div></div>
-              <div v-if="dayPopup.analyzed && dayPopup.report" class="bg-indigo-50 rounded-xl p-4"><div class="text-2xl mb-1">{{ dayPopup.report.mood_emoji }}</div><p class="text-sm font-medium text-slate-800">{{ dayPopup.report.one_line }}</p><p class="text-xs text-slate-500 mt-2">{{ dayPopup.report.mood }}</p><button @click="dayPopup = null; goReport(dayPopup.date)" class="mt-3 text-xs bg-indigo-500 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-600 transition-colors">查看完整报告 →</button></div>
-              <div v-else-if="dayPopup.hasData" class="bg-amber-50 rounded-xl p-4 text-center"><p class="text-sm text-amber-700">该日期尚未分析</p><button @click="dayPopup = null; analyzeLatest(); handleGenerateReport()" class="mt-2 text-xs bg-amber-500 text-white px-3 py-1.5 rounded-lg hover:bg-amber-600 transition-colors">立即分析</button></div>
+              <div v-if="dayPopup.analyzed && dayPopup.report" class="bg-indigo-50 rounded-xl p-4"><div class="text-2xl mb-1">{{ dayPopup.report.mood_emoji }}</div><p class="text-sm font-medium text-slate-800">{{ dayPopup.report.one_line }}</p><p class="text-xs text-slate-500 mt-2">{{ dayPopup.report.mood }}</p><button @click="viewReportFromPopup()" class="mt-3 text-xs bg-indigo-500 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-600 transition-colors">查看完整报告 →</button></div>
+              <div v-else-if="dayPopup.hasData" class="bg-amber-50 rounded-xl p-4 text-center"><p class="text-sm text-amber-700">该日期尚未分析</p><button @click="handleGenerateReport()" class="mt-2 text-xs bg-amber-500 text-white px-3 py-1.5 rounded-lg hover:bg-amber-600 transition-colors">立即分析</button></div>
             </div>
           </div>
         </div>
