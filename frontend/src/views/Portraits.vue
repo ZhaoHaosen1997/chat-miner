@@ -13,7 +13,12 @@ const members = ref([])
 const loading = ref(false)
 const refreshing = ref(null)      // 单个刷新的 memberId
 const viewMode = ref('cards')     // 'cards' | 'network'
-const batchAnalyzing = ref(false) // 批量分析中
+const batchAnalyzing = ref(false)
+// v0.12.2: 画像模型选择
+function getPortraitModelId() {
+  const v = localStorage.getItem('portraitModelId')
+  return v ? parseInt(v) : null
+} // 批量分析中
 const error = ref('')
 
 async function load(silent = false) {
@@ -38,7 +43,7 @@ async function refreshOne(memberId) {
   if (refreshing.value === memberId || activeTaskId.value) return
   refreshing.value = memberId
   try {
-    const result = await analyzePortrait(currentGroup.value.id, memberId)
+    const result = await analyzePortrait(currentGroup.value.id, memberId, getPortraitModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -53,7 +58,7 @@ async function generateOne(memberId) {
   if (refreshing.value === memberId || activeTaskId.value) return
   refreshing.value = memberId
   try {
-    const result = await analyzePortrait(currentGroup.value.id, memberId, 0)
+    const result = await analyzePortrait(currentGroup.value.id, memberId, getPortraitModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -68,7 +73,7 @@ async function analyzeAll() {
   if (batchAnalyzing.value || activeTaskId.value) return
   batchAnalyzing.value = true
   try {
-    const result = await analyzeAllPortraits(currentGroup.value.id)
+    const result = await analyzeAllPortraits(currentGroup.value.id, getPortraitModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
     } else {

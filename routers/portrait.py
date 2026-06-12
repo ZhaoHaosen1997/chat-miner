@@ -334,17 +334,20 @@ async def api_portrait_stats(group_id: int, member_id: int):
     }
 
 
-async def _run_full_portrait_analysis(group_id: int, member_id: int, task):
-    """统一画像分析：基础 pipeline + 深度 pipeline + Python 统计，一次生成完整画像"""
+async def _run_full_portrait_analysis(group_id: int, member_id: int, task, model_id: int = None):
+    """统一画像分析：基础 pipeline + 深度 pipeline + Python 统计，一次生成完整画像
+
+    v0.12.2: 支持 model_id 选择模型（本地或在线均可）。
+    """
     try:
-        await _do_run_full_portrait_analysis(group_id, member_id, task)
+        await _do_run_full_portrait_analysis(group_id, member_id, task, model_id=model_id)
     except Exception as e:
         logger.error(f"画像分析异常: {e}", exc_info=True)
         if task.type != "analyze_all_portraits":
             task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
 
 
-async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
+async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, model_id: int = None):
     group = get_group(group_id)
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
@@ -352,6 +355,21 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         if task.type != "analyze_all_portraits":
             task.finish(success=False, error={"type": "data_missing", "detail": "数据未找到"})
         return
+
+    # v0.12.2: 解析模型配置
+    from services.model_config import get_effective_model, _row_to_config
+    from models.database import get_model_config as db_get_model_config
+
+    if model_id is not None:
+        db_config = db_get_model_config(model_id)
+        if not db_config or not db_config.get("is_enabled", 1):
+            if task.type != "analyze_all_portraits":
+                task.finish(success=False, error={"type": "invalid_model", "detail": f"模型 ID={model_id} 不存在或已禁用"})
+            return
+        model_config = _row_to_config(db_config)
+    else:
+        model_config = get_effective_model("local")
+    is_online = model_config.get("model_type") == "online"
 
     wxid = member["wxid"]
     sender_name = member["display_name"] or member["nickname"]
@@ -381,7 +399,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
     if task:
         task.steps.clear()
 
-    # ---- Step 1: 基础画像 Pipeline（性格/角色/兴趣/口头禅/一句话） ----
+    # ---- Step 1: 画像 Pipeline（v0.12.2: 在线单次 / 本地分步） ----
     # 构建 member_names + all_wxids（增量和全量都需要）
     member_names = set()
     all_wxids = set()
@@ -393,27 +411,45 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         if swxid:
             all_wxids.add(swxid)
 
-    # 完整运行基础 pipeline
-    task.update("inference", "基础画像分析中...")
     from services.parser import format_sender_messages_for_portrait
-    from services.pipelines import run_portrait_pipeline
-
     chat_text = format_sender_messages_for_portrait(all_msgs, sender_name,
                                                      member_names=member_names)
-    try:
-        portrait_data = await run_portrait_pipeline(
-            chat_text, sender_name, group["name"], len(all_msgs), task=task,
-            is_private=len(chat.senders) <= 2,
-        )
-        data_start = all_dates[0] if all_dates else ""
-        data_end = all_dates[-1] if all_dates else ""
-        portrait_data["_data_start"] = data_start
-        portrait_data["_data_end"] = data_end
-    except Exception as e:
-        logger.error(f"基础画像 pipeline 失败: {sender_name}: {e}")
-        if task.type != "analyze_all_portraits":
-            task.finish(success=False, error={"type": "basic_failed", "detail": str(e)})
-        return
+
+    is_private = len(chat.senders) <= 2
+
+    if is_online:
+        # v0.12.2: 在线模型单次调用画像管线
+        task.update("inference", "在线模型生成画像中...")
+        from services.pipelines import run_portrait_pipeline_online
+        try:
+            portrait_data = await run_portrait_pipeline_online(
+                chat_text, sender_name, group["name"], len(all_msgs),
+                model_config=model_config, task=task, is_private=is_private,
+            )
+        except Exception as e:
+            logger.error(f"在线画像管线失败: {sender_name}: {e}")
+            if task.type != "analyze_all_portraits":
+                task.finish(success=False, error={"type": "portrait_failed", "detail": str(e)})
+            return
+    else:
+        # 本地模型：原有 4 步子任务管线
+        task.update("inference", "基础画像分析中...")
+        from services.pipelines import run_portrait_pipeline
+        try:
+            portrait_data = await run_portrait_pipeline(
+                chat_text, sender_name, group["name"], len(all_msgs), task=task,
+                is_private=is_private,
+            )
+        except Exception as e:
+            logger.error(f"基础画像 pipeline 失败: {sender_name}: {e}")
+            if task.type != "analyze_all_portraits":
+                task.finish(success=False, error={"type": "basic_failed", "detail": str(e)})
+            return
+
+    data_start = all_dates[0] if all_dates else ""
+    data_end = all_dates[-1] if all_dates else ""
+    portrait_data["_data_start"] = data_start
+    portrait_data["_data_end"] = data_end
 
     # ---- Step 2: Python 统计 ----
     task.update("inference", "数据分析中...")
@@ -442,26 +478,38 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
         )
         logger.info(f"{sender_name}: AI emoji 未匹配，Python 自动选择 {portrait_data['emoji_style']}")
 
-    # ---- Step 3: 深度画像 Pipeline（情绪/语言洞察/月度趋势） ----
-    if task:
-        for s in task.steps:
-            if s["name"] == "统计数据" and s["status"] == "running":
-                s["status"] = "done"
-    task.update("inference", "深度分析中...")
-    from services.pipelines import run_deep_portrait_pipeline
-    deep_data = await run_deep_portrait_pipeline(
-        chat_text="",
-        messages=all_msgs,
-        sender_name=sender_name,
-        group_name=group["name"],
-        group_id=group_id,
-        msg_count=len(all_msgs),
-        stats_summary=stats_summary,
-        task=task,
-    )
-    portrait_data["emotion_profile"] = deep_data.get("emotion_profile", {})
-    portrait_data["language_style"] = deep_data.get("language_style", {})
-    portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
+    # ---- Step 3: 深度画像分析（v0.12.2: 在线模型已在 Step1 完成，跳过） ----
+    if not is_online:
+        if task:
+            for s in task.steps:
+                if s["name"] == "统计数据" and s["status"] == "running":
+                    s["status"] = "done"
+        task.update("inference", "深度分析中...")
+        from services.pipelines import run_deep_portrait_pipeline
+        deep_data = await run_deep_portrait_pipeline(
+            chat_text="",
+            messages=all_msgs,
+            sender_name=sender_name,
+            group_name=group["name"],
+            group_id=group_id,
+            msg_count=len(all_msgs),
+            stats_summary=stats_summary,
+            task=task,
+        )
+        portrait_data["emotion_profile"] = deep_data.get("emotion_profile", {})
+        portrait_data["language_style"] = deep_data.get("language_style", {})
+        portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
+    else:
+        # v0.12.2: 在线模型已在单次调用中生成深度字段
+        portrait_data["emotion_profile"] = {
+            "primary": portrait_data.get("emotion_summary", ""),
+        }
+        portrait_data["language_style"] = {
+            "style_notes": portrait_data.get("language_notes", ""),
+        }
+        portrait_data["monthly_synthesis"] = portrait_data.get("deep_insight", "")
+        # 在线模型标记
+        portrait_data["_online_generated"] = True
 
     # ---- 合并数据统计（增量全量都更新） ----
     portrait_data["social_relations"] = social_relations
@@ -561,8 +609,11 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task):
 
 
 @router.post("/portrait/{member_id}/analyze")
-async def api_analyze_portrait(group_id: int, member_id: int):
-    """统一画像分析：一键生成/刷新完整画像（基础+深度）"""
+async def api_analyze_portrait(group_id: int, member_id: int, model_id: int = None):
+    """统一画像分析：一键生成/刷新完整画像（基础+深度）
+
+    v0.12.2: 新增 model_id 参数，支持选择在线模型单次生成画像。
+    """
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -576,7 +627,7 @@ async def api_analyze_portrait(group_id: int, member_id: int):
 
     task = task_manager.create("full_portrait", group_id, {"member_id": member_id})
     task.update("pending", f"全量{label} {member['display_name']} 的画像...")
-    asyncio.create_task(_run_full_portrait_analysis(group_id, member_id, task))
+    asyncio.create_task(_run_full_portrait_analysis(group_id, member_id, task, model_id=model_id))
 
     return {
         "code": 200,
@@ -587,13 +638,15 @@ async def api_analyze_portrait(group_id: int, member_id: int):
 
 # 保留旧端点兼容，内部转发
 @router.post("/portrait/{member_id}/deep")
-async def api_deep_portrait(group_id: int, member_id: int):
+async def api_deep_portrait(group_id: int, member_id: int, model_id: int = None):
     """触发深度画像生成（已合并到 /analyze，保留兼容）"""
-    return await api_analyze_portrait(group_id, member_id)
+    return await api_analyze_portrait(group_id, member_id, model_id=model_id)
 
 
-async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
+async def _run_analyze_all_portraits(group_id: int, group_name: str, task, model_id: int = None):
     """后台执行：一键分析全群画像（全量分析所有成员，不做增量跳过）
+
+    v0.12.2: 支持 model_id 参数。
     """
     chat = get_chat_cache(group_id)
     if not chat:
@@ -620,7 +673,7 @@ async def _run_analyze_all_portraits(group_id: int, group_name: str, task):
                    progress={"current": i, "total": total})
 
         try:
-            await _run_full_portrait_analysis(group_id, member["id"], task)
+            await _run_full_portrait_analysis(group_id, member["id"], task, model_id=model_id)
         except Exception as e:
             logger.error(f"批量画像分析失败: {sender_name}: {e}")
             failed += 1
@@ -765,8 +818,11 @@ async def api_group_relations(group_id: int):
 
 
 @router.post("/portraits/analyze-all")
-async def api_analyze_all_portraits(group_id: int):
-    """一键分析全群画像"""
+async def api_analyze_all_portraits(group_id: int, model_id: int = None):
+    """一键分析全群画像
+
+    v0.12.2: 新增 model_id 参数。
+    """
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -779,7 +835,7 @@ async def api_analyze_all_portraits(group_id: int):
     task = task_manager.create("analyze_all_portraits", group_id, {"total": total})
     task.update("pending", f"批量分析 {total} 人...", progress={"current": 0, "total": total})
 
-    asyncio.create_task(_run_analyze_all_portraits(group_id, group["name"], task))
+    asyncio.create_task(_run_analyze_all_portraits(group_id, group["name"], task, model_id=model_id))
 
     return {
         "code": 200,

@@ -17,6 +17,11 @@ const router = useRouter()
 const currentGroup = inject('currentGroup')
 const activeTaskId = inject('activeTaskId')
 const triggerRefresh = inject('triggerRefresh')
+// v0.12.2: 画像模型选择
+function getPortraitModelId() {
+  const v = localStorage.getItem('portraitModelId')
+  return v ? parseInt(v) : null
+}
 
 const portrait = ref(null)
 const stats = ref(null)
@@ -68,7 +73,7 @@ async function doAnalyze() {
   if (analyzing.value || activeTaskId.value) return
   analyzing.value = true
   try {
-    const result = await analyzePortrait(currentGroup.value.id, props.memberId)
+    const result = await analyzePortrait(currentGroup.value.id, props.memberId, getPortraitModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }

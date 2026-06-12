@@ -1000,6 +1000,166 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     return portrait
 
 
+# ---- 在线模型单次调用画像 v0.12.2 ----
+
+PORTRAIT_ONLINE_SYSTEM = """你是一个群聊人物画像分析师。根据发言记录生成一份完整的成员画像JSON。严格按JSON格式输出，不要输出任何其他内容。"""
+
+PORTRAIT_ONLINE_USER = """分析成员 {name} 的发言，生成完整画像JSON。
+
+{chat}
+
+输出JSON格式（严格按此结构）：
+{{
+  "personality": ["标签1", "标签2", "标签3"],
+  "speaking_style": "一个词的说话风格",
+  "role": "群内角色",
+  "interests": ["兴趣1", "兴趣2", "兴趣3"],
+  "active_hours": "活跃时段描述，如 夜猫子22:00-02:00",
+  "signature_phrases": ["口头禅1", "口头禅2"],
+  "one_line": "8-18字人设描述",
+  "emoji_label": "标签词（从下面的列表选一个）",
+  "emotion_summary": "一句话情绪特征总结",
+  "language_notes": "2-3句话的语言风格描述",
+  "deep_insight": "一段话的深度分析：这个人的变化趋势、隐藏特质、在群里的独特价值"
+}}
+
+性格标签参考（可自由发挥）：较真 随和 社恐 自来熟 刀子嘴 老好人 玻璃心 佛系 急性子 细节控 强迫症 摆烂王 卷王 乐子人 吃货 愤青 文艺
+
+说话风格参考：豪爽 温柔 毒舌 理性 活泼 老成 阴阳怪气 一本正经 骚话连篇 惜字如金 直球 拐弯抹角
+
+群内角色参考：气氛组 和事佬 话题制造机 话题终结者 吃瓜群众 潜水大佬 毒舌评论员 科普达人 摸鱼冠军 卷王
+
+emoji标签参考：乐天派 整活王 暖心 暴脾气 老学究 派对咖 emo怪 沙雕 吃瓜群众 摸鱼达人 摆烂王 卷王 老司机 玻璃心 凡尔赛 社死选手 夜猫子 游戏宅 美食家 潜水冠军 捧场王 毒舌 话痨 文艺青年
+
+注意：根据发言判断性别，不要用性别错位的称呼。deep_insight 要有洞察力，不要泛泛而谈。"""
+
+
+async def run_portrait_pipeline_online(
+    chat_text: str,
+    sender_name: str,
+    group_name: str,
+    msg_count: int,
+    model_config: dict,
+    task=None,
+    is_private: bool = False,
+) -> dict:
+    """在线模型单次调用画像管线 v0.12.2
+
+    将基础画像 4 个子任务 + 深度分析合并为一个 JSON prompt，一次性输出完整画像。
+    利用在线模型的大上下文和强推理能力，跳过拆分重试。
+    失败时自动降级到本地 4 步子任务管线。
+
+    Returns:
+        与 run_portrait_pipeline() 相同结构的 dict，额外含 emotion_summary/language_notes/deep_insight
+    """
+    from services.online_model import call_online_chat
+    from services.model_config import get_effective_model
+
+    if task:
+        task.update("inference", "(1/1) 在线模型生成画像...")
+
+    user_prompt = PORTRAIT_ONLINE_USER.format(name=sender_name, chat=chat_text)
+
+    logger.info(f"在线模型画像: {sender_name}, 模型={model_config.get('model_name')}")
+
+    try:
+        result = await call_online_chat(
+            system_prompt=PORTRAIT_ONLINE_SYSTEM,
+            user_prompt=user_prompt,
+            model_config=model_config,
+            temperature=0.4,
+            json_mode=True,
+            max_tokens=4096,
+        )
+
+        if result["success"] and result["data"]:
+            data = _extract_json_from_text(result["data"])
+            if data and isinstance(data, dict):
+                portrait = _normalize_online_portrait(data, sender_name, is_private)
+                if task:
+                    task.model_used = result.get("model", model_config.get("model_name", ""))
+                return portrait
+            else:
+                logger.warning(f"在线模型画像 JSON 解析失败，降级到本地管线")
+        else:
+            logger.warning(f"在线模型画像调用失败: {result.get('error')}，降级到本地管线")
+
+    except Exception as e:
+        logger.error(f"在线模型画像异常: {e}，降级到本地管线")
+
+    # 降级：使用本地 4 步子任务管线
+    logger.info(f"降级到本地管线为 {sender_name} 生成画像")
+    if task:
+        task.update("inference", "在线模型失败，切换到本地模型...")
+    try:
+        return await run_portrait_pipeline(
+            chat_text=chat_text,
+            sender_name=sender_name,
+            group_name=group_name,
+            msg_count=msg_count,
+            task=task,
+            is_private=is_private,
+        )
+    except Exception as e2:
+        logger.error(f"本地管线降级也失败: {e2}")
+        return {}
+
+
+def _normalize_online_portrait(data: dict, sender_name: str, is_private: bool = False) -> dict:
+    """将在线模型 JSON 输出归一化为与本地管线兼容的结构，并附加深度字段"""
+    # 基础字段归一化
+    personality = data.get("personality", [])
+    if isinstance(personality, str):
+        personality = [t.strip() for t in personality.replace("，", ",").split(",")]
+    personality = [p for p in personality if p][:3]
+
+    speaking_style = str(data.get("speaking_style", ""))[:20]
+
+    role = str(data.get("role", ""))[:20]
+
+    interests = data.get("interests", [])
+    if isinstance(interests, str):
+        interests = [t.strip() for t in interests.replace("，", ",").split(",")]
+    interests = [i for i in interests if i][:5]
+
+    active_hours = str(data.get("active_hours", ""))[:50]
+
+    sig = data.get("signature_phrases", [])
+    if isinstance(sig, str):
+        sig = [t.strip() for t in sig.replace("，", ",").split(",")]
+    signature_phrases = [s[:20] for s in sig if s and s != "无"][:3]
+
+    one_line = str(data.get("one_line", ""))[:30]
+    if not one_line or len(one_line) < 2:
+        parts = []
+        if personality:
+            parts.append(personality[0])
+        if role:
+            parts.append(role)
+        one_line = f"一个{'·'.join(parts)}" if parts else f"{'聊天中的' if is_private else '群里的'}神秘人"
+
+    # emoji 匹配
+    emoji_label = str(data.get("emoji_label", ""))
+    emoji_style = _match_emoji_by_label(emoji_label) if emoji_label else ""
+
+    portrait = {
+        "personality": personality,
+        "speaking_style": speaking_style,
+        "role": role,
+        "interests": interests,
+        "active_hours": active_hours,
+        "signature_phrase": signature_phrases[0] if signature_phrases else None,
+        "signature_phrases": signature_phrases,
+        "one_line": one_line[:30],
+        "emoji_style": emoji_style[:10],
+        # v0.12.2: 在线模型额外深度字段
+        "emotion_summary": str(data.get("emotion_summary", ""))[:200],
+        "language_notes": str(data.get("language_notes", ""))[:300],
+        "deep_insight": str(data.get("deep_insight", ""))[:500],
+    }
+    return portrait
+
+
 # ---- 深度画像 Pipeline (v0.5) ----
 # 基于 Python 统计数据摘要做 AI 分析，不直接读原始消息
 

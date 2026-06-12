@@ -24,6 +24,7 @@ const deleteConfirm = ref(null)
 const groups = ref([])
 const defaultGroupId = ref(localStorage.getItem('defaultGroupId') || '')
 const dailyModelId = ref(localStorage.getItem('dailyModelId') || '')
+const portraitModelId = ref(localStorage.getItem('portraitModelId') || '')
 
 // Form state
 const form = ref({
@@ -71,6 +72,14 @@ function saveDailyModel() {
     localStorage.setItem('dailyModelId', dailyModelId.value)
   } else {
     localStorage.removeItem('dailyModelId')
+  }
+}
+
+function savePortraitModel() {
+  if (portraitModelId.value) {
+    localStorage.setItem('portraitModelId', portraitModelId.value)
+  } else {
+    localStorage.removeItem('portraitModelId')
   }
 }
 
@@ -235,6 +244,36 @@ onMounted(loadConfigs)
           </optgroup>
           <optgroup label="在线模型">
             <option v-for="m in onlineConfigs" :key="'daily-online-'+m.id" :value="m.id">
+              ☁️ {{ m.name }} ({{ m.model_name }})
+            </option>
+          </optgroup>
+        </select>
+      </div>
+    </section>
+
+    <!-- 画像分析默认模型 v0.12.2 -->
+    <section>
+      <div class="flex items-center gap-2 mb-4">
+        <Users :size="20" class="text-gray-600" />
+        <h2 class="text-lg font-semibold text-gray-800">画像分析默认模型</h2>
+      </div>
+      <div class="card p-4">
+        <p class="text-sm text-gray-500 mb-3">
+          生成群友画像时使用的默认模型。在线模型将一次生成完整画像（含深度分析），更快更深入。
+        </p>
+        <select
+          :value="portraitModelId"
+          @change="portraitModelId = $event.target.value; savePortraitModel()"
+          class="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+        >
+          <option value="">本地默认 (Ollama)</option>
+          <optgroup label="本地模型">
+            <option v-for="m in localConfigs" :key="'pt-local-'+m.id" :value="m.id">
+              🖥️ {{ m.name }} ({{ m.model_name }})
+            </option>
+          </optgroup>
+          <optgroup label="在线模型">
+            <option v-for="m in onlineConfigs" :key="'pt-online-'+m.id" :value="m.id">
               ☁️ {{ m.name }} ({{ m.model_name }})
             </option>
           </optgroup>

@@ -97,16 +97,22 @@ export const generateDeepPortrait = async (gid, mid) => {
 }
 // 统一画像分析（v0.5.1 合并：基础+深度一步完成）
 // max_days: 0=全量, 10=最近10天增量刷新
-export const analyzePortrait = async (gid, mid, maxDays = 0) => {
-  const params = maxDays > 0 ? `?max_days=${maxDays}` : ''
-  const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/analyze${params}`, { method: 'POST' })
+// v0.12.2: 支持 modelId 参数
+export const analyzePortrait = async (gid, mid, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/portrait/${mid}/analyze${qs}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
 }
 // 一键分析全群画像
-export const analyzeAllPortraits = async (gid) => {
-  const res = await fetch(`${BASE}/groups/${gid}/portraits/analyze-all`, { method: 'POST' })
+export const analyzeAllPortraits = async (gid, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/portraits/analyze-all${qs}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
