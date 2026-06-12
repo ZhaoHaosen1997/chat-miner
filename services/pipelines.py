@@ -1058,7 +1058,9 @@ async def run_portrait_pipeline_online(
     if task:
         task.update("inference", "(1/1) 在线模型生成画像...")
 
-    user_prompt = PORTRAIT_ONLINE_USER.format(name=sender_name, chat=chat_text)
+    # 私聊模式适配
+    chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
+    user_prompt = PORTRAIT_ONLINE_USER.format(name=sender_name, chat=chat_for_prompt)
 
     logger.info(f"在线模型画像: {sender_name}, 模型={model_config.get('model_name')}")
 
@@ -1139,7 +1141,7 @@ def _normalize_online_portrait(data: dict, sender_name: str, is_private: bool = 
         one_line = f"一个{'·'.join(parts)}" if parts else f"{'聊天中的' if is_private else '群里的'}神秘人"
 
     # emoji 匹配
-    emoji_label = str(data.get("emoji_label", ""))
+    emoji_label = data.get("emoji_label") or ""
     emoji_style = _match_emoji_by_label(emoji_label) if emoji_label else ""
 
     portrait = {

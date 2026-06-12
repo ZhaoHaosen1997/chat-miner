@@ -17,7 +17,9 @@ const batchAnalyzing = ref(false)
 // v0.12.2: 画像模型选择
 function getPortraitModelId() {
   const v = localStorage.getItem('portraitModelId')
-  return v ? parseInt(v) : null
+  if (v === null || v === '') return null
+  const n = Number(v)
+  return isNaN(n) ? null : n
 } // 批量分析中
 const error = ref('')
 

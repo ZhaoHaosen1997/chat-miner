@@ -52,7 +52,9 @@ const generatingPeriod = ref('')  // 正在生成的 period_key
 // v0.12.0: 从设置页读取每日分析默认模型
 function getDailyModelId() {
   const v = localStorage.getItem('dailyModelId')
-  return v ? parseInt(v) : null
+  if (v === null || v === '') return null
+  const n = Number(v)
+  return isNaN(n) ? null : n
 }
 const showAllWeekly = ref(false)
 const showAllMonthly = ref(false)

@@ -503,6 +503,8 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
         # v0.12.2: 在线模型已在单次调用中生成深度字段
         portrait_data["emotion_profile"] = {
             "primary": portrait_data.get("emotion_summary", ""),
+            "trend": "",
+            "timeline": [],
         }
         portrait_data["language_style"] = {
             "style_notes": portrait_data.get("language_notes", ""),
@@ -522,7 +524,6 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
         "monthly_trend": activity["monthly_trend"],
     }
     portrait_data["language_stats"] = language  # 全量存储，供前端展示
-    portrait_data["monthly_synthesis"] = deep_data.get("monthly_synthesis", "")
 
     # v0.6.4: 一次性计算可缓存数据，避免每次打开页面重算
     from services.stats_engine import (
@@ -537,11 +538,10 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     portrait_data["signature_emoji"] = (
         language.get("top_emojis", [{}])[0].get("emoji", "") if language.get("top_emojis") else ""
     )
-    # ---- 趣味功能 (v0.5.1) ----
+    # ---- 趣味功能 (v0.5.1, v0.12.2: 在线模型时走在线调用) ----
     task.update("inference", "趣味分析中...")
     from services.stats_engine import compute_fun_title_basis
     from services.pipelines import FUN_TITLE_PROMPTS, FUN_RELATION_PROMPTS
-    from services.analyzer import call_ollama_chat
 
     # 趣味称号
     title_basis = compute_fun_title_basis(activity, language, social_relations,
@@ -549,10 +549,23 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     title_user = FUN_TITLE_PROMPTS["user"].format(
         name=sender_name, data_summary=title_basis["data_summary"]
     )
-    title_result = await call_ollama_chat(
-        FUN_TITLE_PROMPTS["system"], title_user, config.OLLAMA_MODEL, timeout=20
-    )
-    fun_title = str(title_result["data"]).strip() if title_result.get("data") else title_basis["category"]
+    fun_title = title_basis["category"]  # Python 统计兜底
+    try:
+        if is_online:
+            from services.online_model import call_online_chat
+            title_result = await call_online_chat(
+                FUN_TITLE_PROMPTS["system"], title_user, model_config,
+                temperature=0.5, max_tokens=30,
+            )
+        else:
+            from services.analyzer import call_ollama_chat
+            title_result = await call_ollama_chat(
+                FUN_TITLE_PROMPTS["system"], title_user, config.OLLAMA_MODEL, timeout=20
+            )
+        if title_result.get("data"):
+            fun_title = str(title_result["data"]).strip()
+    except Exception as e:
+        logger.warning(f"趣味称号生成失败: {e}，使用统计兜底")
 
     # 关系趣味解读（Top 1 互动对象）
     fun_relation = ""
@@ -563,10 +576,21 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
             count=top.get("total_interactions", 0),
             relation_type=top.get("relation_type", "群友"),
         )
-        rel_result = await call_ollama_chat(
-            FUN_RELATION_PROMPTS["system"], rel_user, config.OLLAMA_MODEL, timeout=20
-        )
-        fun_relation = str(rel_result["data"]).strip() if rel_result.get("data") else ""
+        try:
+            if is_online:
+                from services.online_model import call_online_chat
+                rel_result = await call_online_chat(
+                    FUN_RELATION_PROMPTS["system"], rel_user, model_config,
+                    temperature=0.5, max_tokens=30,
+                )
+            else:
+                from services.analyzer import call_ollama_chat
+                rel_result = await call_ollama_chat(
+                    FUN_RELATION_PROMPTS["system"], rel_user, config.OLLAMA_MODEL, timeout=20
+                )
+            fun_relation = str(rel_result["data"]).strip() if rel_result.get("data") else ""
+        except Exception as e:
+            logger.warning(f"关系解读生成失败: {e}")
 
     portrait_data["fun_title"] = fun_title
     portrait_data["fun_relation"] = fun_relation
@@ -599,13 +623,14 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
         data_end=date_end,
     )
     duration_ms = int((_time.time() - start_time) * 1000)
-    task.model_used = config.OLLAMA_MODEL
+    model_used = model_config.get("model_name", config.OLLAMA_MODEL)
+    task.model_used = model_used
     task.duration_ms = duration_ms
     # 批量任务不在这里 finish，由外层循环控制
     if task.type != "analyze_all_portraits":
         task.finish(success=True)
     log_analysis(group_id, "", "full_portrait", "success",
-                 model_used=config.OLLAMA_MODEL, duration_ms=duration_ms)
+                 model_used=model_used, duration_ms=duration_ms)
 
 
 @router.post("/portrait/{member_id}/analyze")
