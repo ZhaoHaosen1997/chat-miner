@@ -71,7 +71,7 @@ async def ai_judge_relation(name_a: str, name_b: str,
         valid_types = ["损友", "同事", "好友", "普通群友", "网友",
                        "饭搭子", "奶茶搭子", "深夜聊天搭子", "互怼组合",
                        "捧哏逗哏", "冤家", "塑料姐妹", "亲兄弟", "游戏搭子",
-                       "领导与下属", "亲密朋友", "游戏搭子"]
+                       "领导与下属", "亲密朋友"]  # v0.13.3: 去重
         for t in valid_types:
             if t in raw:
                 return t

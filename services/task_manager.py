@@ -124,17 +124,26 @@ class TaskManager:
         return task
 
     def _cleanup_stale(self, max_age_seconds: int = 1800):
-        """清理已完成/失败/取消的旧任务（默认 30 分钟）"""
+        """清理已完成/失败/取消的旧任务（默认 30 分钟）
+        v0.13.3: 同时清理卡住的 running 任务（超过 2 小时无进度）
+        """
         now = time.time()
         stale_ids = []
         for tid, t in self._tasks.items():
             if t.status in ("done", "failed", "cancelled"):
                 if t._start_time > 0 and (now - t._start_time) > max_age_seconds:
                     stale_ids.append(tid)
+            # 卡住的 running/pending 任务（超过 2 小时）
+            elif t.status in ("running", "pending", "inference", "waiting_gpu"):
+                if t._start_time > 0 and (now - t._start_time) > 7200:
+                    logger.warning(f"清理卡住的任务: {tid} type={t.type} status={t.status}")
+                    t.status = "failed"
+                    t.error = {"type": "stale_task", "detail": "任务执行超时（2小时），已自动清理"}
+                    stale_ids.append(tid)
         for tid in stale_ids:
             self._tasks.pop(tid, None)
         if stale_ids:
-            logger.debug(f"清理 {len(stale_ids)} 个过期任务")
+            logger.info(f"清理 {len(stale_ids)} 个过期/卡住任务")
 
     def get(self, task_id: str) -> Optional[TaskInfo]:
         return self._tasks.get(task_id)

@@ -2,7 +2,7 @@
 AI 分析服务：调用 Ollama API 生成每日报告
 使用 httpx 异步请求，支持重试和 JSON 提取
 通过 GPU 分布式锁防止多应用抢占显存
-每次调用独立会话（keep_alive=0），防止上下文累积
+每次调用独立会话（keep_alive=300），pipeline 期间模型常驻内存，完成后 5 分钟自动卸载
 """
 import json
 import re
@@ -185,7 +185,7 @@ async def call_ollama_chat(
 
     自动通过 GPU 分布式锁协调多应用对 GPU 的访问。
     如果 GPU 被占用（如 ComfyUI），会等待并重试。
-    每次调用创建独立会话（keep_alive=0），防止上下文累积。
+    每次调用创建独立会话（keep_alive=300），pipeline 期间模型常驻内存。
 
     Args:
         system_prompt: 系统提示词

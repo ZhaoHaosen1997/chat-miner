@@ -2,6 +2,7 @@
 群鱼塘 API 路由
 """
 import json
+import asyncio
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel
 
@@ -39,16 +40,16 @@ class AdoptBody(BaseModel):
 
 @router.get("")
 @router.get("/")
-def get_pond(group_id: int):
+async def get_pond(group_id: int):
     """获取鱼塘全貌（含天气、所有鱼、排行榜、事件）"""
-    state = fp.get_pond_state(group_id)
+    state = await asyncio.to_thread(fp.get_pond_state, group_id)
     return {"code": 200, "message": "ok", "data": state}
 
 
 @router.post("/settle")
-def settle_pond(group_id: int, body: SettleBody = SettleBody()):
+async def settle_pond(group_id: int, body: SettleBody = SettleBody()):
     """触发全群结算"""
-    result = fp.settle_all_fish(group_id, body.reference_date)
+    result = await asyncio.to_thread(fp.settle_all_fish, group_id, body.reference_date)
     return {"code": 200, "message": "结算完成", "data": result}
 
 

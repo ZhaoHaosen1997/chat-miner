@@ -58,6 +58,8 @@ provide('addTaskHistory', (entry) => {
 
 function onGroupChange(group) {
   currentGroup.value = group
+  // v0.13.3: 切换群组时清理上一个群的活动任务 ID
+  activeTaskId.value = ''
 }
 
 function onTaskDone(data) {

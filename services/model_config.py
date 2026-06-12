@@ -63,14 +63,15 @@ def get_effective_model(model_type: str) -> dict:
     """
     获取某类型的"生效模型"配置。
     优先 DB 默认 → DB 同类型首个 → .env 兜底。
+    v0.13.3: 单次查询，避免 N+1。
     """
-    # 1. DB 默认配置
-    db_default = get_default_model(model_type)
-    if db_default:
-        return _row_to_config(db_default)
-
-    # 2. DB 中同类型任意第一条（作为后备默认）
+    # 1. 一次查询获取所有启用的同类型配置（按 is_default desc, id asc 排序）
     all_configs = list_model_configs()
+    for c in all_configs:
+        if c["model_type"] == model_type and c.get("is_enabled", 1):
+            if c.get("is_default"):
+                return _row_to_config(c)
+    # 2. 同类型任意第一条（无默认时取首个）
     for c in all_configs:
         if c["model_type"] == model_type and c.get("is_enabled", 1):
             logger.warning(f"模型类型 {model_type} 无默认配置，使用首个可用配置: {c['name']}")

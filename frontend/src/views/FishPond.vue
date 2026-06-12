@@ -12,6 +12,7 @@ import { Fish, RefreshCw, Sparkles, Coins, Zap, Search, X, BookOpen } from 'luci
 
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
+const showError = inject('showError')  // v0.13.3: 统一错误弹窗
 
 const pondState = ref(null)
 const loading = ref(false)
@@ -54,7 +55,7 @@ async function handleParseCommands() {
     parseLog.value = result
     showParseLog.value = true
     await loadPond()
-  } catch (e) { alert(e.message) }
+  } catch (e) { showError('指令解析失败', e.message) }
   finally { actionLoading.value = '' }
 }
 
@@ -62,7 +63,7 @@ async function handleAdopt(wxid, displayName) {
   try {
     await adoptFish(gid.value, wxid, displayName)
     await loadPond()
-  } catch (e) { alert(e.message) }
+  } catch (e) { showError('领养失败', e.message) }
 }
 
 function handleFishClick(fish) {
@@ -93,7 +94,7 @@ async function handleFishAction(action, wxid, extra) {
       selectedFish.value = { ...selectedFish.value, ...detail.fish }
     }
     await loadPond()
-  } catch (e) { alert(e.message) }
+  } catch (e) { showError('操作失败', e.message) }
   finally { actionLoading.value = '' }
 }
 

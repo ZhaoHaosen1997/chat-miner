@@ -32,4 +32,17 @@ const router = createRouter({
   routes,
 })
 
-createApp(App).use(router).mount('#app')
+const app = createApp(App)
+app.use(router)
+
+// v0.13.3: 全局 Vue 错误处理，桥接到 ErrorModal
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue Error]', err, info)
+  // 尝试通过 DOM 查找 ErrorModal 实例触发显示
+  const detail = err instanceof Error ? (err.stack || '').split('\n').slice(0, 3).join('\n') : ''
+  window.dispatchEvent(new CustomEvent('app-error', {
+    detail: { title: '前端异常', message: err.message || String(err), detail, context: info }
+  }))
+}
+
+app.mount('#app')

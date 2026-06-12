@@ -318,6 +318,13 @@ def init_db():
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
+    # v0.13.3: 常用查询索引
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_analysis_log_created_at ON analysis_log(created_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_log_group ON analysis_log(group_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_task_records_group ON task_records(group_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_portrait_versions_member ON portrait_versions(group_id, member_id);
+    """)
     # v0.13.1: portrait_versions 唯一约束（防版本号重复）
     cur = conn.execute("PRAGMA index_list(portrait_versions)")
     indexes = {row[1] for row in cur.fetchall()}

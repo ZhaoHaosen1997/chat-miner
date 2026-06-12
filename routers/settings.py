@@ -169,7 +169,7 @@ async def api_check_health(config_id: int):
         # Ollama: 检查 /api/tags
         endpoint = model_cfg["endpoint"]
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=config.OLLAMA_TIMEOUT) as client:
                 resp = await client.get(f"{endpoint}/api/tags")
                 if resp.status_code == 200:
                     tags_data = resp.json()

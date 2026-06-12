@@ -1257,7 +1257,7 @@ async def generate_weekly_report(
         }
 
     # 保存到数据库
-    model_used = ai_result.get("model", config.DEEPSEEK_MODEL)
+    model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_MODEL
     day_count_val = report.get("day_count", len(week_dates))
     total_msgs_val = report.get("total_messages", 0)
     active_members_val = report.get("active_members_avg", 0)
@@ -1579,7 +1579,7 @@ async def generate_monthly_report(
         }
 
     # ---- 保存 + 返回 ----
-    model_used = ai_result.get("model", config.DEEPSEEK_REASONER_MODEL)
+    model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_REASONER_MODEL
     save_periodic_report(
         group_id=group_id, report_type="monthly", period_key=period_key,
         date_start=date_start, date_end=date_end,

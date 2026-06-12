@@ -573,6 +573,8 @@ async def api_get_weekly(group_id: int, period_key: str):
     from services.weekly_report import iso_week_dates
     from models.database import get_periodic_report as _get_pr
 
+    if not get_group(group_id):
+        raise HTTPException(404, detail="群不存在")
     report = _get_pr(group_id, "weekly", period_key)
     if not report:
         # 检查该周是否有效
@@ -670,6 +672,8 @@ async def api_get_monthly(group_id: int, period_key: str):
     from services.weekly_report import month_dates
     from models.database import get_periodic_report as _get_pr
 
+    if not get_group(group_id):
+        raise HTTPException(404, detail="群不存在")
     report = _get_pr(group_id, "monthly", period_key)
     if not report:
         parts = period_key.split("-")
@@ -764,6 +768,8 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
 async def api_get_annual(group_id: int, year: int):
     """获取年度报告"""
     from models.database import get_periodic_report
+    if not get_group(group_id):
+        raise HTTPException(404, detail="群不存在")
     report = get_periodic_report(group_id, "annual", str(year))
     if not report:
         raise HTTPException(404, detail=f"{year}年度报告尚未生成")

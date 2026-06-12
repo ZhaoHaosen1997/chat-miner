@@ -132,8 +132,8 @@ async def generate_annual_report(group_id: int, year: int, chat,
     award_count = max(3, min(15, active_count // 2))
     award_count = (award_count // 3) * 3
 
-    # 6. 构建 prompt
-    user_prompt = _build_annual_prompt(raw_data, monthly_summaries, year)
+    # 6. 构建 prompt（v0.13.3: award_count 传参复用，避免 _build_annual_prompt 内重复计算）
+    user_prompt = _build_annual_prompt(raw_data, monthly_summaries, year, award_count)
 
     # 7. 调用 AI
     if task:
@@ -474,16 +474,18 @@ def _anonymize_content(content: str, alias_map: dict[str, str]) -> str:
 # _de_anonymize_ai_output 已从 services.weekly_report 导入，直接使用，不重复定义
 
 
-def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: int) -> str:
-    """构建年度报告的用户提示词"""
+def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: int,
+                          award_count: int = 0) -> str:
+    """构建年度报告的用户提示词（v0.13.3: award_count 由调用方传入，避免重复计算）"""
     stats = raw_data["stats"]
     sampled = raw_data["sampled_msgs"]
     member_index = raw_data.get("member_index", [])  # [{wxid, alias, detail}]
 
-    # 动态计算奖项数量：至少3个，按活跃成员数/2，取3的倍数
-    active_count = stats["active_members"]
-    award_count = max(3, min(15, active_count // 2))
-    award_count = (award_count // 3) * 3  # 向下取3的倍数
+    # award_count 由调用方预先计算传入；若未传入则动态计算
+    if award_count <= 0:
+        active_count = stats["active_members"]
+        award_count = max(3, min(15, active_count // 2))
+        award_count = (award_count // 3) * 3
 
     # 月报摘要
     monthly_text_parts = []
