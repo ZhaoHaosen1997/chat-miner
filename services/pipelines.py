@@ -476,12 +476,15 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 async def run_daily_pipeline(chat_text: str, group_name: str,
                               date: str, msg_count: int, task=None,
                               hourly_stats: str = "",
-                              is_private: bool = False) -> dict:
+                              is_private: bool = False,
+                              primary_model: str = "") -> dict:
     """执行 8 步子任务管道，拼装每日报告 JSON（含趣味功能）
 
     is_private: 私聊模式，将 prompt 中的"群聊"替换为"聊天"、"群友"替换为"对方"
+    primary_model: 指定主模型名（空则使用 config.OLLAMA_MODEL）
     """
     total = 8
+    p_model = primary_model or config.OLLAMA_MODEL
 
     if task:
         task.update("inference", f"(0/6) 开始分析...")
@@ -507,7 +510,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     topics_data = await _run_sub(task, "提取话题", 1, total,
                                   _p("topics")["system"],
-                                  f"{chat_text}\n\n{_p('topics')['user']}")
+                                  f"{chat_text}\n\n{_p('topics')['user']}",
+                                  model=p_model)
     topics = _parse_lines(topics_data) if topics_data else []
     if not topics:
         topics = ["今日话题"]
@@ -517,7 +521,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     quotes_data = await _run_sub(task, "找搞笑发言", 2, total,
                                   _p("quotes")["system"],
-                                  f"{chat_text}\n\n{_p('quotes')['user']}")
+                                  f"{chat_text}\n\n{_p('quotes')['user']}",
+                                  model=p_model)
     quotes = _parse_quotes(quotes_data) if quotes_data else []
     if not quotes and quotes_data is None:
         failed_steps.append("quotes")
@@ -526,7 +531,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     mood_data = await _run_sub(task, "判断情绪", 3, total,
                                 _p("mood")["system"],
-                                f"{chat_text}\n\n{_p('mood')['user']}")
+                                f"{chat_text}\n\n{_p('mood')['user']}",
+                                model=p_model)
     mood, mood_emoji = _parse_mood(mood_data)
     if mood_data is None:
         failed_steps.append("mood")
@@ -535,7 +541,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     kw_data = await _run_sub(task, "提取关键词", 4, total,
                               _p("keywords")["system"],
-                              f"{chat_text}\n\n{_p('keywords')['user']}")
+                              f"{chat_text}\n\n{_p('keywords')['user']}",
+                              model=p_model)
     keywords = _parse_kw(kw_data)
     if kw_data is None:
         failed_steps.append("keywords")
@@ -544,7 +551,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     ol_data = await _run_sub(task, "一句话总结", 5, total,
                               _p("oneline")["system"],
-                              f"{chat_text}\n\n{_p('oneline')['user']}")
+                              f"{chat_text}\n\n{_p('oneline')['user']}",
+                              model=p_model)
     one_line, highlight = _parse_oneline(ol_data)
     if ol_data is None:
         failed_steps.append("oneline")
@@ -554,7 +562,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     hs = (hourly_stats or "(无小时分布数据)").replace("{", "{{").replace("}", "}}")
     hs_user = PROMPTS["active_hours"]["user"].replace("{hourly_stats}", hs)
     ah_data = await _run_sub(task, "活跃时段分析", 6, total,
-                              _p("active_hours")["system"], hs_user)
+                              _p("active_hours")["system"], hs_user,
+                              model=p_model)
     ah = _parse_active_hours(ah_data)
     if ah_data is None:
         failed_steps.append("active_hours")
@@ -563,7 +572,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     if _cancelled(): return {}
     headline_data = await _run_sub(task, "趣味标题", 7, total,
                                     _p("headline")["system"],
-                                    f"{chat_text}\n\n{_p('headline')['user']}")
+                                    f"{chat_text}\n\n{_p('headline')['user']}",
+                                    model=p_model)
     headline = str(headline_data).strip() if headline_data else ""
 
     # 8. 名场面（取最佳搞笑发言，AI配花字吐槽）
@@ -574,7 +584,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         sc = _p("scene_commentary")
         scene_user = sc["user"].format(scene=scene_text)
         scene_data = await _run_sub(task, "名场面吐槽", 8, total,
-                                     sc["system"], scene_user)
+                                     sc["system"], scene_user,
+                                     model=p_model)
         scene_commentary = str(scene_data).strip() if scene_data else ""
     if headline_data is None:
         failed_steps.append("headline")
@@ -605,6 +616,222 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         # 持久化任务记录
         _save_pipeline_record(task, group_name, date)
 
+    return report
+
+
+# ---- 在线模型单次调用日报 v0.12.0 ----
+
+DAILY_ONLINE_SYSTEM = """你是一个群聊观察员，负责生成群聊日报。严格按JSON格式输出，不要输出任何其他内容。"""
+
+DAILY_ONLINE_USER = """分析以下群聊记录，生成一份完整的日报JSON。
+
+{chat}
+
+输出JSON格式（严格按此结构，不要输出任何解释）：
+{{
+  "topic_summary": ["话题1", "话题2", "话题3"],
+  "funny_quotes": [
+    {{"speaker": "发言人", "quote": "原话", "comment": "你的犀利吐槽"}}
+  ],
+  "mood": "欢乐/温馨/严肃/吐槽/平淡/热闹/伤感/沙雕/吃瓜/摸鱼/摆烂/内卷/破防/离谱/上头 (选一个)",
+  "mood_emoji": "对应emoji",
+  "keywords": ["关键词1", "关键词2", "关键词3", "关键词4"],
+  "one_line": "20字内有梗的一句话总结",
+  "highlight": "今天最值得记录的瞬间",
+  "active_hours": {{"peak_label": "如 晚间热闹", "peak_desc": "一句话描述活跃规律"}},
+  "headline": "综艺预告片风格的趣味标题（15字内）",
+  "scene_commentary": "对最搞笑的名场面配一句花字吐槽（10字内）"
+}}
+
+话题提取2-4个，搞笑发言找3-5条，情绪严格从选项中选择。"""
+
+
+async def run_daily_pipeline_online(
+    chat_text: str,
+    group_name: str,
+    date: str,
+    msg_count: int,
+    model_config: dict,
+    task=None,
+    hourly_stats: str = "",
+    is_private: bool = False,
+) -> dict:
+    """在线模型单次调用日报管线 v0.12.0
+
+    将 8 个子任务合并为一个 JSON prompt，一次性输出完整日报。
+    利用在线模型的大上下文和强指令跟随能力，跳过拆分重试。
+    失败时自动降级到本地 8 子任务管线。
+
+    Returns:
+        与 run_daily_pipeline() 相同结构的 dict
+    """
+    from services.online_model import call_online_chat
+    from services.model_config import get_effective_model
+    import asyncio
+
+    if task:
+        task.update("inference", "(1/1) 在线模型生成日报...")
+
+    # 适配私聊话术
+    chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
+
+    # 构建 prompt
+    hs = (hourly_stats or "(无小时分布数据)")
+    full_chat = chat_for_prompt + f"\n\n小时消息分布：\n{hs}"
+    user_prompt = DAILY_ONLINE_USER.format(chat=full_chat)
+
+    logger.info(f"在线模型日报: {group_name} {date}, 模型={model_config.get('model_name')}")
+
+    try:
+        result = await call_online_chat(
+            system_prompt=DAILY_ONLINE_SYSTEM,
+            user_prompt=user_prompt,
+            model_config=model_config,
+            temperature=0.3,
+            json_mode=True,
+            max_tokens=4096,
+        )
+
+        if result["success"] and result["data"]:
+            # 解析 JSON
+            data = _extract_json_from_text(result["data"])
+            if data and isinstance(data, dict):
+                # 用现有解析函数做安全网格式化
+                report = _normalize_online_report(data)
+                if task:
+                    task.model_used = result.get("model", model_config.get("model_name", ""))
+                    if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
+                        task.finish(success=True)
+                    _save_pipeline_record(task, group_name, date)
+                return report
+            else:
+                logger.warning("在线模型日报 JSON 解析失败，降级到本地管线")
+        else:
+            logger.warning(f"在线模型日报调用失败: {result.get('error')}，降级到本地管线")
+
+    except Exception as e:
+        logger.error(f"在线模型日报异常: {e}，降级到本地管线")
+
+    # 降级：使用本地 8 子任务管线
+    logger.info(f"降级到本地管线为 {group_name} {date} 生成日报")
+    if task:
+        task.update("inference", "在线模型失败，切换到本地模型...")
+    try:
+        local_config = get_effective_model("local")
+        # 设置 task 的 model_used 为本地模型（在 run_daily_pipeline 中会设）
+        return await run_daily_pipeline(
+            chat_text=chat_text,
+            group_name=group_name,
+            date=date,
+            msg_count=msg_count,
+            task=task,
+            hourly_stats=hourly_stats,
+            is_private=is_private,
+        )
+    except Exception as e2:
+        logger.error(f"本地管线降级也失败: {e2}")
+        if task:
+            task.finish(success=False, error={"type": "pipeline_failed", "detail": str(e2)})
+        return {}
+
+
+def _extract_json_from_text(text: str) -> dict | None:
+    """从 AI 返回的文本中提取 JSON 对象"""
+    # 先尝试直接解析
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+    # 尝试提取 ```json ... ``` 代码块
+    m = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', text)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # 尝试找第一个 { ... } 块
+    m = re.search(r'\{[\s\S]*\}', text)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _normalize_online_report(data: dict) -> dict:
+    """将在线模型 JSON 输出归一化为与 8 子任务管线相同的结构"""
+    # 情绪
+    mood, mood_emoji = _parse_mood(data.get("mood", ""))
+    if not mood:
+        mood = "平淡"
+        mood_emoji = "😐"
+
+    # 话题
+    topics = data.get("topic_summary", [])
+    if isinstance(topics, str):
+        topics = _parse_lines(topics)
+    if not topics:
+        topics = ["今日话题"]
+
+    # 搞笑发言
+    quotes = data.get("funny_quotes", [])
+    if isinstance(quotes, str):
+        quotes = _parse_quotes(quotes)
+    # 确保是 list[dict] 格式
+    if quotes and isinstance(quotes, list):
+        normalized_quotes = []
+        for q in quotes:
+            if isinstance(q, dict):
+                normalized_quotes.append({
+                    "speaker": q.get("speaker", q.get("发言人", "某人")),
+                    "quote": q.get("quote", q.get("原话", "")),
+                    "comment": q.get("comment", q.get("吐槽", "")),
+                })
+            elif isinstance(q, str):
+                normalized_quotes.append({"speaker": "某人", "quote": q, "comment": ""})
+        quotes = normalized_quotes
+
+    # 关键词
+    keywords = data.get("keywords", [])
+    if isinstance(keywords, str):
+        keywords = _parse_kw(keywords)
+    if not keywords:
+        keywords = ["聊天"]
+
+    # 一句话总结
+    one_line = data.get("one_line", "")
+    highlight = data.get("highlight", "")
+    if not one_line or not highlight:
+        ol, hl = _parse_oneline(f"{one_line}\n{highlight}")
+        one_line = ol or one_line or "今天又是热闹的一天"
+        highlight = hl or highlight or "暂无高光"
+
+    # 活跃时段
+    ah = data.get("active_hours", {})
+    if isinstance(ah, str):
+        ah = _parse_active_hours(ah)
+    if not isinstance(ah, dict):
+        ah = {"peak_label": "全天活跃", "peak_desc": "消息分布均匀"}
+
+    # 标题
+    headline = data.get("headline", "") or one_line
+
+    # 名场面吐槽
+    scene = data.get("scene_commentary", "")
+
+    report = {
+        "topic_summary": topics,
+        "funny_quotes": quotes,
+        "mood": mood,
+        "mood_emoji": mood_emoji,
+        "highlight": highlight,
+        "keywords": keywords,
+        "one_line": one_line,
+        "active_hours": ah,
+        "headline": headline,
+        "scene_commentary": scene,
+    }
     return report
 
 

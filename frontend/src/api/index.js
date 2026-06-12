@@ -48,9 +48,12 @@ export const getAnalyzedDates = (gid) => request(`/groups/${gid}/dates/analyzed`
 // --- 每日报告 ---
 export const analyzeDate = (gid, date) =>
   request(`/groups/${gid}/analyze/${date}`, { method: 'POST' })
-// 异步分析：返回 task_id
-export const analyzeDateAsync = async (gid, date) => {
-  const res = await fetch(`${BASE}/groups/${gid}/analyze/${date}`, { method: 'POST' })
+// 异步分析：返回 task_id。v0.12.0: 支持 modelId 参数
+export const analyzeDateAsync = async (gid, date, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/analyze/${date}${qs}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data // { task_id, status } or { cached, report, ... }
@@ -119,8 +122,11 @@ export const getHealth = () => request('/health')
 export const getTaskHistory = (gid, limit = 10) => request(`/tasks/history?group_id=${gid}&limit=${limit}`)
 
 // --- 批量分析 ---
-export const analyzeAll = async (gid) => {
-  const res = await fetch(`${BASE}/groups/${gid}/analyze-all`, { method: 'POST' })
+export const analyzeAll = async (gid, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/analyze-all${qs}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
@@ -207,20 +213,22 @@ export const getWeeklyReport = (gid, periodKey) =>
   request(`/groups/${gid}/weekly/${periodKey}`)
 export const getMonthlyReport = (gid, periodKey) =>
   request(`/groups/${gid}/monthly/${periodKey}`)
-export const generateWeekly = async (gid, periodKey = '', force = false) => {
+export const generateWeekly = async (gid, periodKey = '', force = false, modelId = null) => {
   const params = new URLSearchParams()
   if (periodKey) params.set('period_key', periodKey)
   if (force) params.set('force', 'true')
+  if (modelId) params.set('model_id', modelId)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const res = await fetch(`${BASE}/groups/${gid}/weekly/generate${qs}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
 }
-export const generateMonthly = async (gid, periodKey = '', force = false) => {
+export const generateMonthly = async (gid, periodKey = '', force = false, modelId = null) => {
   const params = new URLSearchParams()
   if (periodKey) params.set('period_key', periodKey)
   if (force) params.set('force', 'true')
+  if (modelId) params.set('model_id', modelId)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const res = await fetch(`${BASE}/groups/${gid}/monthly/generate${qs}`, { method: 'POST' })
   const data = await res.json()
@@ -235,13 +243,31 @@ export const getAnnualAwards = (gid, year) =>
   request(`/groups/${gid}/annual-awards/${year}`)
 export const getMemberAwards = (gid, memberId) =>
   request(`/groups/${gid}/member/${memberId}/awards`)
-export async function generateAnnual(gid, year = 0, force = false) {
+export async function generateAnnual(gid, year = 0, force = false, modelId = null) {
   const params = new URLSearchParams()
   if (year) params.set('year', year)
   if (force) params.set('force', 'true')
+  if (modelId) params.set('model_id', modelId)
   const qs = params.toString()
   const res = await fetch(`${BASE}/groups/${gid}/annual/generate${qs ? '?' + qs : ''}`, { method: 'POST' })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data
 }
+
+// ==================== 模型配置 v0.12.0 ====================
+
+export const getModelConfigs = () => request('/settings/models')
+export const getModelConfig = (id) => request(`/settings/models/${id}`)
+export const createModelConfig = (data) =>
+  request('/settings/models', { method: 'POST', body: JSON.stringify(data) })
+export const updateModelConfig = (id, data) =>
+  request(`/settings/models/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteModelConfig = (id) =>
+  request(`/settings/models/${id}`, { method: 'DELETE' })
+export const setDefaultModel = (id) =>
+  request(`/settings/models/${id}/set-default`, { method: 'POST' })
+export const checkModelHealth = (id) =>
+  request(`/settings/models/${id}/health`)
+export const getModelDefaults = () => request('/settings/defaults')
+

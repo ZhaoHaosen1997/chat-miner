@@ -297,14 +297,16 @@ async def analyze_daily_chat(
     chat_text: str,
     msg_count: int,
     model: str = "",
+    model_config: dict | None = None,
     task=None,
     hourly_stats: str = "",
     is_private: bool = False,
 ) -> dict:
     """分析一天的群聊内容，生成每日报告
 
-    通过 5 步子任务管道执行：话题 → 搞笑发言 → 情绪 → 关键词 → 总结
-    每个子任务独立调用 Ollama，降低单次复杂度，提高 9B 模型成功率。
+    v0.12.0: 支持通过 model_config dict 选择模型和管线路线。
+    - model_config["model_type"] == "online" → 单次调用在线管线
+    - model_config["model_type"] == "local" → 8 子任务本地管线（兼容旧版）
 
     is_private: 私聊模式，prompt 自动适配话术（群聊→聊天、群友→对方）
 
@@ -312,19 +314,44 @@ async def analyze_daily_chat(
         {"success": bool, "data": dict, "error": str, "model": str, "duration_ms": int}
     """
     import time as _time
-    from services.pipelines import run_daily_pipeline
+    from services.pipelines import run_daily_pipeline, run_daily_pipeline_online
 
-    logger.info(f"开始分析 {group_name} {date}: {msg_count} 条消息, {len(chat_text)} 字符 (pipeline模式)")
+    # v0.12.0: 优先使用 model_config；否则用 model 参数（向后兼容）
+    if model_config is None:
+        from services.model_config import get_effective_model
+        model_config = get_effective_model("local")
+        if model:
+            model_config["model_name"] = model
+
+    is_online = model_config.get("model_type") == "online"
+    pipeline_label = "online单次" if is_online else "pipeline"
+
+    logger.info(
+        f"开始分析 {group_name} {date}: {msg_count} 条消息, "
+        f"{len(chat_text)} 字符 ({pipeline_label}模式, 模型={model_config.get('model_name')})"
+    )
 
     start = _time.time()
     try:
-        data = await run_daily_pipeline(chat_text, group_name, date, msg_count, task, hourly_stats, is_private=is_private)
+        if is_online:
+            data = await run_daily_pipeline_online(
+                chat_text, group_name, date, msg_count,
+                model_config=model_config, task=task,
+                hourly_stats=hourly_stats, is_private=is_private,
+            )
+        else:
+            data = await run_daily_pipeline(
+                chat_text, group_name, date, msg_count, task,
+                hourly_stats, is_private,
+                primary_model=model_config.get("model_name", ""),
+            )
+
         duration = int((_time.time() - start) * 1000)
         return {
-            "success": True,
+            "success": bool(data),
             "data": data,
-            "error": None,
-            "model": config.OLLAMA_MODEL,
+            "error": None if data else "管线返回空结果",
+            "model": model_config.get("model_name", config.OLLAMA_MODEL),
             "duration_ms": duration,
         }
     except Exception as e:
@@ -336,7 +363,7 @@ async def analyze_daily_chat(
             "success": False,
             "data": None,
             "error": str(e),
-            "model": config.OLLAMA_MODEL,
+            "model": model_config.get("model_name", config.OLLAMA_MODEL),
             "duration_ms": duration,
         }
 

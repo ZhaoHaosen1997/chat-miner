@@ -276,6 +276,23 @@ def init_db():
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
     """)
+    # v0.12.0: 模型配置
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS model_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            model_type TEXT NOT NULL DEFAULT 'local',
+            endpoint TEXT NOT NULL DEFAULT '',
+            api_key TEXT NOT NULL DEFAULT '',
+            model_name TEXT NOT NULL,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            extra_params TEXT DEFAULT '',
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    _seed_model_configs_from_env(conn)
     # v0.11.0: 年度奖项
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS annual_awards (
@@ -309,6 +326,29 @@ def init_db():
     conn.close()
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
+
+
+def _seed_model_configs_from_env(conn):
+    """首次启动时，如果 model_configs 为空，从 .env 播种默认模型配置"""
+    count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
+    if count > 0:
+        return  # 已有配置，不覆盖
+
+    # 播种 Ollama 本地默认模型
+    conn.execute(
+        """INSERT INTO model_configs (name, model_type, endpoint, model_name, is_default)
+           VALUES (?, 'local', ?, ?, 1)""",
+        ("Ollama (env)", config.OLLAMA_HOST, config.OLLAMA_MODEL)
+    )
+
+    # 如果配置了 DeepSeek API Key，播种在线默认模型
+    if config.DEEPSEEK_API_KEY:
+        conn.execute(
+            """INSERT INTO model_configs (name, model_type, endpoint, api_key, model_name, is_default)
+               VALUES (?, 'online', ?, ?, ?, 1)""",
+            ("DeepSeek (env)", config.DEEPSEEK_API_URL, config.DEEPSEEK_API_KEY, config.DEEPSEEK_MODEL)
+        )
+    conn.commit()
 
 
 def _migrate_db(conn):
@@ -1289,3 +1329,124 @@ def buy_from_market(group_id: int, wxid: str, date: str,
     conn.commit()
     conn.close()
     return dict(row)
+
+
+# ==================== 模型配置 CRUD v0.12.0 ====================
+
+def list_model_configs() -> list[dict]:
+    """列出所有模型配置，按 model_type + is_default desc 排序"""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM model_configs ORDER BY model_type, is_default DESC, id ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_model_config(config_id: int) -> dict | None:
+    """获取单个模型配置"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM model_configs WHERE id=?", (config_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_model_config(name: str, model_type: str, endpoint: str = "",
+                        api_key: str = "", model_name: str = "",
+                        is_default: bool = False, extra_params: str = "") -> int:
+    """创建模型配置，返回新 ID。若 is_default=True，先清除同类型其他默认"""
+    conn = get_conn()
+    if is_default:
+        conn.execute(
+            "UPDATE model_configs SET is_default=0, updated_at=CURRENT_TIMESTAMP "
+            "WHERE model_type=? AND is_default=1", (model_type,)
+        )
+    cur = conn.execute(
+        """INSERT INTO model_configs (name, model_type, endpoint, api_key, model_name, is_default, extra_params)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (name, model_type, endpoint, api_key, model_name, 1 if is_default else 0, extra_params)
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return new_id
+
+
+def update_model_config(config_id: int, **kwargs) -> bool:
+    """部分更新模型配置。自动维护 is_default 唯一性"""
+    allowed = {"name", "model_type", "endpoint", "api_key", "model_name",
+               "is_default", "extra_params", "is_enabled"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not fields:
+        return False
+
+    conn = get_conn()
+    existing = conn.execute(
+        "SELECT * FROM model_configs WHERE id=?", (config_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        return False
+
+    # 如果设置 is_default=1，先清除同类型其他默认
+    if fields.get("is_default"):
+        model_type = fields.get("model_type", existing["model_type"])
+        conn.execute(
+            "UPDATE model_configs SET is_default=0, updated_at=CURRENT_TIMESTAMP "
+            "WHERE model_type=? AND is_default=1 AND id!=?", (model_type, config_id)
+        )
+
+    fields["updated_at"] = datetime.now().isoformat()
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    values = list(fields.values()) + [config_id]
+    conn.execute(
+        f"UPDATE model_configs SET {set_clause} WHERE id=?",
+        values
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def delete_model_config(config_id: int) -> bool:
+    """删除模型配置。若删除的是默认，自动提升同类型第一条为默认"""
+    conn = get_conn()
+    existing = conn.execute(
+        "SELECT * FROM model_configs WHERE id=?", (config_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        return False
+
+    conn.execute("DELETE FROM model_configs WHERE id=?", (config_id,))
+
+    # 如果删除的是默认模型，提升同类型第一条为默认
+    if existing["is_default"]:
+        first = conn.execute(
+            "SELECT id FROM model_configs WHERE model_type=? AND is_enabled=1 "
+            "ORDER BY id ASC LIMIT 1",
+            (existing["model_type"],)
+        ).fetchone()
+        if first:
+            conn.execute(
+                "UPDATE model_configs SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (first["id"],)
+            )
+
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_default_model(model_type: str) -> dict | None:
+    """获取某类型的默认配置（已启用）"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM model_configs WHERE model_type=? AND is_default=1 AND is_enabled=1 "
+        "ORDER BY id ASC LIMIT 1",
+        (model_type,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None

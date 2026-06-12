@@ -49,6 +49,11 @@ const periodsLoading = ref(false)
 const periodsLoaded = ref(false)
 const showPeriods = ref(true)   // 默认展开
 const generatingPeriod = ref('')  // 正在生成的 period_key
+// v0.12.0: 从设置页读取每日分析默认模型
+function getDailyModelId() {
+  const v = localStorage.getItem('dailyModelId')
+  return v ? parseInt(v) : null
+}
 const showAllWeekly = ref(false)
 const showAllMonthly = ref(false)
 const showAnnualConfirm = ref(false)  // 年报月报不足确认弹窗
@@ -110,7 +115,7 @@ async function analyzeLatest() {
   analyzing.value = true
   const date = latestUnanalyzed.value.date
   try {
-    const result = await analyzeDateAsync(currentGroup.value.id, date)
+    const result = await analyzeDateAsync(currentGroup.value.id, date, getDailyModelId())
     if (result.skipped) {
       skippedDates.value.add(date)
       analyzing.value = false
@@ -129,7 +134,7 @@ async function startAnalyzeAll() {
   if (analyzing.value || activeTaskId.value) return
   analyzing.value = true
   try {
-    const result = await analyzeAll(currentGroup.value.id)
+    const result = await analyzeAll(currentGroup.value.id, getDailyModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
       batchTotal.value = result.total_unanalyzed || 0
@@ -152,6 +157,12 @@ function goReport(date) {
   router.push(`/report/${date}`)
 }
 
+function viewReportFromPopup() {
+  const d = dayPopup.value.date
+  dayPopup.value = null
+  goReport(d)
+}
+
 function openDayPopup(day) {
   dayPopup.value = day
   dayPopupLoading.value = ''
@@ -161,7 +172,7 @@ async function handleGenerateReport() {
   if (!dayPopup.value) return
   dayPopupLoading.value = 'report'
   try {
-    const result = await analyzeDateAsync(gid.value, dayPopup.value.date)
+    const result = await analyzeDateAsync(gid.value, dayPopup.value.date, getDailyModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
@@ -841,7 +852,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
           </div>
           <div class="px-5 py-4 space-y-3">
             <!-- 已分析：查看日报（主按钮） -->
-            <button v-if="dayPopup.analyzed" @click="dayPopup = null; goReport(dayPopup.date)"
+            <button v-if="dayPopup.analyzed" @click="viewReportFromPopup"
               class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold
                      bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition shadow-lg shadow-indigo-200 active:scale-[0.98]">
               <FileText :size="16" />

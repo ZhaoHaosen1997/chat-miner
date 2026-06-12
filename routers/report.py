@@ -54,8 +54,14 @@ async def api_get_analyzed_dates(group_id: int):
     return {"code": 200, "message": "获取成功", "data": dates}
 
 
-async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task):
-    """后台执行：分析 + 保存"""
+async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task, model_id: int = None):
+    """后台执行：分析 + 保存
+
+    v0.12.0: 支持 model_id 选择模型（本地或在线均可）。None=使用本地默认模型。
+    """
+    from services.model_config import get_effective_model, _row_to_config
+    from models.database import get_model_config
+
     chat = get_chat_cache(group_id)
     if not chat:
         task.finish(success=False, error={"type": "data_missing", "detail": "群数据未加载"})
@@ -66,7 +72,19 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
         task.finish(success=False, error={"type": "too_few", "detail": f"仅 {len(text_msgs)} 条文本消息"})
         return
 
-    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL, senders=chat.senders)
+    # v0.12.0: 解析模型配置 — 日报允许本地或在线
+    if model_id is not None:
+        db_config = get_model_config(model_id)
+        if not db_config or not db_config.get("is_enabled", 1):
+            task.finish(success=False, error={"type": "invalid_model", "detail": f"模型 ID={model_id} 不存在或已禁用"})
+            return
+        model_config = _row_to_config(db_config)
+    else:
+        model_config = get_effective_model("local")
+
+    # 根据模型类型决定格式化方式
+    model_name = model_config.get("model_name", config.OLLAMA_MODEL)
+    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
     if len(chat_text) > 100000:
         logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
 
@@ -82,7 +100,8 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task)
         date=date,
         chat_text=chat_text,
         msg_count=len(text_msgs),
-        model=config.OLLAMA_MODEL,
+        model=model_name,
+        model_config=model_config,
         task=task,
         hourly_stats=hourly_stats_str,
         is_private=is_private,
@@ -128,8 +147,11 @@ async def api_delete_report(group_id: int, date: str):
 
 
 @router.post("/analyze/{date}")
-async def api_analyze_date(group_id: int, date: str, force: bool = False):
-    """触发分析某天（带回退缓存检查 + 异步执行）"""
+async def api_analyze_date(group_id: int, date: str, force: bool = False, model_id: int = None):
+    """触发分析某天（带回退缓存检查 + 异步执行）
+
+    v0.12.0: 新增 model_id 参数，支持选择模型。None=使用默认本地模型。
+    """
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -172,7 +194,7 @@ async def api_analyze_date(group_id: int, date: str, force: bool = False):
     task.update("pending", "任务已创建，等待 GPU...")
 
     # 后台执行
-    asyncio.create_task(_run_analyze_and_save(group_id, group["name"], date, task))
+    asyncio.create_task(_run_analyze_and_save(group_id, group["name"], date, task, model_id=model_id))
 
     return {
         "code": 200,
@@ -209,12 +231,29 @@ async def api_get_report(group_id: int, date: str):
     }
 
 
-async def _run_analyze_all(group_id: int, group_name: str, task):
-    """后台执行：批量分析所有未分析日期（从新到旧）"""
+async def _run_analyze_all(group_id: int, group_name: str, task, model_id: int = None):
+    """后台执行：批量分析所有未分析日期（从新到旧）
+
+    v0.12.0: 支持 model_id 选择模型（本地或在线均可）。
+    """
+    from services.model_config import get_effective_model, _row_to_config
+    from models.database import get_model_config
+
     chat = get_chat_cache(group_id)
     if not chat:
         task.finish(success=False, error={"type": "data_missing", "detail": "群数据未加载"})
         return
+
+    # v0.12.0: 批量分析统一使用同一个模型
+    if model_id is not None:
+        db_config = get_model_config(model_id)
+        if not db_config or not db_config.get("is_enabled", 1):
+            task.finish(success=False, error={"type": "invalid_model", "detail": f"模型 ID={model_id} 不存在或已禁用"})
+            return
+        model_config = _row_to_config(db_config)
+    else:
+        model_config = get_effective_model("local")
+    model_name = model_config.get("model_name", config.OLLAMA_MODEL)
 
     all_dates = chat.all_dates()
     analyzed = set(get_analyzed_dates(group_id))
@@ -246,7 +285,7 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
             await asyncio.sleep(1)
             continue
 
-        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=config.OLLAMA_MODEL, senders=chat.senders)
+        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
         # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
         task.update("inference", f"({i+1}/{total}) 分析 {date}...",
                    progress={"current": i, "total": total})
@@ -258,7 +297,8 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
             group_name=group_name, date=date,
             chat_text=chat_text, msg_count=len(text_msgs),
             task=task,
-            model=config.OLLAMA_MODEL,
+            model=model_name,
+            model_config=model_config,
             hourly_stats=hourly_stats_str,
             is_private=len(chat.senders) <= 2,
         )
@@ -302,8 +342,11 @@ async def _run_analyze_all(group_id: int, group_name: str, task):
 
 
 @router.post("/analyze-all")
-async def api_analyze_all(group_id: int):
-    """一键分析全部未分析日期（从新到旧）"""
+async def api_analyze_all(group_id: int, model_id: int = None):
+    """一键分析全部未分析日期（从新到旧）
+
+    v0.12.0: 新增 model_id 参数。
+    """
     group = get_group(group_id)
     if not group:
         raise HTTPException(404, detail="群不存在")
@@ -322,7 +365,7 @@ async def api_analyze_all(group_id: int):
     task = task_manager.create("analyze_all", group_id, {"total": total})
     task.update("pending", f"开始批量分析 {total} 天...", progress={"current": 0, "total": total})
 
-    asyncio.create_task(_run_analyze_all(group_id, group["name"], task))
+    asyncio.create_task(_run_analyze_all(group_id, group["name"], task, model_id=model_id))
 
     return {
         "code": 200,
@@ -518,12 +561,14 @@ async def api_get_weekly(group_id: int, period_key: str):
 
 
 @router.post("/weekly/generate")
-async def api_generate_weekly(group_id: int, period_key: str = "", force: bool = False):
+async def api_generate_weekly(group_id: int, period_key: str = "", force: bool = False,
+                               model_id: int = None):
     """生成周报（异步任务，默认生成最新可用的自然周）
 
     Args:
         period_key: 可选，指定要生成的周（如 '2026-W23'），不传则生成最新可用的周
         force: 强制重新生成，跳过缓存
+        model_id: v0.12.0 可选，指定使用的模型。None=使用在线默认（无则在本地）。
     """
     from services.weekly_report import compute_available_periods, generate_weekly_report
 
@@ -556,7 +601,8 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
     async def _run():
         try:
             result = await generate_weekly_report(group_id, period_key, task, force=force,
-                                                  is_private=len(chat.senders) <= 2)
+                                                  is_private=len(chat.senders) <= 2,
+                                                  model_id=model_id)
             if result["success"]:
                 task.update("done", f"周报 {period_key} 生成完成")
                 task.finish(success=True)
@@ -611,12 +657,14 @@ async def api_get_monthly(group_id: int, period_key: str):
 
 
 @router.post("/monthly/generate")
-async def api_generate_monthly(group_id: int, period_key: str = "", force: bool = False):
+async def api_generate_monthly(group_id: int, period_key: str = "", force: bool = False,
+                                model_id: int = None):
     """生成月报（异步任务，默认生成最新可用的自然月）
 
     Args:
         period_key: 可选，指定要生成的月（如 '2026-06'），不传则生成最新可用的月
         force: 强制重新生成，跳过缓存
+        model_id: v0.12.0 可选，指定使用的模型。None=使用在线默认（无则在本地）。
     """
     from services.weekly_report import compute_available_periods, generate_monthly_report
 
@@ -647,7 +695,8 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
     async def _run():
         try:
             result = await generate_monthly_report(group_id, period_key, task, force=force,
-                                                   is_private=len(chat.senders) <= 2)
+                                                   is_private=len(chat.senders) <= 2,
+                                                   model_id=model_id)
             if result["success"]:
                 task.update("done", f"月报 {period_key} 生成完成")
                 task.finish(success=True)
@@ -684,15 +733,33 @@ async def api_get_annual(group_id: int, year: int):
 
 
 @router.post("/annual/generate")
-async def api_generate_annual(group_id: int, year: int = 0, force: bool = False):
+async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
+                               model_id: int = None):
     """生成年度报告（异步任务）
+
+    v0.12.0: 年报仅支持在线模型。若传入 local 模型 ID 返回 400。
 
     Args:
         year: 年份，0表示生成最新可用年份
         force: 强制重新生成，跳过缓存
+        model_id: v0.12.0 可选，仅支持在线模型。None=使用在线默认。
     """
     from services.weekly_report import compute_available_periods
     from services.annual_report import generate_annual_report
+    from services.model_config import resolve_model_for_report
+
+    # v0.12.0: 年报强制使用在线模型
+    if model_id is not None:
+        try:
+            model_config = resolve_model_for_report("online", requested_model_id=model_id)
+        except ValueError as e:
+            raise HTTPException(400, detail=str(e))
+    else:
+        # 检查在线模型是否可用
+        try:
+            model_config = resolve_model_for_report("online", requested_model_id=None)
+        except Exception:
+            raise HTTPException(400, detail="年报需要在线模型，但当前无可用在线模型。请在设置中配置并启用在线模型。")
 
     group = get_group(group_id)
     if not group:
@@ -731,7 +798,8 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False)
     async def _run():
         try:
             result = await generate_annual_report(
-                group_id, year, chat, task=task, force=force)
+                group_id, year, chat, task=task, force=force,
+                model_config=model_config)
             if result["success"]:
                 task.update("done", f"{year}年度报告生成完成")
                 task.finish(success=True)

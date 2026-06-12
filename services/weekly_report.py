@@ -934,13 +934,78 @@ def _build_monthly_prompt(aggregated: dict, date_start: str, date_end: str,
 async def _ai_generate(system_prompt: str, user_prompt: str,
                        model: str = "", json_mode: bool = True,
                        temperature: float = 0.8, max_tokens: int = 4096,
-                       thinking: bool = False) -> dict:
-    """调用 DeepSeek V4 Flash 生成，失败时降级到本地 Ollama
+                       thinking: bool = False,
+                       model_config: dict | None = None) -> dict:
+    """AI 生成入口，支持在线/本地模型 + 降级
 
-    v0.7.2: 默认 temperature 0.8（创意输出），max_tokens 4096。
-    月报开启 thinking=True 获得更深推理。
+    v0.12.0: 优先使用 model_config 选择模型和端点。
+    若 model_config 为 None 或 model_config["model_type"]=="online" 且无 api_key，
+    则回退到旧版 DeepSeek → Ollama 降级逻辑。
+
+    Args:
+        model_config: v0.12.0 模型配置 dict。若为 None 则使用旧版 DeepSeek 逻辑。
     """
-    # 优先用 DeepSeek V4 Flash
+    # v0.12.0: 使用 model_config 路由
+    if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
+        from services.online_model import call_online_chat
+        result = await call_online_chat(
+            system_prompt, user_prompt,
+            model_config=model_config,
+            temperature=temperature,
+            json_mode=json_mode,
+            max_tokens=max_tokens,
+            thinking=thinking,
+        )
+        if result["success"] and result["data"]:
+            return result
+        # 在线模型失败 → 降级到本地
+        logger.warning(f"在线模型不可用，降级到本地: {result.get('error')}")
+        from services.model_config import get_effective_model
+        try:
+            local_cfg = get_effective_model("local")
+            from services.analyzer import call_ollama_chat
+            ollama_result = await call_ollama_chat(system_prompt, user_prompt, model=local_cfg.get("model_name", ""))
+            if ollama_result["success"] and ollama_result["data"]:
+                return {
+                    "success": True,
+                    "data": ollama_result["data"],
+                    "model": ollama_result.get("model", config.OLLAMA_MODEL),
+                    "duration_ms": ollama_result.get("duration_ms", 0),
+                    "fallback": True,
+                }
+        except Exception as e:
+            logger.warning(f"本地降级也失败: {e}")
+        return result  # 返回在线模型的错误
+
+    if model_config and model_config.get("model_type") == "local":
+        # 直接使用本地模型
+        from services.analyzer import call_ollama_chat
+        result = await call_ollama_chat(system_prompt, user_prompt, model=model_config.get("model_name", ""))
+        if result["success"] and result["data"]:
+            return result
+        # 本地失败 → 尝试在线降级
+        logger.warning(f"本地模型失败，尝试在线降级: {result.get('error')}")
+        from services.model_config import get_effective_model
+        try:
+            online_cfg = get_effective_model("online")
+            if online_cfg.get("api_key"):
+                from services.online_model import call_online_chat
+                online_result = await call_online_chat(
+                    system_prompt, user_prompt,
+                    model_config=online_cfg,
+                    temperature=temperature,
+                    json_mode=json_mode,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                )
+                if online_result["success"] and online_result["data"]:
+                    return online_result
+        except Exception:
+            pass
+        return result
+
+    # 旧版降级：DeepSeek → Ollama
+    from services.online_model import call_deepseek_chat
     result = await call_deepseek_chat(
         system_prompt, user_prompt,
         model=model or config.DEEPSEEK_MODEL,
@@ -1028,7 +1093,7 @@ def _parse_ai_json(raw_data) -> dict:
 
 async def generate_weekly_report(
     group_id: int, period_key: str, task=None, force: bool = False,
-    is_private: bool = False,
+    is_private: bool = False, model_id: int = None,
 ) -> dict:
     """生成指定自然周的周报
 
@@ -1036,16 +1101,26 @@ async def generate_weekly_report(
 
     v0.7.2: 优先使用新管道（Python统计+匿名化采样→DeepSeek V4 Flash）
     降级路径：原始消息不足时回退到旧日报聚合模式
+    v0.12.0: 新增 model_id 参数，支持模型选择。
 
     Args:
         group_id: 群 ID
         period_key: 周标识，如 '2026-W23'
         task: 可选的 TaskInfo，用于 SSE 进度推送
         force: 强制重新生成，跳过缓存
+        model_id: v0.12.0 可选模型 ID。None=在线默认（无则在本地）。
 
     Returns:
         {"success": bool, "data": dict, "error": str, "cached": bool}
     """
+    from services.model_config import resolve_model_for_report, get_effective_model
+
+    # v0.12.0: 解析模型配置（优先在线，无则本地）
+    try:
+        model_config = resolve_model_for_report("online", requested_model_id=model_id)
+    except ValueError:
+        model_config = get_effective_model("local")
+
     # 检查缓存（force 时跳过）
     if not force:
         existing = get_periodic_report(group_id, "weekly", period_key)
@@ -1112,6 +1187,7 @@ async def generate_weekly_report(
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.WEEKLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_WEEKLY,
+            model_config=model_config,
         )
 
         if not ai_result["success"]:
@@ -1186,7 +1262,7 @@ async def generate_weekly_report(
         ai_result = await _ai_generate(
             _adapt_prompt(WEEKLY_SYSTEM_PROMPT) if is_private else WEEKLY_SYSTEM_PROMPT,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
-            json_mode=True)
+            json_mode=True, model_config=model_config)
 
         if not ai_result["success"]:
             return {
@@ -1246,21 +1322,30 @@ async def generate_weekly_report(
 
 async def generate_monthly_report(
     group_id: int, period_key: str, task=None, force: bool = False,
-    is_private: bool = False,
+    is_private: bool = False, model_id: int = None,
 ) -> dict:
     """生成指定自然月的月报
 
     is_private: 私聊模式，将 prompt 中的"群聊"替换为"聊天"、"群友"替换为"对方"
+    v0.12.0: 新增 model_id 参数，支持模型选择。
 
     Args:
         group_id: 群 ID
         period_key: 月标识，如 '2026-06'
         task: 可选的 TaskInfo
         force: 强制重新生成，跳过缓存
+        model_id: v0.12.0 可选模型 ID。None=在线默认（无则在本地）。
 
     Returns:
         {"success": bool, "data": dict, "error": str, "cached": bool}
     """
+    from services.model_config import resolve_model_for_report, get_effective_model
+
+    # v0.12.0: 解析模型配置（优先在线，无则本地）
+    try:
+        model_config = resolve_model_for_report("online", requested_model_id=model_id)
+    except ValueError:
+        model_config = get_effective_model("local")
     # 检查缓存（force 时跳过）
     if not force:
         existing = get_periodic_report(group_id, "monthly", period_key)
@@ -1409,7 +1494,7 @@ async def generate_monthly_report(
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.MONTHLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_MONTHLY,
-            thinking=True,
+            thinking=True, model_config=model_config,
         )
 
         if not ai_result["success"]:
@@ -1497,7 +1582,7 @@ async def generate_monthly_report(
             _adapt_prompt(MONTHLY_SYSTEM_PROMPT) if is_private else MONTHLY_SYSTEM_PROMPT,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             model=config.DEEPSEEK_REASONER_MODEL,
-            json_mode=True,
+            json_mode=True, model_config=model_config,
         )
 
         if not ai_result["success"]:

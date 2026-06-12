@@ -87,9 +87,12 @@ ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼
 
 
 async def generate_annual_report(group_id: int, year: int, chat,
-                                  task=None, force: bool = False) -> dict:
+                                  task=None, force: bool = False,
+                                  model_config: dict | None = None) -> dict:
     """
     主入口：生成年度报告 + 颁奖典礼
+
+    v0.12.0: 新增 model_config 参数。年报仅支持在线模型。
 
     Returns:
         {"success": bool, "data": dict, "error": str, "cached": bool, "model_used": str}
@@ -145,6 +148,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
         max_tokens=16384,
         json_mode=True,
         thinking=True,
+        model_config=model_config,
     )
 
     if not ai_result["success"]:
