@@ -52,6 +52,7 @@ async def call_online_chat(
     json_mode: bool = False,
     thinking: bool = False,
     max_tokens: int = 0,
+    timeout: int = 0,
 ) -> dict:
     """通用在线模型调用（OpenAI 兼容 API）
 
@@ -95,7 +96,7 @@ async def call_online_chat(
     else:
         max_tokens = max_tokens or 4096
 
-    timeout = config.DEEPSEEK_TIMEOUT  # 使用统一超时配置
+    timeout = timeout or config.DEEPSEEK_TIMEOUT  # 优先调用方指定，否则统一超时配置
     api_url = _build_api_url(endpoint)
 
     messages = [
@@ -111,7 +112,7 @@ async def call_online_chat(
         "max_tokens": max_tokens,
     }
 
-    if thinking:
+    if thinking and model_name.lower().startswith("deepseek"):
         payload["thinking"] = {"type": "enabled"}
 
     if json_mode:
@@ -224,6 +225,7 @@ async def call_deepseek_chat(
         system_prompt, user_prompt, model_config,
         temperature=temperature, json_mode=json_mode,
         thinking=thinking, max_tokens=max_tokens,
+        timeout=timeout,
     )
 
 

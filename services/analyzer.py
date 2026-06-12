@@ -347,10 +347,11 @@ async def analyze_daily_chat(
             )
 
         duration = int((_time.time() - start) * 1000)
+        is_cancelled = task and hasattr(task, '_cancelled') and task._cancelled
         return {
-            "success": bool(data),
+            "success": bool(data) or is_cancelled,  # 取消不算失败
             "data": data,
-            "error": None if data else "管线返回空结果",
+            "error": None if (data or is_cancelled) else "管线返回空结果",
             "model": model_config.get("model_name", config.OLLAMA_MODEL),
             "duration_ms": duration,
         }

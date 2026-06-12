@@ -718,7 +718,6 @@ async def run_daily_pipeline_online(
         task.update("inference", "在线模型失败，切换到本地模型...")
     try:
         local_config = get_effective_model("local")
-        # 设置 task 的 model_used 为本地模型（在 run_daily_pipeline 中会设）
         return await run_daily_pipeline(
             chat_text=chat_text,
             group_name=group_name,
@@ -727,6 +726,7 @@ async def run_daily_pipeline_online(
             task=task,
             hourly_stats=hourly_stats,
             is_private=is_private,
+            primary_model=local_config.get("model_name", ""),
         )
     except Exception as e2:
         logger.error(f"本地管线降级也失败: {e2}")

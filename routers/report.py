@@ -756,9 +756,8 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
             raise HTTPException(400, detail=str(e))
     else:
         # 检查在线模型是否可用
-        try:
-            model_config = resolve_model_for_report("online", requested_model_id=None)
-        except Exception:
+        model_config = resolve_model_for_report("online", requested_model_id=None)
+        if not model_config.get("api_key"):
             raise HTTPException(400, detail="年报需要在线模型，但当前无可用在线模型。请在设置中配置并启用在线模型。")
 
     group = get_group(group_id)

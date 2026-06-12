@@ -1118,7 +1118,8 @@ async def generate_weekly_report(
     # v0.12.0: 解析模型配置（优先在线，无则本地）
     try:
         model_config = resolve_model_for_report("online", requested_model_id=model_id)
-    except ValueError:
+    except ValueError as e:
+        logger.warning(f"周报模型解析失败 (model_id={model_id}): {e}，回退到本地默认模型")
         model_config = get_effective_model("local")
 
     # 检查缓存（force 时跳过）
@@ -1344,7 +1345,8 @@ async def generate_monthly_report(
     # v0.12.0: 解析模型配置（优先在线，无则本地）
     try:
         model_config = resolve_model_for_report("online", requested_model_id=model_id)
-    except ValueError:
+    except ValueError as e:
+        logger.warning(f"月报模型解析失败 (model_id={model_id}): {e}，回退到本地默认模型")
         model_config = get_effective_model("local")
     # 检查缓存（force 时跳过）
     if not force:
