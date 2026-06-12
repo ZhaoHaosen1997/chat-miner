@@ -25,10 +25,9 @@ from services.online_model import call_deepseek_chat
 from services.stats_engine import (
     compute_activity_stats, compute_language_stats,
     compute_message_style, compute_topic_role,
-    WECHAT_EMOJI_PATTERN, strip_mentions,
 )
 from services.weekly_report import (
-    _build_alias_map, _anonymize_messages, _de_anonymize_ai_output,
+    _build_alias_map, _de_anonymize_ai_output,
     _ai_generate,
 )
 
@@ -151,20 +150,12 @@ async def generate_annual_report(group_id: int, year: int, chat,
     if not ai_result["success"]:
         return {"success": False, "error": f"AI 生成失败: {ai_result.get('error', '未知错误')}"}
 
-    # 7. 解析 AI 输出
-    try:
-        ai_data = json.loads(ai_result["data"])
-    except json.JSONDecodeError:
-        # 尝试从 AI 回复中提取 JSON
-        text = ai_result["data"]
-        match = re.search(r'\{[\s\S]*\}', text)
-        if match:
-            try:
-                ai_data = json.loads(match.group())
-            except json.JSONDecodeError:
-                return {"success": False, "error": "AI 返回格式异常，无法解析 JSON"}
-        else:
-            return {"success": False, "error": "AI 返回格式异常，无法解析 JSON"}
+    # 7. 解析 AI 输出（复用 weekly_report 的 _parse_ai_json，它安全处理 dict/str）
+
+    from services.weekly_report import _parse_ai_json
+    ai_data = _parse_ai_json(ai_result["data"])
+    if not ai_data:
+        return {"success": False, "error": "AI 返回格式异常，无法解析 JSON"}
 
     # 8. 解析奖项（用 #N 编号映射成员，避免名字替换污染）
     member_index = raw_data["member_index"]  # [{wxid, alias, detail}, ...]
@@ -176,6 +167,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
 
     awards = ai_data.get("annual_awards", [])
     saved_awards = []
+    skipped_awards = 0
     for award in awards:
         winner_raw = str(award.get("winner", "")).strip()
         # 解析 #N 格式
@@ -189,16 +181,19 @@ async def generate_annual_report(group_id: int, year: int, chat,
         else:
             member_id = 0
             display_name = winner_raw
+            logger.warning("无法解析获奖者: winner=%s (期望 #N 格式，N=1~%d)", winner_raw, len(member_index))
 
         # 只脱敏颁奖词（奖项名是纯标题，不需要脱敏）
         reason = award.get("award_reason", "")
         if reason:
-            reason = _de_anonymize_text(reason, reverse_map)
+            reason = _de_anonymize_ai_output(reason, reverse_map)
 
         # 验证奖项名（过滤被污染的）
         award_name = award.get("award_name", "").strip()
         if not award_name or len(award_name) < 3 or award_name in ("null", "None", ""):
-            continue  # 跳过无效奖项
+            logger.warning("跳过无效奖项名: award_name=%r, winner=%s", award_name, winner_raw)
+            skipped_awards += 1
+            continue
 
         if member_id:
             saved_awards.append({
@@ -211,11 +206,16 @@ async def generate_annual_report(group_id: int, year: int, chat,
 
     if saved_awards:
         save_annual_awards(group_id, year, saved_awards)
+        logger.info("年度奖项已保存: group=%d year=%d total=%d saved=%d skipped=%d",
+                    group_id, year, len(awards), len(saved_awards), skipped_awards)
+    else:
+        logger.warning("年度奖项全部被过滤: group=%d year=%d total=%d skipped=%d",
+                       group_id, year, len(awards), skipped_awards)
 
     # 脱敏叙事内容（不含奖项名）
     for key in ("year_narrative", "group_evolution", "meme_of_the_year", "next_year_wish"):
         if key in ai_data:
-            ai_data[key] = _de_anonymize_text(ai_data[key], reverse_map)
+            ai_data[key] = _de_anonymize_ai_output(ai_data[key], reverse_map)
 
     # 10. 组装年度报告
     date_start = year_dates[0]
@@ -223,7 +223,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
     day_count = len(year_dates)
 
     report = {
-        "_version": "0.11.0",
+        "_version": "0.11.1",
         "year": year,
         "date_start": date_start,
         "date_end": date_end,
@@ -290,14 +290,15 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
     从原始消息中提取年度统计数据 + 匿名化采样
     返回: {stats, sampled_msgs, member_summary, alias_map, reverse_map, member_map, name_to_wxid}
     """
-    # 1. 收集全年文本消息
+    # 1. 收集全年文本消息（使用 chunk_by_date 避免 O(D×M) 全量扫描）
     by_date_msgs = {}
     total_text = 0
+    chunked = chat.chunk_by_date()
 
     for date_str in dates:
-        msgs = [m for m in chat.messages
-                if m.get("formattedTime", "").startswith(date_str)
-                and m.get("type") in ("文本消息", "引用消息")
+        day_msgs = chunked.get(date_str, [])
+        msgs = [m for m in day_msgs
+                if m.get("type") in ("文本消息", "引用消息")
                 and (m.get("content") or "").strip()]
         if msgs:
             by_date_msgs[date_str] = msgs
@@ -336,12 +337,14 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
 
     all_wxids = set(all_member_msgs.keys())
     member_name_set = set(member_names.values())
+    # 构建全部消息列表，供 compute_topic_role 正确计算 initiation_rate 和 reply_count
+    all_msgs_flat = [m for msgs_list in all_member_msgs.values() for m in msgs_list]
 
     for wxid, msgs in all_member_msgs.items():
         activity = compute_activity_stats(msgs, wxid)
         language = compute_language_stats(msgs, wxid, member_names=member_name_set)
         style = compute_message_style(language, activity)
-        role = compute_topic_role(msgs, wxid, all_wxids)
+        role = compute_topic_role(all_msgs_flat, wxid, all_wxids)
         member_stats[wxid] = {
             "msg_count": activity["total_messages"],
             "days_active": activity["total_days_active"],
@@ -453,25 +456,18 @@ def _anonymize_content(content: str, alias_map: dict[str, str]) -> str:
     for real_name, alias in sorted_names:
         if real_name and len(real_name) > 1:
             content = content.replace(real_name, alias)
+    # 注意：模式顺序很重要！更具体的必须放前面
     for pattern, replacement in [
         (re.compile(r'\d{6}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'), '[身份证]'),
         (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[邮箱]'),
         (re.compile(r'1[3-9]\d{9}'), '[手机号]'),
+        (re.compile(r'\d{3,4}-\d{7,8}'), '[电话号码]'),              # 座机号码
     ]:
         content = pattern.sub(replacement, content)
     return content
 
 
-def _de_anonymize_text(text: str, reverse_map: dict[str, str]) -> str:
-    """将文本中的别名还原为真实名（仅单字符串，不递归）"""
-    if not text or not reverse_map:
-        return text
-    # 按别名长度降序替换
-    sorted_aliases = sorted(reverse_map.items(), key=lambda x: len(x[0]), reverse=True)
-    for alias, real_name in sorted_aliases:
-        if alias and len(alias) > 1:
-            text = text.replace(alias, real_name)
-    return text
+# _de_anonymize_ai_output 已从 services.weekly_report 导入，直接使用，不重复定义
 
 
 def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: int) -> str:

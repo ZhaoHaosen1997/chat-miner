@@ -347,6 +347,9 @@ async function _executeAnnualGenerate(periodKey, force = false) {
     const result = await generateAnnual(currentGroup.value.id, parseInt(periodKey), force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+    } else {
+      // API 返回 code=200 但 data=null（如数据不足），清除 generating 状态
+      generatingPeriod.value = ''
     }
   } catch (e) { console.error(e); generatingPeriod.value = '' }
 }

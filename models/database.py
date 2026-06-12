@@ -4,6 +4,7 @@
 """
 import sqlite3
 import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from config import config
@@ -888,6 +889,25 @@ def get_member_awards(group_id: int, member_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_member_awards_batch(group_id: int, member_ids: list[int]) -> dict[int, list[dict]]:
+    """批量获取多个成员的奖项，返回 {member_id: [award_dict, ...]}"""
+    if not member_ids:
+        return {}
+    conn = get_conn()
+    placeholders = ','.join('?' * len(member_ids))
+    rows = conn.execute(
+        f"""SELECT * FROM annual_awards
+            WHERE group_id=? AND member_id IN ({placeholders})
+            ORDER BY member_id, year DESC, id""",
+        [group_id] + member_ids
+    ).fetchall()
+    conn.close()
+    result = defaultdict(list)
+    for r in rows:
+        result[r["member_id"]].append(dict(r))
+    return dict(result)
 
 
 def delete_annual_awards(group_id: int, year: int) -> bool:

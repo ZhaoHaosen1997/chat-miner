@@ -44,6 +44,10 @@ async function startGenerate() {
     const result = await generateAnnual(currentGroup.value.id, parseInt(props.yearId))
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+    } else {
+      // API 返回 code=200 但 data=null（如数据不足），清除 generating 状态
+      generating.value = false
+      error.value = 'not_generated'
     }
   } catch (e) {
     error.value = e.message

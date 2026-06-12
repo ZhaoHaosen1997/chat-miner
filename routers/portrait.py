@@ -30,7 +30,11 @@ async def api_get_portraits(group_id: int):
     from models.database import get_portraits as db_get_portraits
     portraits = db_get_portraits(group_id)
 
-    from models.database import get_member_awards as db_get_member_awards
+    from models.database import get_member_awards_batch
+
+    # 批量获取所有成员的奖项（避免 N+1 查询）
+    member_ids = [p["member_id"] for p in portraits]
+    awards_map = get_member_awards_batch(group_id, member_ids) if member_ids else {}
 
     result = []
     for p in portraits:
@@ -43,7 +47,7 @@ async def api_get_portraits(group_id: int):
         member = get_member(group_id, p["member_id"])
 
         # 获取该成员奖项（最多返回最近3个）
-        awards = db_get_member_awards(group_id, p["member_id"])
+        awards = awards_map.get(p["member_id"], [])
         award_summary = None
         if awards:
             award_summary = {
