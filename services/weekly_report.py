@@ -926,7 +926,16 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
         try:
             local_cfg = get_effective_model("local")
             from services.analyzer import call_ollama_chat
-            ollama_result = await call_ollama_chat(system_prompt, user_prompt, model=local_cfg.get("model_name", ""))
+            # v0.13.4: 本地模型上下文有限，截断 prompt 防卡死
+            truncated_user = user_prompt
+            if len(user_prompt) > 3000:
+                truncated_user = user_prompt[:3000] + "\n\n（内容过长已截断，请基于已有数据生成）"
+                logger.info(f"本地模型降级：prompt 从 {len(user_prompt)} 截断至 3000 字符")
+            ollama_result = await call_ollama_chat(
+                system_prompt, truncated_user,
+                model=local_cfg.get("model_name", ""),
+                timeout=180,  # 本地模型给 3 分钟
+            )
             if ollama_result["success"] and ollama_result["data"]:
                 return {
                     "success": True,
@@ -935,14 +944,26 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
                     "duration_ms": ollama_result.get("duration_ms", 0),
                     "fallback": True,
                 }
+            else:
+                logger.warning(f"本地降级也失败: {ollama_result.get('error')}")
+                return ollama_result  # 返回本地模型的错误
         except Exception as e:
-            logger.warning(f"本地降级也失败: {e}")
+            logger.warning(f"本地降级异常: {e}")
         return result  # 返回在线模型的错误
 
     if model_config and model_config.get("model_type") == "local":
         # 直接使用本地模型
         from services.analyzer import call_ollama_chat
-        result = await call_ollama_chat(system_prompt, user_prompt, model=model_config.get("model_name", ""))
+        # v0.13.4: 本地模型上下文有限，截断过长 prompt
+        truncated_user = user_prompt
+        if len(user_prompt) > 3000:
+            truncated_user = user_prompt[:3000] + "\n\n（内容过长已截断，请基于已有数据生成）"
+            logger.info(f"本地模型：prompt 从 {len(user_prompt)} 截断至 3000 字符")
+        result = await call_ollama_chat(
+            system_prompt, truncated_user,
+            model=model_config.get("model_name", ""),
+            timeout=180,
+        )
         if result["success"] and result["data"]:
             return result
         # 本地失败 → 尝试在线降级
@@ -1139,8 +1160,14 @@ async def generate_weekly_report(
             use_new_pipeline = True
             logger.info(f"周报使用新管道: {period_key}, {total_msgs}条消息")
 
+    # v0.13.4: 本地模型上下文有限，降级到旧管道（基于日报聚合，prompt 更短）
+    is_local_model = model_config.get("model_type") == "local"
+    if is_local_model and use_new_pipeline:
+        logger.info(f"周报检测到本地模型，切换旧管道（prompt 较短）")
+        use_new_pipeline = False  # 强制走旧管道
+
     if use_new_pipeline:
-        # 新版 prompt
+        # 新版 prompt（仅在线模型使用）
         if task:
             task.update("inference", f"📋 {model_config.get('model_name', 'AI')} 生成周报中...")
 
@@ -1445,6 +1472,12 @@ async def generate_monthly_report(
                         logger.info(f"词频突变检测: {len(bursting)} 个候选词")
             except Exception as e:
                 logger.warning(f"词频突变检测失败: {e}")
+
+    # v0.13.4: 本地模型上下文有限，降级到旧管道
+    is_local_model_monthly = model_config.get("model_type") == "local"
+    if is_local_model_monthly and use_new_pipeline:
+        logger.info(f"月报检测到本地模型，切换旧管道（prompt 较短）")
+        use_new_pipeline = False
 
     if use_new_pipeline:
         if task:
