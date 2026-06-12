@@ -8,10 +8,10 @@ export async function apiGet(url) {
   const res = await fetch(`${BASE}${url}`)
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
-  return data
+  return data.data  // v0.13.2: 统一返回 data.data，与 request() 一致
 }
 
-async function request(url, options = {}) {
+export async function request(url, options = {}) {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,

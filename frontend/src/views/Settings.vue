@@ -112,6 +112,16 @@ function closeForm() {
 }
 
 async function saveForm() {
+  // v0.13.2: 解析 extra_params 确保是对象，避免 JSON.stringify 双重编码
+  let extraParams = ''
+  if (form.value.extra_params && form.value.extra_params.trim()) {
+    try {
+      const parsed = JSON.parse(form.value.extra_params)
+      extraParams = typeof parsed === 'object' ? JSON.stringify(parsed) : form.value.extra_params
+    } catch {
+      extraParams = form.value.extra_params  // 解析失败，原样发送
+    }
+  }
   const payload = {
     name: form.value.name,
     model_type: form.value.model_type,
@@ -119,7 +129,7 @@ async function saveForm() {
     api_key: form.value.api_key === '••••••••' ? '' : form.value.api_key,
     model_name: form.value.model_name,
     is_default: form.value.is_default,
-    extra_params: form.value.extra_params,
+    extra_params: extraParams,
   }
 
   if (editingId.value) {

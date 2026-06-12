@@ -357,6 +357,12 @@ const unanalyzedCount = computed(() =>
       <Loader2 class="w-8 h-8 animate-spin text-indigo-400" />
     </div>
 
+    <!-- v0.13.2: 错误状态 -->
+    <div v-else-if="error" class="card p-8 text-center">
+      <p class="text-red-400 mb-2">加载失败：{{ error }}</p>
+      <button @click="load()" class="text-sm text-indigo-500 hover:text-indigo-600">重试</button>
+    </div>
+
     <!-- 关系网络视图 -->
     <div v-if="viewMode === 'network'" class="card p-4 animate-scale-in">
       <!-- 图例 -->

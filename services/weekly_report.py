@@ -662,38 +662,6 @@ MONTHLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本月（{dat
   "next_month_preview": "下月展望（40-60字）"
 }}"""
 
-MONTHLY_SYSTEM_PROMPT = """你是一个群聊分析师，负责写群聊月报。风格要求：
-- 深刻有洞察，但也轻松有趣
-- 能发现月度趋势和社群变迁
-- 不要套话、不要模板化
-- 用中文，长度控制在要求范围内"""
-
-MONTHLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本月（{date_start} ~ {date_end}）的月报。
-
-【基本信息】
-本月有 {day_count} 天有聊天记录，共 {total_messages} 条消息，日均活跃约 {avg_members} 人。
-{weekly_context}
-
-【每日情绪轨迹】
-{mood_lines}
-
-【热门话题 TOP 5】
-{topics_text}
-
-【关键词云】
-{keywords_text}
-
-【上月对比】
-{prev_month_summary}
-
-请用 JSON 格式输出以下内容（勿输出其他内容）：
-{{
-  "overview": "月度综述（250-300字），本月大事记，话题趋势演变",
-  "atmosphere_diagnosis": "社群氛围诊断（100-150字），本月群氛围特征及对比上月的变化",
-  "member_spotlight": "群友聚光灯（100-150字），2-3位本月最值得关注的成员及原因",
-  "next_month_preview": "下月展望（40-60字）"
-}}"""
-
 # -- v0.7.2 新版月报 prompt --
 MONTHLY_SYSTEM_PROMPT_V2 = """你是一个人类学家+社群分析师+电影预告片编剧的混合体。
 

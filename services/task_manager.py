@@ -30,8 +30,8 @@ class TaskInfo:
         self.duration_ms = 0
         self.steps = []  # [{name, status, duration_ms, model, error}]
         self._start_time = 0.0
-        # SSE 事件队列
-        self._queue: asyncio.Queue = asyncio.Queue()
+        # SSE 事件队列（v0.13.2: 增大队列防丢事件）
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=200)
         # 取消标志
         self._cancelled = False
         # v0.12.4: 降级标记
@@ -57,7 +57,7 @@ class TaskInfo:
         try:
             self._queue.put_nowait(self.to_event())
         except asyncio.QueueFull:
-            pass
+            logger.warning(f"SSE 队列已满，丢弃事件: task={self.task_id} status={status}")
 
     def finish(self, success: bool = True, error: dict = None):
         if success:

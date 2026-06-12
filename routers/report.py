@@ -12,6 +12,7 @@ from config import config
 from models.database import (
     get_group, get_daily_report, save_daily_report, get_analyzed_dates,
     get_recent_reports, log_analysis, update_group_stats,
+    mark_date_analyzing, unmark_date_analyzing, is_date_analyzing,
 )
 from services.analyzer import analyze_daily_chat
 from services.parser import format_messages_for_prompt
@@ -308,6 +309,12 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
 
         task.update("inference", f"分析 {date}...", progress={"current": i, "total": total})
 
+        # v0.13.2: 跳过正在被其他任务分析的日期（防并发重复）
+        if is_date_analyzing(group_id, date):
+            task.update("inference", f"跳过 {date} (正在被其他任务分析)",
+                       progress={"current": i + 1, "total": total})
+            continue
+
         text_msgs = chat.get_text_messages_for_date(date)
         if len(text_msgs) < 5:
             failed += 1
@@ -316,39 +323,43 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
             await asyncio.sleep(1)
             continue
 
-        chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
-        # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
-        task.update("inference", f"({i+1}/{total}) 分析 {date}...",
-                   progress={"current": i, "total": total})
-        day_stats = chat.stats_for_date(date)
-        hourly_lines = [f"{h}:00 - {cnt}条" for h, cnt in
-                        sorted(day_stats.get("hourly_distribution", {}).items()) if cnt > 0]
-        hourly_stats_str = "\n".join(hourly_lines) if hourly_lines else ""
-        result = await analyze_daily_chat(
-            group_name=group_name, date=date,
-            chat_text=chat_text, msg_count=len(text_msgs),
-            task=task,
-            model=model_name,
-            model_config=model_config,
-            hourly_stats=hourly_stats_str,
-            is_private=len(chat.senders) <= 2,
-        )
-
-        if result["success"] and result["data"]:
-            report_json = json.dumps(result["data"], ensure_ascii=False)
-            stats = chat.stats_for_date(date)
-            save_daily_report(
-                group_id=group_id, date=date,
-                message_count=stats["total_messages"],
-                active_members=stats["active_members"],
-                report_json=report_json, model_used=result["model"],
+        mark_date_analyzing(group_id, date)
+        try:
+            chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
+            # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
+            task.update("inference", f"({i+1}/{total}) 分析 {date}...",
+                       progress={"current": i, "total": total})
+            day_stats = chat.stats_for_date(date)
+            hourly_lines = [f"{h}:00 - {cnt}条" for h, cnt in
+                            sorted(day_stats.get("hourly_distribution", {}).items()) if cnt > 0]
+            hourly_stats_str = "\n".join(hourly_lines) if hourly_lines else ""
+            result = await analyze_daily_chat(
+                group_name=group_name, date=date,
+                chat_text=chat_text, msg_count=len(text_msgs),
+                task=task,
+                model=model_name,
+                model_config=model_config,
+                hourly_stats=hourly_stats_str,
+                is_private=len(chat.senders) <= 2,
             )
-            log_analysis(group_id, date, "daily_report", "success",
-                        model_used=result["model"], duration_ms=result["duration_ms"])
-        else:
-            failed += 1
-            log_analysis(group_id, date, "daily_report", "failed",
-                        error_msg=result.get("error", ""))
+
+            if result["success"] and result["data"]:
+                report_json = json.dumps(result["data"], ensure_ascii=False)
+                stats = chat.stats_for_date(date)
+                save_daily_report(
+                    group_id=group_id, date=date,
+                    message_count=stats["total_messages"],
+                    active_members=stats["active_members"],
+                    report_json=report_json, model_used=result["model"],
+                )
+                log_analysis(group_id, date, "daily_report", "success",
+                            model_used=result["model"], duration_ms=result["duration_ms"])
+            else:
+                failed += 1
+                log_analysis(group_id, date, "daily_report", "failed",
+                            error_msg=result.get("error", ""))
+        finally:
+            unmark_date_analyzing(group_id, date)
 
         # 更新进度
         analyzed_count = len(get_analyzed_dates(group_id))

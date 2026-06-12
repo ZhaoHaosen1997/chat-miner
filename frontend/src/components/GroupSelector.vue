@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { listGroups, renameGroup, deleteGroup } from '../api/index.js'
+import { listGroups, renameGroup, deleteGroup, request } from '../api/index.js'
 import { ChevronDown, Upload, Plus, Loader2, Pencil, Trash2, Check, X } from 'lucide-vue-next'
 
 const props = defineProps({ current: Object })
@@ -34,22 +34,15 @@ async function handleCreate() {
   creating.value = true
   createError.value = ''
   try {
-    const BASE = '/api'
-    const res = await fetch(`${BASE}/groups`, {
+    const data = await request('/groups', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
-    const data = await res.json()
-    if (data.code === 200) {
-      await loadGroups()
-      emit('select', { id: data.data.group_id, name: data.data.name, display_name: data.data.name })
-      showCreate.value = false
-      newName.value = ''
-      menuOpen.value = false
-    } else {
-      createError.value = data.message || '创建失败'
-    }
+    await loadGroups()
+    emit('select', { id: data.group_id, name: data.name, display_name: data.name })
+    showCreate.value = false
+    newName.value = ''
+    menuOpen.value = false
   } catch (e) {
     createError.value = e.message || '请求失败'
   } finally {

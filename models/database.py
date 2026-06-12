@@ -647,6 +647,25 @@ def get_analyzed_dates(group_id: int) -> list[str]:
     return [r["date"] for r in rows]
 
 
+# v0.13.2: 分析中日期追踪（防并发 analyze-all 重复处理）
+_analyzing_dates: set[str] = set()
+
+
+def mark_date_analyzing(group_id: int, date: str):
+    """标记日期为分析中"""
+    _analyzing_dates.add(f"{group_id}:{date}")
+
+
+def unmark_date_analyzing(group_id: int, date: str):
+    """取消分析中标记"""
+    _analyzing_dates.discard(f"{group_id}:{date}")
+
+
+def is_date_analyzing(group_id: int, date: str) -> bool:
+    """检查日期是否正在分析中"""
+    return f"{group_id}:{date}" in _analyzing_dates
+
+
 def get_recent_reports(group_id: int, limit: int = 7) -> list[dict]:
     """获取最近的报告摘要"""
     conn = get_conn()

@@ -579,6 +579,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
                                     f"{chat_text}\n\n{_p('headline')['user']}",
                                     model=p_model)
     headline = str(headline_data).strip() if headline_data else ""
+    if headline_data is None:
+        failed_steps.append("headline")
 
     # 8. 名场面（取最佳搞笑发言，AI配花字吐槽）
     scene_commentary = ""
@@ -591,8 +593,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
                                      sc["system"], scene_user,
                                      model=p_model)
         scene_commentary = str(scene_data).strip() if scene_data else ""
-    if headline_data is None:
-        failed_steps.append("headline")
+        if scene_data is None:
+            failed_steps.append("scene_commentary")
 
     # 拼装
     report = {

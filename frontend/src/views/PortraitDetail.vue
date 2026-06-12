@@ -34,6 +34,8 @@ const statsLoading = ref(false)  // 统计数据独立加载，不阻塞页面
 const error = ref('')
 const activeTab = ref('overview')  // overview | activity | language | social | history
 const analyzing = ref(false)
+// v0.13.2: 快速切换成员竞态防护
+let _loadVersion = 0
 
 const tabs = [
   { key: 'overview', label: '概览', icon: User },
@@ -46,6 +48,7 @@ const tabs = [
 
 async function load() {
   if (!currentGroup.value || !props.memberId) return
+  const myVersion = ++_loadVersion
   loading.value = true
   statsLoading.value = true
   error.value = ''
@@ -56,6 +59,7 @@ async function load() {
       getPortraitHistory(currentGroup.value.id, props.memberId).catch(() => null),
       getArchaeology(currentGroup.value.id, props.memberId).catch(() => null),
     ])
+    if (myVersion !== _loadVersion) return  // 竞态：已切换到其他成员
     portrait.value = p
     history.value = h
     archaeology.value = a
@@ -63,11 +67,13 @@ async function load() {
 
     // 第二阶段：后台加载统计数据（计算密集，可能较慢）
     stats.value = await getPortraitStats(currentGroup.value.id, props.memberId).catch(() => null)
+    if (myVersion !== _loadVersion) return  // 竞态检查
   } catch (e) {
+    if (myVersion !== _loadVersion) return
     error.value = e.message
     loading.value = false
   } finally {
-    statsLoading.value = false
+    if (myVersion === _loadVersion) statsLoading.value = false
   }
 }
 
