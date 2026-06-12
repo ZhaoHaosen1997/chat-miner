@@ -14,7 +14,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('frontend/dist', 'frontend/dist'),
-        ('stopwords.txt', '.'),
     ],
     hiddenimports=[
         'uvicorn.logging',

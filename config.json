@@ -1,0 +1,8 @@
+{
+  "_comment": "Chat-Miner 启动配置文件。修改后重启生效。",
+  "host": "0.0.0.0",
+  "port": 8856,
+  "data_dir": "data",
+  "log_dir": "logs",
+  "log_level": "INFO"
+}

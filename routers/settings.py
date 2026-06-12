@@ -1,5 +1,5 @@
 """
-设置 API v0.12.0：模型配置 CRUD + 连通性测试
+设置 API v1.0.2：模型配置 CRUD + 应用设置 + 停用词管理
 """
 import logging
 import httpx
@@ -8,7 +8,9 @@ from pydantic import BaseModel, field_validator
 from config import config
 from models.database import (
     list_model_configs, get_model_config, create_model_config,
-    update_model_config, delete_model_config
+    update_model_config, delete_model_config,
+    get_all_app_settings, upsert_app_setting, upsert_app_settings_batch,
+    get_stopwords_text,
 )
 from services.model_config import _row_to_config, _row_to_response, get_effective_model, mask_api_key
 from services.online_model import check_online_model_health
@@ -223,4 +225,78 @@ async def api_get_defaults():
             "local": local,
             "online": online,
         },
+    }
+
+
+# ==================== 应用设置 v1.0.2 ====================
+
+class AppSettingUpdate(BaseModel):
+    key: str
+    value: str
+
+
+class AppSettingsBatchUpdate(BaseModel):
+    updates: dict[str, str]
+
+
+@router.get("/app-settings")
+async def api_get_app_settings():
+    """获取所有应用设置（敏感字段自动脱敏）"""
+    settings = get_all_app_settings()
+    return {
+        "code": 200,
+        "message": "获取成功",
+        "data": settings,
+    }
+
+
+@router.put("/app-settings")
+async def api_update_app_setting(body: AppSettingUpdate):
+    """更新单个应用设置，即时生效"""
+    upsert_app_setting(body.key, body.value)
+    config.load_from_db()
+    return {
+        "code": 200,
+        "message": f"设置 '{body.key}' 已更新，即时生效",
+        "data": None,
+    }
+
+
+@router.put("/app-settings/batch")
+async def api_update_app_settings_batch(body: AppSettingsBatchUpdate):
+    """批量更新应用设置，即时生效"""
+    upsert_app_settings_batch(body.updates)
+    config.load_from_db()
+    return {
+        "code": 200,
+        "message": f"已更新 {len(body.updates)} 项设置",
+        "data": None,
+    }
+
+
+# ==================== 停用词管理 v1.0.2 ====================
+
+class StopwordsUpdate(BaseModel):
+    text: str
+
+
+@router.get("/stopwords")
+async def api_get_stopwords():
+    """获取停用词文本"""
+    text = get_stopwords_text()
+    return {
+        "code": 200,
+        "message": "获取成功",
+        "data": {"text": text},
+    }
+
+
+@router.put("/stopwords")
+async def api_update_stopwords(body: StopwordsUpdate):
+    """更新停用词文本（下次分析时生效）"""
+    upsert_app_setting("stopwords_text", body.text)
+    return {
+        "code": 200,
+        "message": "停用词已更新，下次分析时生效",
+        "data": None,
     }

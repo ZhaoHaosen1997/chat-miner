@@ -311,6 +311,18 @@ def init_db():
         );
     """)
     _seed_default_model_configs(conn)
+    # v1.0.2: 应用设置（可热更新配置 + 停用词）
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            value_type TEXT NOT NULL DEFAULT 'string',
+            description TEXT NOT NULL DEFAULT '',
+            is_sensitive INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    _seed_app_settings(conn)
     # v0.11.0: 年度奖项
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS annual_awards (
@@ -383,6 +395,58 @@ def _seed_default_model_configs(conn):
         """INSERT INTO model_configs (name, model_type, endpoint, model_name, is_default)
            VALUES (?, 'local', ?, ?, 1)""",
         ("Ollama (本地)", config.OLLAMA_HOST, config.OLLAMA_MODEL)
+    )
+    conn.commit()
+
+
+def _seed_app_settings(conn):
+    """v1.0.2: 首次启动时从 config.py 默认值 + config.DEFAULT_STOPWORDS 初始化 app_settings"""
+    count = conn.execute("SELECT COUNT(*) FROM app_settings").fetchone()[0]
+    if count > 0:
+        return  # 已有配置，不覆盖
+
+    settings = [
+        # 高级：Ollama
+        ("ollama_timeout", str(config.OLLAMA_TIMEOUT), "int",
+         "Ollama 请求超时(秒)"),
+        # 高级：GPU 分布式锁
+        ("gpu_lock_enabled", str(config.GPU_LOCK_ENABLED).lower(), "bool",
+         "GPU 分布式锁开关"),
+        ("gpu_lock_url", config.GPU_LOCK_URL, "string",
+         "GPU 锁服务地址"),
+        ("gpu_lock_who", config.GPU_LOCK_WHO, "string",
+         "GPU 锁持有者标识"),
+        ("gpu_lock_retry_interval", str(config.GPU_LOCK_RETRY_INTERVAL), "int",
+         "GPU 锁重试间隔(秒)"),
+        ("gpu_lock_max_retries", str(config.GPU_LOCK_MAX_RETRIES), "int",
+         "GPU 锁最大重试次数"),
+        # 高级：DeepSeek
+        ("deepseek_timeout", str(config.DEEPSEEK_TIMEOUT), "int",
+         "DeepSeek API 超时(秒)"),
+        ("weekly_temperature", str(config.WEEKLY_TEMPERATURE), "float",
+         "周报 AI 温度(0-2)"),
+        ("monthly_temperature", str(config.MONTHLY_TEMPERATURE), "float",
+         "月报 AI 温度(0-2)"),
+        ("deepseek_max_tokens_weekly", str(config.DEEPSEEK_MAX_TOKENS_WEEKLY), "int",
+         "周报最大输出 Token 数"),
+        ("deepseek_max_tokens_monthly", str(config.DEEPSEEK_MAX_TOKENS_MONTHLY), "int",
+         "月报最大输出 Token 数"),
+        # 高级：画像
+        ("portrait_refresh_days", str(config.PORTRAIT_REFRESH_DAYS), "int",
+         "画像刷新阈值(天)"),
+    ]
+    for key, value, value_type, description in settings:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, value_type, description) "
+            "VALUES (?, ?, ?, ?)",
+            (key, value, value_type, description)
+        )
+
+    # 停用词：从 config.DEFAULT_STOPWORDS 常量导入
+    conn.execute(
+        "INSERT INTO app_settings (key, value, value_type, description) "
+        "VALUES ('stopwords_text', ?, 'string', '用户自定义过滤词')",
+        (config.DEFAULT_STOPWORDS,)
     )
     conn.commit()
 
@@ -1538,3 +1602,121 @@ def get_default_model(model_type: str) -> dict | None:
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ==================== 应用设置 CRUD v1.0.2 ====================
+
+def get_app_setting(key: str) -> dict | None:
+    """获取单个应用设置"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM app_settings WHERE key=?", (key,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_app_settings() -> list[dict]:
+    """列出所有应用设置，敏感字段脱敏"""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM app_settings ORDER BY key"
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("is_sensitive") and d.get("value"):
+            from services.model_config import mask_api_key
+            d["value"] = mask_api_key(d["value"])
+        result.append(d)
+    return result
+
+
+def upsert_app_setting(key: str, value: str) -> bool:
+    """插入或更新单个应用设置"""
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO app_settings (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP""",
+        (key, value)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def upsert_app_settings_batch(updates: dict[str, str]) -> bool:
+    """批量更新应用设置"""
+    if not updates:
+        return False
+    conn = get_conn()
+    for key, value in updates.items():
+        conn.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               updated_at = CURRENT_TIMESTAMP""",
+            (key, value)
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_stopwords_text() -> str:
+    """v1.0.2: 从 DB 获取停用词文本内容"""
+    setting = get_app_setting("stopwords_text")
+    return setting["value"] if setting else ""
+
+
+def load_app_settings_to_config():
+    """v1.0.2: 从 DB 加载可热更新设置到 config 对象（启动时调用）。
+
+    只更新可热加载的设置；HOST/PORT/DATA_DIR/DATABASE_PATH/LOG_DIR 等
+    运行时不可变设置不受影响。
+    """
+    from config import config
+
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT key, value, value_type FROM app_settings"
+    ).fetchall()
+    conn.close()
+
+    type_map = {
+        "int": int,
+        "float": float,
+        "bool": lambda v: v.lower() in ("true", "1", "yes"),
+        "string": str,
+    }
+
+    KEY_ATTR_MAP = {
+        "ollama_timeout": "OLLAMA_TIMEOUT",
+        "gpu_lock_enabled": "GPU_LOCK_ENABLED",
+        "gpu_lock_url": "GPU_LOCK_URL",
+        "gpu_lock_who": "GPU_LOCK_WHO",
+        "gpu_lock_retry_interval": "GPU_LOCK_RETRY_INTERVAL",
+        "gpu_lock_max_retries": "GPU_LOCK_MAX_RETRIES",
+        "deepseek_timeout": "DEEPSEEK_TIMEOUT",
+        "weekly_temperature": "WEEKLY_TEMPERATURE",
+        "monthly_temperature": "MONTHLY_TEMPERATURE",
+        "deepseek_max_tokens_weekly": "DEEPSEEK_MAX_TOKENS_WEEKLY",
+        "deepseek_max_tokens_monthly": "DEEPSEEK_MAX_TOKENS_MONTHLY",
+        "portrait_refresh_days": "PORTRAIT_REFRESH_DAYS",
+    }
+
+    for row in rows:
+        key = row["key"]
+        attr = KEY_ATTR_MAP.get(key)
+        if not attr:
+            continue
+        converter = type_map.get(row["value_type"], str)
+        try:
+            setattr(config, attr, converter(row["value"]))
+        except (ValueError, TypeError):
+            pass  # 转换失败则保留 config.py 默认值

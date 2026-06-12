@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict, Counter
 from typing import Callable
 
-from models.database import get_daily_report, get_analyzed_dates
+from models.database import get_daily_report, get_analyzed_dates, get_stopwords_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +39,19 @@ _META_TOKENS = {
 
 
 def _load_user_stopwords() -> set[str]:
-    """从项目根目录 stopwords.txt 加载用户自定义过滤词"""
-    import sys
-    from pathlib import Path
-
-    if getattr(sys, 'frozen', False):
-        # PyInstaller one-folder: stopwords.txt 在 _MEIPASS 根目录
-        stopwords_file = Path(sys._MEIPASS) / "stopwords.txt"
-    else:
-        stopwords_file = Path(__file__).resolve().parent.parent / "stopwords.txt"
-    words = set()
-    if stopwords_file.exists():
-        try:
-            with open(stopwords_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    # 跳过空行和注释
-                    if line and not line.startswith("#"):
-                        words.add(line)
-        except Exception:
-            pass
-    return words
+    """v1.0.2: 从数据库加载用户自定义过滤词（替代 stopwords.txt 文件读取）"""
+    try:
+        from models.database import get_stopwords_text
+        text = get_stopwords_text()
+        words = set()
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                words.add(line)
+        return words
+    except Exception:
+        pass
+    return set()
 
 
 def _build_dynamic_stop_words(member_names: set[str] = None) -> set[str]:

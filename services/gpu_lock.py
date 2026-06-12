@@ -15,8 +15,12 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-LOCK_CHECK_URL = f"{config.GPU_LOCK_URL}/api/gpu/lock/check"
-LOCK_URL = f"{config.GPU_LOCK_URL}/api/gpu/lock"
+# v1.0.2: 延迟访问 config，确保热更新生效
+def _get_lock_check_url():
+    return f"{config.GPU_LOCK_URL}/api/gpu/lock/check"
+
+def _get_lock_url():
+    return f"{config.GPU_LOCK_URL}/api/gpu/lock"
 
 # 模块级 httpx 客户端复用（避免每次 AI 调用创建 3 个客户端）
 _lock_client: httpx.AsyncClient | None = None
@@ -31,7 +35,7 @@ def _get_lock_client() -> httpx.AsyncClient:
 async def check_gpu_free() -> bool:
     """检测 GPU 是否空闲"""
     try:
-        resp = await _get_lock_client().get(LOCK_CHECK_URL)
+        resp = await _get_lock_client().get(_get_lock_check_url())
         return resp.status_code == 200
     except httpx.ConnectError:
         logger.warning(f"无法连接到 GPU 锁服务 ({config.GPU_LOCK_URL})，假定 GPU 空闲")
@@ -44,7 +48,7 @@ async def check_gpu_free() -> bool:
 async def get_lock_owner() -> str | None:
     """查看谁占着 GPU"""
     try:
-        resp = await _get_lock_client().get(LOCK_URL)
+        resp = await _get_lock_client().get(_get_lock_url())
         data = resp.json()
         return data.get("who") if data.get("locked") else None
     except Exception as e:
@@ -57,7 +61,7 @@ async def acquire_lock(who: str = "") -> bool:
     who = who or config.GPU_LOCK_WHO
     try:
         resp = await _get_lock_client().put(
-            LOCK_URL,
+            _get_lock_url(),
             headers={"Content-Type": "application/json"},
             json={"who": who},
         )
@@ -74,7 +78,7 @@ async def acquire_lock(who: str = "") -> bool:
 async def release_lock() -> bool:
     """解锁，释放 GPU"""
     try:
-        resp = await _get_lock_client().delete(LOCK_URL)
+        resp = await _get_lock_client().delete(_get_lock_url())
         if resp.status_code == 200:
             logger.info("GPU 锁已释放")
             return True

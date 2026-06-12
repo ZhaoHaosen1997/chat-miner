@@ -1,15 +1,15 @@
-; Chat-Miner v1.0 Installer
+; Chat-Miner v1.0.2 Installer
 ; NSIS 3.x script — generates setup.exe
 ;
 ; Build: makensis installer.nsi
-; Output: ChatMiner-v1.0-setup.exe
+; Output: ChatMiner-v1.0.2-setup.exe
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
 ; --- General ---
 Name "ChatMiner"
-OutFile "ChatMiner-v1.0-setup.exe"
+OutFile "ChatMiner-v1.0.2-setup.exe"
 InstallDir "$LOCALAPPDATA\ChatMiner"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma

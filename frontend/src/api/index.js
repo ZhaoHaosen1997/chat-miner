@@ -278,3 +278,21 @@ export const checkModelHealth = (id) =>
   request(`/settings/models/${id}/health`)
 export const getModelDefaults = () => request('/settings/defaults')
 
+// ==================== 应用设置 v1.0.2 ====================
+export const getAppSettings = () => request('/settings/app-settings')
+export const updateAppSetting = (key, value) =>
+  request('/settings/app-settings', {
+    method: 'PUT', body: JSON.stringify({ key, value })
+  })
+export const updateAppSettingsBatch = (updates) =>
+  request('/settings/app-settings/batch', {
+    method: 'PUT', body: JSON.stringify({ updates })
+  })
+
+// ==================== 停用词 v1.0.2 ====================
+export const getStopwords = () => apiGet('/settings/stopwords')
+export const updateStopwords = (text) =>
+  request('/settings/stopwords', {
+    method: 'PUT', body: JSON.stringify({ text })
+  })
+

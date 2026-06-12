@@ -3,11 +3,14 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getModelConfigs, createModelConfig, updateModelConfig,
-  deleteModelConfig, setDefaultModel, listGroups, apiGet
+  deleteModelConfig, setDefaultModel, listGroups, apiGet,
+  getAppSettings, updateAppSetting,
+  getStopwords, updateStopwords,
 } from '../api/index.js'
 import {
   Plus, Pencil, Trash2, Check, X, Loader2,
-  Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles
+  Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles,
+  ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -36,6 +39,13 @@ const form = ref({
   is_default: false,
   extra_params: '',
 })
+
+// v1.0.2: 高级选项 & 停用词
+const advancedOpen = ref(false)
+const appSettings = ref({})
+const stopwordsText = ref('')
+const stopwordsLoading = ref(false)
+const stopwordsSaved = ref(false)
 
 // ---- Computed ----
 const localConfigs = computed(() => configs.value.filter(c => c.model_type === 'local'))
@@ -189,7 +199,52 @@ function onTypeChange() {
 }
 
 // ---- Lifecycle ----
-onMounted(loadConfigs)
+async function loadAppSettings() {
+  try {
+    const settings = await getAppSettings()
+    const map = {}
+    for (const s of settings) {
+      map[s.key] = { value: s.value, value_type: s.value_type, description: s.description }
+    }
+    appSettings.value = map
+  } catch (e) { /* ignore */ }
+}
+
+async function loadStopwords() {
+  stopwordsLoading.value = true
+  try {
+    const result = await getStopwords()
+    stopwordsText.value = result.text || ''
+  } catch (e) { /* ignore */ }
+  finally { stopwordsLoading.value = false }
+}
+
+async function saveAdvancedSetting(key, value) {
+  try {
+    await updateAppSetting(key, String(value))
+    if (appSettings.value[key]) {
+      appSettings.value[key].value = String(value)
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  }
+}
+
+async function saveStopwords() {
+  try {
+    await updateStopwords(stopwordsText.value)
+    stopwordsSaved.value = true
+    setTimeout(() => { stopwordsSaved.value = false }, 2000)
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  }
+}
+
+onMounted(async () => {
+  await loadConfigs()
+  loadAppSettings()
+  loadStopwords()
+})
 </script>
 
 <template>
@@ -400,6 +455,203 @@ onMounted(loadConfigs)
         </div>
       </section>
     </template>
+
+    <!-- 停用词编辑区 v1.0.2 -->
+    <section>
+      <div class="flex items-center gap-2 mb-4">
+        <Filter :size="20" class="text-gray-600" />
+        <h2 class="text-lg font-semibold text-gray-800">过滤词管理</h2>
+      </div>
+      <div class="card p-4">
+        <p class="text-sm text-gray-500 mb-3">
+          在此编辑停用词列表。以 <code class="text-xs bg-gray-100 px-1 rounded">#</code> 开头的行视为注释，不会被过滤。
+          每行一个词，修改后下次分析时自动生效。
+        </p>
+        <textarea
+          v-model="stopwordsText"
+          rows="14"
+          class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none resize-y"
+          :disabled="stopwordsLoading"
+          placeholder="# 每行一个过滤词&#10;# # 开头的行为注释&#10;示例词1&#10;示例词2"
+        ></textarea>
+        <div class="flex items-center justify-between mt-3">
+          <span v-if="stopwordsSaved" class="text-xs text-green-600 flex items-center gap-1">
+            <Check :size="14" /> 已保存
+          </span>
+          <span v-else class="text-xs text-gray-400">修改后即时生效（下次分析时加载），无需重启服务</span>
+          <button
+            @click="saveStopwords"
+            :disabled="stopwordsLoading"
+            class="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {{ stopwordsLoading ? '加载中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 高级选项 v1.0.2 -->
+    <section>
+      <button
+        @click="advancedOpen = !advancedOpen"
+        class="flex items-center gap-2 w-full text-left mb-4 hover:bg-gray-50 rounded-lg p-1 -m-1 transition-colors"
+      >
+        <component :is="advancedOpen ? ChevronDown : ChevronRight" :size="20" class="text-gray-500" />
+        <h2 class="text-lg font-semibold text-gray-800">高级选项</h2>
+        <span class="text-xs text-gray-400">(Ollama 超时、GPU 锁、报告参数等)</span>
+      </button>
+
+      <div v-if="advancedOpen" class="space-y-6">
+        <!-- Ollama 超时 -->
+        <div class="card p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <Clock :size="16" class="text-gray-500" />
+            <h3 class="text-sm font-semibold text-gray-700">Ollama 超时设置</h3>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">请求超时 (秒)</label>
+              <input
+                type="number"
+                :value="appSettings.ollama_timeout?.value || 120"
+                @change="saveAdvancedSetting('ollama_timeout', $event.target.value)"
+                min="10" max="600"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- GPU 分布式锁 -->
+        <div class="card p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <Shield :size="16" class="text-gray-500" />
+            <h3 class="text-sm font-semibold text-gray-700">GPU 分布式锁</h3>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-500">启用</label>
+              <input
+                type="checkbox"
+                :checked="appSettings.gpu_lock_enabled?.value === 'true'"
+                @change="saveAdvancedSetting('gpu_lock_enabled', $event.target.checked)"
+                class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">服务地址</label>
+              <input
+                type="text"
+                :value="appSettings.gpu_lock_url?.value"
+                @change="saveAdvancedSetting('gpu_lock_url', $event.target.value)"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">标识名</label>
+              <input
+                type="text"
+                :value="appSettings.gpu_lock_who?.value"
+                @change="saveAdvancedSetting('gpu_lock_who', $event.target.value)"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">重试间隔 (秒)</label>
+              <input
+                type="number"
+                :value="appSettings.gpu_lock_retry_interval?.value || 5"
+                @change="saveAdvancedSetting('gpu_lock_retry_interval', $event.target.value)"
+                min="1" max="60"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">最大重试次数</label>
+              <input
+                type="number"
+                :value="appSettings.gpu_lock_max_retries?.value || 24"
+                @change="saveAdvancedSetting('gpu_lock_max_retries', $event.target.value)"
+                min="1" max="120"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 报告参数 -->
+        <div class="card p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <Thermometer :size="16" class="text-gray-500" />
+            <h3 class="text-sm font-semibold text-gray-700">报告生成参数</h3>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">周报 Temperature (0-2)</label>
+              <input
+                type="number"
+                :value="appSettings.weekly_temperature?.value || 0.8"
+                @change="saveAdvancedSetting('weekly_temperature', $event.target.value)"
+                min="0" max="2" step="0.1"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">月报 Temperature (0-2)</label>
+              <input
+                type="number"
+                :value="appSettings.monthly_temperature?.value || 0.6"
+                @change="saveAdvancedSetting('monthly_temperature', $event.target.value)"
+                min="0" max="2" step="0.1"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">周报最大 Tokens</label>
+              <input
+                type="number"
+                :value="appSettings.deepseek_max_tokens_weekly?.value || 4096"
+                @change="saveAdvancedSetting('deepseek_max_tokens_weekly', $event.target.value)"
+                min="256" max="32768"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">月报最大 Tokens</label>
+              <input
+                type="number"
+                :value="appSettings.deepseek_max_tokens_monthly?.value || 8192"
+                @change="saveAdvancedSetting('deepseek_max_tokens_monthly', $event.target.value)"
+                min="256" max="32768"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">DeepSeek 超时 (秒)</label>
+              <input
+                type="number"
+                :value="appSettings.deepseek_timeout?.value || 120"
+                @change="saveAdvancedSetting('deepseek_timeout', $event.target.value)"
+                min="10" max="600"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">画像刷新阈值 (天)</label>
+              <input
+                type="number"
+                :value="appSettings.portrait_refresh_days?.value || 7"
+                @change="saveAdvancedSetting('portrait_refresh_days', $event.target.value)"
+                min="1" max="365"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- 新增/编辑弹窗 -->
     <Teleport to="body">

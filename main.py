@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
     logger.info("Chat-Miner 启动中...")
     config.ensure_dirs()
     init_db()
+    config.load_from_db()  # v1.0.2: 从 DB 加载可热更新配置
     logger.info(f"数据库: {config.DATABASE_PATH}")
     if config.GPU_LOCK_ENABLED:
         logger.info(f"Ollama: {config.OLLAMA_HOST} | 模型: {config.OLLAMA_MODEL}")
@@ -87,7 +88,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于 AI 大模型",
-    version="1.0.1",
+    version="1.0.2",
     lifespan=lifespan,
 )
 

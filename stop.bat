@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 title Stop Chat-Miner Servers
 
 echo Stopping Chat-Miner servers...

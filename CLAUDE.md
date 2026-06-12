@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **严禁操作生产数据**：`data/` 目录下的 `chat_miner.db` 和 `merged_data.json` 是用户数据。
 - 不得删除、修改、清空 `data/` 下的任何文件，除非用户**明确说**"可以清数据""导入流程会重建""开发阶段数据可以舍弃"。
-- 部署更新时只替换代码文件，不动 `data/` 和 `.env`。
+- 部署更新时只替换代码文件，不动 `data/` 和 `config.json`。
 - 测试新功能时用 `test-group` 或创建新群，不要动已有群的数据。
 - **本地开发端口**：8857（避免与 WSL 生产 8856 冲突）。启动命令：`python -m uvicorn main:app --host 0.0.0.0 --port 8857`
 
@@ -33,7 +33,7 @@ Python: venv 在项目目录下 venv/
 wsl -d DebianDev -- sh -c "rsync -av --delete \
   --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
   --exclude='__pycache__' --exclude='data' --exclude='logs' --exclude='venv' \
-  --exclude='.env' --exclude='docs' --exclude='*.tar.gz' \
+  --exclude='config.json' --exclude='docs' --exclude='*.tar.gz' \
   /mnt/c/mycode/chat-miner/ /home/zhaohaosen/applications/chat-miner/ && \
   cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && \
   sudo systemctl restart chat-miner && echo 'Deploy OK'"
@@ -46,7 +46,7 @@ wsl -d DebianDev -- sh -c "rsync -av --delete \
 # cd /mnt/c/mycode/chat-miner
 # tar --exclude='.git' --exclude='node_modules' --exclude='frontend/node_modules' \
 #     --exclude='__pycache__' --exclude='data' --exclude='logs' --exclude='venv' \
-#     --exclude='.env' --exclude='docs' -czf /tmp/chat-miner-deploy.tar.gz .
+#     --exclude='config.json' --exclude='docs' -czf /tmp/chat-miner-deploy.tar.gz .
 # wsl -d DebianDev -- sh -c "tar -xzf /mnt/c/mycode/chat-miner-deploy.tar.gz \
 #     -C /home/zhaohaosen/applications/chat-miner/ && cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && sudo systemctl restart chat-miner"
 # rm -f /tmp/chat-miner-deploy.tar.gz
@@ -96,16 +96,16 @@ cd frontend && npx vite --port 5173
 
 **Portrait system**: Unified analysis (`_run_full_portrait_analysis`) does basic pipeline + Python stats + deep pipeline + fun titles. Incremental mode (`max_days=10`) preserves AI personality traits, only refreshes data stats.
 
-**Custom stopwords**: `stopwords.txt` at project root. Loaded by `_load_user_stopwords()` each analysis run. Words here excluded from all word/emoji/personality analysis.
+**Custom stopwords**: Managed via Settings page (stored in `app_settings` DB table). Default stopwords hardcoded in `config.DEFAULT_STOPWORDS`. Loaded by `_load_user_stopwords()` each analysis run.
 
 ## Key patterns
 
 - **API response format**: `{"code": 200, "message": "...", "data": {...}}`
-- **Config**: `.env` → `config.py:Config` class. Never hardcode secrets or URLs.
+- **Config**: `config.json` (启动参数) → `config.py` (默认值) → DB `app_settings` (可热更新)。通过设置页面管理。
 - **Frontend state**: `provide/inject` for `currentGroup`, `triggerRefresh`, `activeTaskId`.
 - **Frontend router**: Hash-based, routes: `/`, `/report/:date`, `/portraits`, `/portrait/:memberId`.
 - **JSON parsing safety**: All message content access uses `(m.get("content") or "").strip()` because `content` can be `None`.
-- **Git**: Commit in Chinese with version tag. Do NOT commit `.env` or `docs/`.
+- **Git**: Commit in Chinese with version tag. Do NOT commit `docs/`.
 - **版本号规则**：新功能大版本（v0.x.0）独立提交；每次提交 bug fix 时版本号最后一位 +1（如 v0.12.0 → v0.12.1），禁止两次提交使用同一个版本号。
 
 ## Input JSON format
