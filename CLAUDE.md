@@ -106,6 +106,7 @@ cd frontend && npx vite --port 5173
 - **Frontend router**: Hash-based, routes: `/`, `/report/:date`, `/portraits`, `/portrait/:memberId`.
 - **JSON parsing safety**: All message content access uses `(m.get("content") or "").strip()` because `content` can be `None`.
 - **Git**: Commit in Chinese with version tag. Do NOT commit `.env` or `docs/`.
+- **版本号规则**：新功能大版本（v0.x.0）独立提交；每次提交 bug fix 时版本号最后一位 +1（如 v0.12.0 → v0.12.1），禁止两次提交使用同一个版本号。
 
 ## Input JSON format
 
