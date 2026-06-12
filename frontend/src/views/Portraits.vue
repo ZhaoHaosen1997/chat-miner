@@ -110,10 +110,12 @@ function openDetail(portrait) {
 // 合并 portraits 和 members
 const mergedPortraits = ref([])
 watch([portraits, members], ([p, m]) => {
-  mergedPortraits.value = p.map(pt => {
-    const member = m.find(mb => mb.id === pt.member_id) || {}
-    return { ...pt, ...member }
-  })
+  mergedPortraits.value = p
+    .map(pt => {
+      const member = m.find(mb => mb.id === pt.member_id)
+      return member ? { ...pt, ...member } : null
+    })
+    .filter(Boolean)
 })
 
 // ---- 关系网络图 ----

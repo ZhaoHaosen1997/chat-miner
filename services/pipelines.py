@@ -487,6 +487,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
     p_model = primary_model or config.OLLAMA_MODEL
 
     if task:
+        task.model_used = p_model  # v0.12.4: 入口即设，进度面板可持续显示
         task.update("inference", f"(0/6) 开始分析...")
         task.steps.clear()
 
@@ -669,9 +670,9 @@ async def run_daily_pipeline_online(
     from services.model_config import get_effective_model
     import asyncio
 
-    model_name = model_config.get("model_name", "在线模型")
+    mname = model_config.get("model_name") or ""
     if task:
-        task.update("inference", f"🎬 {model_name} 正在解读今日群聊...")
+        task.update("inference", f"🎬 {mname or '在线模型'} 正在解读今日群聊...")
 
     # 适配私聊话术
     chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
@@ -700,7 +701,7 @@ async def run_daily_pipeline_online(
                 # 用现有解析函数做安全网格式化
                 report = _normalize_online_report(data)
                 if task:
-                    task.model_used = result.get("model", model_config.get("model_name", ""))
+                    task.model_used = result.get("model", mname)
                     if task.type not in ("analyze_all", "full_portrait", "analyze_all_portraits"):
                         task.finish(success=True)
                     _save_pipeline_record(task, group_name, date)
@@ -861,6 +862,9 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     prompt_user = f"{chat_text}\n\n以上是 {sender_name} 的发言。"
     role_opts = "气氛组/和事佬/话题制造机/话题终结者/吃瓜群众/潜水大佬/毒舌评论员/科普达人/摸鱼冠军/卷王/凡尔赛大师/画饼专家/真香选手/社死担当/开车司机/破防boy/摆烂王者"
     failed_steps = []
+
+    if task:
+        task.model_used = config.OLLAMA_MODEL  # v0.12.4: 入口即设
 
     def _cancelled_portrait():
         return task and hasattr(task, '_cancelled') and task._cancelled
@@ -1056,9 +1060,9 @@ async def run_portrait_pipeline_online(
     from services.online_model import call_online_chat
     from services.model_config import get_effective_model
 
-    model_name = model_config.get("model_name", "在线模型")
+    mname = model_config.get("model_name") or ""
     if task:
-        task.update("inference", f"🎨 {model_name} 正在描绘 {sender_name} 的群聊人格...")
+        task.update("inference", f"🎨 {mname or '在线模型'} 正在描绘 {sender_name} 的群聊人格...")
 
     # 私聊模式适配
     chat_for_prompt = _adapt_for_private(chat_text) if is_private else chat_text
@@ -1081,7 +1085,7 @@ async def run_portrait_pipeline_online(
             if data and isinstance(data, dict):
                 portrait = _normalize_online_portrait(data, sender_name, is_private)
                 if task:
-                    task.model_used = result.get("model", model_config.get("model_name", ""))
+                    task.model_used = result.get("model", mname)
                 return portrait
             else:
                 logger.warning(f"在线模型画像 JSON 解析失败，降级到本地管线")

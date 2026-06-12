@@ -27,7 +27,8 @@ RELATION_JUDGE_PROMPT = {
 
 
 async def ai_judge_relation(name_a: str, name_b: str,
-                             context: str, model: str = "") -> Optional[str]:
+                             context: str, model: str = "",
+                             model_config: dict | None = None) -> Optional[str]:
     """AI 判断两人的关系类型
 
     Args:
@@ -35,6 +36,7 @@ async def ai_judge_relation(name_a: str, name_b: str,
         name_b: 对方名
         context: 互动上下文文本（已截断至 1000 字）
         model: 模型名
+        model_config: v0.12.5 在线模型配置，优先于 model
 
     Returns:
         关系类型标签（如"损友"），失败返回 None
@@ -49,12 +51,19 @@ async def ai_judge_relation(name_a: str, name_b: str,
     if len(user_prompt) > 2000:
         user_prompt = user_prompt[:2000]
 
-    result = await call_ollama_chat(
-        RELATION_JUDGE_PROMPT["system"],
-        user_prompt,
-        model=model or config.OLLAMA_MODEL,
-        timeout=30,
-    )
+    if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
+        from services.online_model import call_online_chat
+        result = await call_online_chat(
+            RELATION_JUDGE_PROMPT["system"], user_prompt, model_config,
+            temperature=0.3, max_tokens=20, timeout=15,
+        )
+    else:
+        result = await call_ollama_chat(
+            RELATION_JUDGE_PROMPT["system"],
+            user_prompt,
+            model=model or config.OLLAMA_MODEL,
+            timeout=30,
+        )
 
     if result["success"] and result["data"]:
         raw = str(result["data"]).strip()
@@ -76,7 +85,8 @@ async def analyze_social_relations(messages: list[dict],
                                     member_name: str,
                                     get_sender_name,
                                     get_name_by_wxid=None,
-                                    model: str = "") -> list[dict]:
+                                    model: str = "",
+                                    model_config: dict | None = None) -> list[dict]:
     """分析成员的社交关系：Python 统计 + AI 判断
 
     Args:
@@ -86,6 +96,7 @@ async def analyze_social_relations(messages: list[dict],
         get_sender_name: 兼容旧代码
         get_name_by_wxid: wxid → 名字 的映射函数
         model: 模型名
+        model_config: v0.12.5 在线模型配置
 
     Returns:
         [{wxid, name, interaction_count, relation_type, note}] Top 5
@@ -104,7 +115,7 @@ async def analyze_social_relations(messages: list[dict],
         )
         if context:
             relation_type = await ai_judge_relation(
-                member_name, r["name"], context, model
+                member_name, r["name"], context, model, model_config=model_config
             )
             if relation_type:
                 r["relation_type"] = relation_type

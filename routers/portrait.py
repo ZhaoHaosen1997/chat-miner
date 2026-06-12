@@ -463,7 +463,8 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     activity = compute_activity_stats(chat.messages, wxid)
     language = compute_language_stats(chat.messages, wxid, member_names)
     social_relations = await analyze_social_relations(
-        chat.messages, wxid, sender_name, chat.get_sender_name, chat.get_name_by_wxid
+        chat.messages, wxid, sender_name, chat.get_sender_name, chat.get_name_by_wxid,
+        model_config=model_config if is_online else None,
     )
     stats_summary = format_stats_for_ai(activity, language, social_relations, [])
 

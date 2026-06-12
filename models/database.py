@@ -525,12 +525,21 @@ def upsert_members(group_id: int, senders: list[dict]):
 
 
 def get_members(group_id: int) -> list[dict]:
-    """获取群成员列表，按消息数降序"""
+    """获取群成员列表，按消息数降序（排除群自身）"""
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM group_members WHERE group_id=? ORDER BY message_count DESC",
-        (group_id,)
-    ).fetchall()
+    # 获取群的 wxid，用于排除群自身的 sender 条目
+    group = conn.execute("SELECT wxid FROM chat_groups WHERE id=?", (group_id,)).fetchone()
+    group_wxid = group["wxid"] if group else None
+    if group_wxid:
+        rows = conn.execute(
+            "SELECT * FROM group_members WHERE group_id=? AND wxid!=? ORDER BY message_count DESC",
+            (group_id, group_wxid)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM group_members WHERE group_id=? ORDER BY message_count DESC",
+            (group_id,)
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

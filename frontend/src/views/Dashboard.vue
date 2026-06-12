@@ -169,6 +169,7 @@ function viewReportFromPopup() {
 function openDayPopup(day) {
   dayPopup.value = day
   dayPopupLoading.value = ''
+  dayPopupError.value = ''
 }
 
 async function handleGenerateReport() {
@@ -194,7 +195,7 @@ async function handleResettleDay() {
     const { resettleFishPond } = await import('../api/index.js')
     await resettleFishPond(gid.value, dayPopup.value.date)
     dayPopup.value = null
-  } catch (e) { alert('结算失败: ' + e.message) }
+  } catch (e) { dayPopupError.value = e.message }
   finally { dayPopupLoading.value = '' }
 }
 
