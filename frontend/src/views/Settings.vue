@@ -639,6 +639,16 @@ onMounted(async () => {
               />
             </div>
             <div>
+              <label class="text-xs text-gray-500">在线模型重试次数</label>
+              <input
+                type="number"
+                :value="appSettings.online_retry_count?.value || 2"
+                @change="saveAdvancedSetting('online_retry_count', $event.target.value)"
+                min="0" max="10"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
+            <div>
               <label class="text-xs text-gray-500">画像刷新阈值 (天)</label>
               <input
                 type="number"

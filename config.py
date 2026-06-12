@@ -49,6 +49,7 @@ class Config:
     DEEPSEEK_MODEL = "deepseek-v4-flash"
     DEEPSEEK_REASONER_MODEL = "deepseek-v4-flash"
     DEEPSEEK_TIMEOUT = 120
+    ONLINE_RETRY_COUNT = 2  # v1.0.3: 在线模型失败后重试次数（总计 1+N 次尝试）
     WEEKLY_TEMPERATURE = 0.8
     MONTHLY_TEMPERATURE = 0.6
     DEEPSEEK_MAX_TOKENS_WEEKLY = 4096

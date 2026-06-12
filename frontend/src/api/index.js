@@ -220,6 +220,24 @@ export const getWeeklyReport = (gid, periodKey) =>
   request(`/groups/${gid}/weekly/${periodKey}`)
 export const getMonthlyReport = (gid, periodKey) =>
   request(`/groups/${gid}/monthly/${periodKey}`)
+export const generateAllWeekly = async (gid, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/weekly/generate-all${qs}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
+export const generateAllMonthly = async (gid, modelId = null) => {
+  const params = new URLSearchParams()
+  if (modelId) params.set('model_id', modelId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${BASE}/groups/${gid}/monthly/generate-all${qs}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data
+}
 export const generateWeekly = async (gid, periodKey = '', force = false, modelId = null) => {
   const params = new URLSearchParams()
   if (periodKey) params.set('period_key', periodKey)

@@ -16,6 +16,13 @@ const loading = ref(true)
 const generating = ref(false)
 const error = ref('')
 
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 async function load() {
   if (!currentGroup.value || !props.yearId) return
   loading.value = true
@@ -291,7 +298,7 @@ watch(report, (r) => {
       <!-- 底部统计 -->
       <div class="mt-8 pt-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
         <span>{{ report.report_json?.date_start }} ~ {{ report.report_json?.date_end }}</span>
-        <span>{{ report.report_json?._version || 'v0.11.0' }} · {{ report.model_used }}</span>
+        <span>{{ report.report_json?._version || 'v0.11.0' }} · {{ report.model_used }} · {{ formatTime(report.created_at) }}</span>
       </div>
     </template>
   </div>

@@ -421,6 +421,8 @@ def _seed_app_settings(conn):
         ("gpu_lock_max_retries", str(config.GPU_LOCK_MAX_RETRIES), "int",
          "GPU 锁最大重试次数"),
         # 高级：DeepSeek
+        ("online_retry_count", str(config.ONLINE_RETRY_COUNT), "int",
+         "在线模型失败重试次数"),
         ("deepseek_timeout", str(config.DEEPSEEK_TIMEOUT), "int",
          "DeepSeek API 超时(秒)"),
         ("weekly_temperature", str(config.WEEKLY_TEMPERATURE), "float",
@@ -1702,6 +1704,7 @@ def load_app_settings_to_config():
         "gpu_lock_who": "GPU_LOCK_WHO",
         "gpu_lock_retry_interval": "GPU_LOCK_RETRY_INTERVAL",
         "gpu_lock_max_retries": "GPU_LOCK_MAX_RETRIES",
+        "online_retry_count": "ONLINE_RETRY_COUNT",
         "deepseek_timeout": "DEEPSEEK_TIMEOUT",
         "weekly_temperature": "WEEKLY_TEMPERATURE",
         "monthly_temperature": "MONTHLY_TEMPERATURE",

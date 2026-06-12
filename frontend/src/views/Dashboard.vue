@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
+  generateAllWeekly, generateAllMonthly,
 } from '../api/index.js'
 import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
@@ -58,8 +59,23 @@ function getDailyModelId() {
   const n = Number(v)
   return isNaN(n) ? null : n
 }
-const showAllWeekly = ref(false)
-const showAllMonthly = ref(false)
+// v1.0.3: 分页展开（每次+10条）
+const PAGE_SIZE = 10
+const DEFAULT_SHOW = 8
+const weeklyShowCount = ref(DEFAULT_SHOW)
+const monthlyShowCount = ref(DEFAULT_SHOW)
+function expandWeekly() {
+  weeklyShowCount.value = Math.min(weeklyShowCount.value + PAGE_SIZE, weeklyPeriods.value.length)
+}
+function collapseWeekly() {
+  weeklyShowCount.value = DEFAULT_SHOW
+}
+function expandMonthly() {
+  monthlyShowCount.value = Math.min(monthlyShowCount.value + PAGE_SIZE, monthlyPeriods.value.length)
+}
+function collapseMonthly() {
+  monthlyShowCount.value = DEFAULT_SHOW
+}
 const showAnnualConfirm = ref(false)  // 年报月报不足确认弹窗
 const pendingAnnualYear = ref('')
 
@@ -319,6 +335,8 @@ async function doGenerateWeekly(periodKey, force = false) {
     const result = await generateWeekly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+    } else {
+      generatingPeriod.value = ''  // v1.0.3: 防御性复位
     }
   } catch (e) { showError?.('周报生成失败', e.message, e.stack, '仪表盘·生成周报'); generatingPeriod.value = '' }
 }
@@ -331,8 +349,41 @@ async function doGenerateMonthly(periodKey, force = false) {
     const result = await generateMonthly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+    } else {
+      generatingPeriod.value = ''  // v1.0.3: 防御性复位
     }
   } catch (e) { showError?.('月报生成失败', e.message, e.stack, '仪表盘·生成月报'); generatingPeriod.value = '' }
+}
+
+// v1.0.3: 一键生成全部周报/月报
+async function doGenerateAllWeekly() {
+  if (generatingPeriod.value || activeTaskId.value) return
+  const ready = weeklyPeriods.value.filter(p => p.status === 'ready')
+  if (!ready.length) return
+  generatingPeriod.value = 'weekly-all'
+  try {
+    const result = await generateAllWeekly(currentGroup.value.id)
+    if (result?.task_id) {
+      activeTaskId.value = result.task_id
+    } else {
+      generatingPeriod.value = ''
+    }
+  } catch (e) { showError?.('批量周报生成失败', e.message, e.stack, '仪表盘·一键生成周报'); generatingPeriod.value = '' }
+}
+
+async function doGenerateAllMonthly() {
+  if (generatingPeriod.value || activeTaskId.value) return
+  const ready = monthlyPeriods.value.filter(p => p.status === 'ready')
+  if (!ready.length) return
+  generatingPeriod.value = 'monthly-all'
+  try {
+    const result = await generateAllMonthly(currentGroup.value.id)
+    if (result?.task_id) {
+      activeTaskId.value = result.task_id
+    } else {
+      generatingPeriod.value = ''
+    }
+  } catch (e) { showError?.('批量月报生成失败', e.message, e.stack, '仪表盘·一键生成月报'); generatingPeriod.value = '' }
 }
 
 // 导航到周报/月报/年报详情
@@ -645,10 +696,16 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <div class="flex items-center gap-2 mb-2.5">
                   <span class="text-xs font-semibold text-slate-500 tracking-wide">📊 自然周</span>
                   <span class="text-[10px] text-slate-300">{{ weeklyPeriods.filter(p=>p.status==='generated').length }}/{{ weeklyPeriods.length }}已生成</span>
+                  <button v-if="weeklyPeriods.some(p=>p.status==='ready')"
+                    @click="doGenerateAllWeekly"
+                    :disabled="!!generatingPeriod || !!activeTaskId"
+                    class="text-[10px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full hover:bg-indigo-100 disabled:opacity-40 transition-colors flex items-center gap-0.5 ml-auto"
+                    title="一键生成全部未生成的周报（从新到旧）"
+                  ><Zap :size="10" /> 一键生成</button>
                 </div>
-                <div class="space-y-1" :class="showAllWeekly ? '' : 'max-h-48 overflow-y-auto'">
+                <div class="space-y-1 max-h-48 overflow-y-auto">
                   <div
-                    v-for="p in (showAllWeekly ? weeklyPeriods : weeklyPeriods.slice(0, 8))"
+                    v-for="p in weeklyPeriods.slice(0, weeklyShowCount)"
                     :key="'w'+p.period_key"
                     class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg transition-all"
                     :class="p.status === 'generated' ? 'hover:bg-indigo-50 cursor-pointer border border-transparent hover:border-indigo-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
@@ -674,10 +731,15 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span v-else class="text-[10px] text-slate-300 font-medium">不足</span>
                   </div>
                 </div>
-                <button v-if="weeklyPeriods.length > 8"
-                  @click="showAllWeekly = !showAllWeekly"
+                <button v-if="weeklyShowCount < weeklyPeriods.length"
+                  @click="expandWeekly"
                   class="w-full text-[10px] text-slate-400 hover:text-indigo-500 py-1 mt-1 transition-colors">
-                  {{ showAllWeekly ? '收起 ▲' : `展开全部 ${weeklyPeriods.length} 周 ▼` }}
+                  展开更多 ({{ weeklyShowCount }}/{{ weeklyPeriods.length }}) ▼
+                </button>
+                <button v-if="weeklyShowCount >= weeklyPeriods.length && weeklyPeriods.length > DEFAULT_SHOW"
+                  @click="collapseWeekly"
+                  class="w-full text-[10px] text-slate-400 hover:text-indigo-500 py-1 mt-1 transition-colors">
+                  收起 ▲
                 </button>
               </div>
 
@@ -686,10 +748,16 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <div class="flex items-center gap-2 mb-2.5">
                   <span class="text-xs font-semibold text-slate-500 tracking-wide">📅 自然月</span>
                   <span class="text-[10px] text-slate-300">{{ monthlyPeriods.filter(p=>p.status==='generated').length }}/{{ monthlyPeriods.length }}已生成</span>
+                  <button v-if="monthlyPeriods.some(p=>p.status==='ready')"
+                    @click="doGenerateAllMonthly"
+                    :disabled="!!generatingPeriod || !!activeTaskId"
+                    class="text-[10px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full hover:bg-indigo-100 disabled:opacity-40 transition-colors flex items-center gap-0.5 ml-auto"
+                    title="一键生成全部未生成的月报（从新到旧）"
+                  ><Zap :size="10" /> 一键生成</button>
                 </div>
-                <div class="space-y-1" :class="showAllMonthly ? '' : 'max-h-48 overflow-y-auto'">
+                <div class="space-y-1 max-h-48 overflow-y-auto">
                   <div
-                    v-for="p in (showAllMonthly ? monthlyPeriods : monthlyPeriods.slice(0, 8))"
+                    v-for="p in monthlyPeriods.slice(0, monthlyShowCount)"
                     :key="'m'+p.period_key"
                     class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg transition-all"
                     :class="p.status === 'generated' ? 'hover:bg-purple-50 cursor-pointer border border-transparent hover:border-purple-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
@@ -715,10 +783,15 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span v-else class="text-[10px] text-slate-300 font-medium">不足</span>
                   </div>
                 </div>
-                <button v-if="monthlyPeriods.length > 8"
-                  @click="showAllMonthly = !showAllMonthly"
+                <button v-if="monthlyShowCount < monthlyPeriods.length"
+                  @click="expandMonthly"
                   class="w-full text-[10px] text-slate-400 hover:text-purple-500 py-1 mt-1 transition-colors">
-                  {{ showAllMonthly ? '收起 ▲' : `展开全部 ${monthlyPeriods.length} 月 ▼` }}
+                  展开更多 ({{ monthlyShowCount }}/{{ monthlyPeriods.length }}) ▼
+                </button>
+                <button v-if="monthlyShowCount >= monthlyPeriods.length && monthlyPeriods.length > DEFAULT_SHOW"
+                  @click="collapseMonthly"
+                  class="w-full text-[10px] text-slate-400 hover:text-purple-500 py-1 mt-1 transition-colors">
+                  收起 ▲
                 </button>
               </div>
 

@@ -16,6 +16,13 @@ const generating = ref(false)
 const error = ref('')
 const monthLabel = ref('')
 
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 const adjacentMonths = ref({ prev: null, next: null })
 
 function parseMonth(key) {
@@ -56,6 +63,7 @@ async function load() {
 async function startGenerate() {
   if (generating.value || activeTaskId.value) return
   generating.value = true
+  error.value = ''
   try {
     const result = await generateMonthly(currentGroup.value.id, props.monthId)
     if (result.task_id) {
@@ -63,6 +71,8 @@ async function startGenerate() {
     } else if (result === null) {
       error.value = '本月数据不足，无法生成'
       generating.value = false
+    } else {
+      generating.value = false  // v1.0.3: 防御性复位
     }
   } catch (e) {
     error.value = e.message
@@ -350,6 +360,10 @@ const healthItems = [
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="report.model_used" class="flex items-center justify-center mt-6">
+        <p class="text-slate-300 text-[11px]">{{ report.model_used }} · {{ formatTime(report.created_at) }}</p>
       </div>
 
       <!-- ===== 底部导航 ===== -->

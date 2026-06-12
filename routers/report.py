@@ -666,6 +666,71 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
     }
 
 
+@router.post("/weekly/generate-all")
+async def api_generate_all_weekly(group_id: int, model_id: int = None):
+    """一键生成全部周报（从新到旧，仅生成 ready 状态的周期）"""
+    from services.weekly_report import compute_available_periods, generate_weekly_report
+
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    all_dates = chat.all_dates()
+    periods = compute_available_periods(all_dates, "weekly")
+    ready = [p for p in periods if p["status"] == "ready"]
+    # 从新到旧排序
+    ready.sort(key=lambda p: p["period_key"], reverse=True)
+
+    if not ready:
+        return {
+            "code": 200,
+            "message": "暂无需要生成的周报",
+            "data": None,
+        }
+
+    task = task_manager.create("generate_all_weekly", group_id,
+                               {"periods": [p["period_key"] for p in ready]})
+    task.update("pending", f"开始批量生成 {len(ready)} 份周报...")
+
+    async def _run():
+        total = len(ready)
+        for i, p in enumerate(ready):
+            if task_manager.is_cancelled(task.task_id):
+                task.update("cancelled", f"已取消 (完成 {i}/{total})")
+                return
+            pk = p["period_key"]
+            task.update("inference", f"周报 [{i+1}/{total}] {pk} 生成中...",
+                       progress={"current": i, "total": total})
+            try:
+                result = await generate_weekly_report(group_id, pk, task, force=False,
+                                                      is_private=len(chat.senders) <= 2,
+                                                      model_id=model_id)
+                if not result["success"]:
+                    task.update("inference",
+                               f"周报 [{i+1}/{total}] {pk} 失败: {result.get('error', '')[:60]}",
+                               progress={"current": i + 1, "total": total})
+            except Exception as e:
+                logger.error(f"周报 {pk} 生成异常: {e}")
+                task.update("inference",
+                           f"周报 [{i+1}/{total}] {pk} 异常: {str(e)[:60]}",
+                           progress={"current": i + 1, "total": total})
+        task.update("done", f"批量生成完成: {total} 份周报",
+                   progress={"current": total, "total": total})
+        task.finish(success=True)
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": f"批量周报生成任务已创建 ({len(ready)} 份)",
+        "data": {"task_id": task.task_id, "total": len(ready)},
+    }
+
+
 @router.get("/monthly/{period_key}")
 async def api_get_monthly(group_id: int, period_key: str):
     """获取指定月报"""
@@ -759,6 +824,70 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
         "code": 200,
         "message": f"月报生成任务已创建: {period_key}",
         "data": {"task_id": task.task_id, "period_key": period_key},
+    }
+
+
+@router.post("/monthly/generate-all")
+async def api_generate_all_monthly(group_id: int, model_id: int = None):
+    """一键生成全部月报（从新到旧，仅生成 ready 状态的周期）"""
+    from services.weekly_report import compute_available_periods, generate_monthly_report
+
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    all_dates = chat.all_dates()
+    periods = compute_available_periods(all_dates, "monthly")
+    ready = [p for p in periods if p["status"] == "ready"]
+    ready.sort(key=lambda p: p["period_key"], reverse=True)
+
+    if not ready:
+        return {
+            "code": 200,
+            "message": "暂无需要生成的月报",
+            "data": None,
+        }
+
+    task = task_manager.create("generate_all_monthly", group_id,
+                               {"periods": [p["period_key"] for p in ready]})
+    task.update("pending", f"开始批量生成 {len(ready)} 份月报...")
+
+    async def _run():
+        total = len(ready)
+        for i, p in enumerate(ready):
+            if task_manager.is_cancelled(task.task_id):
+                task.update("cancelled", f"已取消 (完成 {i}/{total})")
+                return
+            pk = p["period_key"]
+            task.update("inference", f"月报 [{i+1}/{total}] {pk} 生成中...",
+                       progress={"current": i, "total": total})
+            try:
+                result = await generate_monthly_report(group_id, pk, task, force=False,
+                                                       is_private=len(chat.senders) <= 2,
+                                                       model_id=model_id)
+                if not result["success"]:
+                    task.update("inference",
+                               f"月报 [{i+1}/{total}] {pk} 失败: {result.get('error', '')[:60]}",
+                               progress={"current": i + 1, "total": total})
+            except Exception as e:
+                logger.error(f"月报 {pk} 生成异常: {e}")
+                task.update("inference",
+                           f"月报 [{i+1}/{total}] {pk} 异常: {str(e)[:60]}",
+                           progress={"current": i + 1, "total": total})
+        task.update("done", f"批量生成完成: {total} 份月报",
+                   progress={"current": total, "total": total})
+        task.finish(success=True)
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": f"批量月报生成任务已创建 ({len(ready)} 份)",
+        "data": {"task_id": task.task_id, "total": len(ready)},
     }
 
 

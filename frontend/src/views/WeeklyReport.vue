@@ -16,6 +16,13 @@ const generating = ref(false)
 const error = ref('')
 const weekRange = ref('')
 
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 // 相邻周
 const adjacentWeeks = ref({ prev: null, next: null })
 
@@ -63,6 +70,7 @@ async function load() {
 async function startGenerate() {
   if (generating.value || activeTaskId.value) return
   generating.value = true
+  error.value = ''
   try {
     const result = await generateWeekly(currentGroup.value.id, props.weekId)
     if (result.task_id) {
@@ -70,6 +78,8 @@ async function startGenerate() {
     } else if (result === null) {
       error.value = '本周数据不足，无法生成'
       generating.value = false
+    } else {
+      generating.value = false  // v1.0.3: 防御性复位
     }
   } catch (e) {
     error.value = e.message
@@ -269,6 +279,9 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
             <Users class="w-3.5 h-3.5" />
             <span class="font-semibold text-white">{{ report.active_members_avg }}</span> 人活跃
           </div>
+        </div>
+        <div v-if="report.model_used" class="relative z-10 flex items-center justify-center mt-3">
+          <p class="text-white/40 text-[11px]">{{ report.model_used }} · {{ formatTime(report.created_at) }}</p>
         </div>
       </div>
 

@@ -931,18 +931,32 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
     # v0.12.0: 使用 model_config 路由
     if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
         from services.online_model import call_online_chat
-        result = await call_online_chat(
-            system_prompt, user_prompt,
-            model_config=model_config,
-            temperature=temperature,
-            json_mode=json_mode,
-            max_tokens=max_tokens,
-            thinking=thinking,
-        )
-        if result["success"] and result["data"]:
-            return result
-        # 在线模型失败 → 降级到本地
-        logger.warning(f"在线模型不可用，降级到本地: {result.get('error')}")
+        # v1.0.3: 在线模型重试，全部失败后再降级本地
+        max_attempts = config.ONLINE_RETRY_COUNT + 1
+        last_result = None
+        for attempt in range(max_attempts):
+            result = await call_online_chat(
+                system_prompt, user_prompt,
+                model_config=model_config,
+                temperature=temperature,
+                json_mode=json_mode,
+                max_tokens=max_tokens,
+                thinking=thinking,
+            )
+            if result["success"] and result["data"]:
+                return result
+            last_result = result
+            if attempt < max_attempts - 1:
+                delay = (attempt + 1) * 2  # 渐进等待：2s, 4s, 6s...
+                logger.warning(
+                    f"在线模型调用失败 (尝试 {attempt+1}/{max_attempts}): "
+                    f"{result.get('error')}，{delay}s 后重试"
+                )
+                await asyncio.sleep(delay)
+
+        # 全部重试失败 → 降级到本地
+        last_error = last_result.get("error", "未知错误") if last_result else "未知错误"
+        logger.warning(f"在线模型 {max_attempts} 次尝试均失败，降级到本地: {last_error}")
         from services.model_config import get_effective_model
         try:
             local_cfg = get_effective_model("local")
@@ -970,7 +984,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
                 return ollama_result  # 返回本地模型的错误
         except Exception as e:
             logger.warning(f"本地降级异常: {e}")
-        return result  # 返回在线模型的错误
+        return last_result if last_result else {"success": False, "data": None, "error": last_error}
 
     if model_config and model_config.get("model_type") == "local":
         # 直接使用本地模型

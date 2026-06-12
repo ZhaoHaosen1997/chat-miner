@@ -34,6 +34,15 @@ const stats = ref(null)
 const loading = ref(true)
 const analyzing = ref(false)
 const error = ref('')
+const modelUsed = ref('')
+const createdAt = ref('')
+
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 async function load() {
   if (!currentGroup.value || !props.date) return
@@ -43,6 +52,8 @@ async function load() {
     const data = await getReport(currentGroup.value.id, props.date)
     report.value = data.report
     stats.value = data.stats
+    modelUsed.value = data.model_used || ''
+    createdAt.value = data.created_at || ''
   } catch (e) {
     // 未分析，尝试触发分析
     if (e.message?.includes('404') || e.message?.includes('尚未分析')) {
@@ -145,6 +156,9 @@ watch(stats, (s) => {
             <RefreshCw :class="['w-3 h-3', reanalyzing && 'animate-spin']" />
             {{ reanalyzing ? '分析中...' : '重新分析' }}
           </button>
+        </div>
+        <div v-if="modelUsed" class="flex items-center justify-center mt-1">
+          <p class="text-slate-300 text-[11px]">{{ modelUsed }} · {{ formatTime(createdAt) }}</p>
         </div>
         <div class="flex justify-center gap-2 mt-4">
           <span
