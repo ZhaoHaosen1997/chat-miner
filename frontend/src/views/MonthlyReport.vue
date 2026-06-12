@@ -18,7 +18,8 @@ const monthLabel = ref('')
 
 function formatTime(ts) {
   if (!ts) return ''
-  const d = new Date(ts)
+  const t = String(ts).replace(' ', 'T') + 'Z'
+  const d = new Date(t)
   if (isNaN(d.getTime())) return ts
   return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

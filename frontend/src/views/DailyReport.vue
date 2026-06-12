@@ -39,7 +39,9 @@ const createdAt = ref('')
 
 function formatTime(ts) {
   if (!ts) return ''
-  const d = new Date(ts)
+  // SQLite CURRENT_TIMESTAMP 是 UTC 格式 "2026-06-13 01:16:43"，补 Z 让 JS 识别为 UTC
+  const t = String(ts).replace(' ', 'T') + 'Z'
+  const d = new Date(t)
   if (isNaN(d.getTime())) return ts
   return d.toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

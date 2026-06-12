@@ -706,7 +706,7 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
             task.update("inference", f"周报 [{i+1}/{total}] {pk} 生成中...",
                        progress={"current": i, "total": total})
             try:
-                result = await generate_weekly_report(group_id, pk, task, force=False,
+                result = await generate_weekly_report(group_id, pk, None, force=False,
                                                       is_private=len(chat.senders) <= 2,
                                                       model_id=model_id)
                 if not result["success"]:
@@ -866,7 +866,7 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
             task.update("inference", f"月报 [{i+1}/{total}] {pk} 生成中...",
                        progress={"current": i, "total": total})
             try:
-                result = await generate_monthly_report(group_id, pk, task, force=False,
+                result = await generate_monthly_report(group_id, pk, None, force=False,
                                                        is_private=len(chat.senders) <= 2,
                                                        model_id=model_id)
                 if not result["success"]:
