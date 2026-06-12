@@ -126,40 +126,43 @@ _circuit_state = {
     "last_failure_time": 0.0,
     "tripped": False,
 }
+# v0.13.1: 熔断器异步锁，防止并发竞态
+import asyncio as _asyncio
+_circuit_lock = _asyncio.Lock()
 
 
-def _check_circuit() -> bool:
+async def _check_circuit() -> bool:
     """检查熔断器状态，返回 True 表示可以继续"""
-    global _circuit_state
-    if not _circuit_state["tripped"]:
-        return True
-    # 检查冷却时间是否到了
-    if time.time() - _circuit_state["last_failure_time"] > CIRCUIT_BREAKER_COOLDOWN:
-        logger.info("熔断器冷却完毕，恢复调用")
-        _circuit_state["tripped"] = False
-        _circuit_state["consecutive_failures"] = 0
-        return True
-    return False
+    async with _circuit_lock:
+        if not _circuit_state["tripped"]:
+            return True
+        # 检查冷却时间是否到了
+        if time.time() - _circuit_state["last_failure_time"] > CIRCUIT_BREAKER_COOLDOWN:
+            logger.info("熔断器冷却完毕，恢复调用")
+            _circuit_state["tripped"] = False
+            _circuit_state["consecutive_failures"] = 0
+            return True
+        return False
 
 
-def _report_failure():
+async def _report_failure():
     """报告一次失败，可能触发熔断"""
-    global _circuit_state
-    _circuit_state["consecutive_failures"] += 1
-    _circuit_state["last_failure_time"] = time.time()
-    if _circuit_state["consecutive_failures"] >= CIRCUIT_BREAKER_THRESHOLD:
-        _circuit_state["tripped"] = True
-        logger.warning(
-            f"熔断器触发！连续 {_circuit_state['consecutive_failures']} 次失败，"
-            f"冷却 {CIRCUIT_BREAKER_COOLDOWN}s"
-        )
+    async with _circuit_lock:
+        _circuit_state["consecutive_failures"] += 1
+        _circuit_state["last_failure_time"] = time.time()
+        if _circuit_state["consecutive_failures"] >= CIRCUIT_BREAKER_THRESHOLD:
+            _circuit_state["tripped"] = True
+            logger.warning(
+                f"熔断器触发！连续 {_circuit_state['consecutive_failures']} 次失败，"
+                f"冷却 {CIRCUIT_BREAKER_COOLDOWN}s"
+            )
 
 
-def _report_success():
+async def _report_success():
     """报告一次成功，重置熔断计数"""
-    global _circuit_state
-    _circuit_state["consecutive_failures"] = 0
-    _circuit_state["tripped"] = False
+    async with _circuit_lock:
+        _circuit_state["consecutive_failures"] = 0
+        _circuit_state["tripped"] = False
 
 
 # AI 常见道歉/拒绝输出的模式
@@ -400,7 +403,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
             return None
 
         # 熔断器检查
-        if _circuit_state["tripped"] and not _check_circuit():
+        if _circuit_state["tripped"] and not await _check_circuit():
             last_error = f"熔断器触发，冷却中（还需 {CIRCUIT_BREAKER_COOLDOWN - int(time.time() - _circuit_state['last_failure_time'])}s）"
             logger.warning(f"{step_name}: {last_error}")
             await asyncio.sleep(5)
@@ -430,7 +433,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
         # 1. 主模型成功
         if result["success"] and result["data"] is not None:
-            _report_success()
+            await _report_success()
             if task:
                 task.add_step(name=step_name, status="done", duration_ms=int((time.time() - total_start) * 1000),
                              model=result.get("model", ""), error="")
@@ -448,7 +451,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
             d2 = int((time.time() - start2) * 1000)
             logger.info(f"{step_name} fallback: success={result2['success']}, duration={d2}ms")
             if result2["success"] and result2["data"] is not None:
-                _report_success()
+                await _report_success()
                 if task:
                     task.add_step(name=step_name, status="done",
                                  duration_ms=int((time.time() - total_start) * 1000),
@@ -464,7 +467,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
             await asyncio.sleep(2)
 
     # 所有重试都失败
-    _report_failure()
+    await _report_failure()
     logger.error(f"{step_name}: 全部{MAX_RETRIES}次重试失败: {last_error}")
     if task:
         task.add_step(name=step_name, status="failed",

@@ -808,12 +808,6 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
     )
 
 
-def _build_monthly_prompt(aggregated: dict, date_start: str, date_end: str,
-                          prev_month_summary: str, weekly_context: str) -> str:
-    """构建 v0.7.2 新版周报 prompt（基于原始数据+匿名化采样）"""
-    stats = raw_data.get("stats", {})
-    sampled = raw_data.get("sampled_msgs", [])
-
 def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> str:
     """构建 v0.7.2 新版周报 prompt（基于原始数据+匿名化采样）"""
     stats = raw_data.get("stats", {})

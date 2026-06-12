@@ -611,19 +611,22 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     portrait_data["_analyzed_at"] = datetime.now().isoformat()
     portrait_data["_analyzed_msg_count"] = len(all_msgs)
 
-    # ---- 归档旧版本 + 保存 ----
+    # ---- 归档旧版本 + 保存（v0.13.1: 加 UNIQUE 约束保护） ----
     if existing:
-        latest_ver = get_latest_portrait_version(group_id, member_id)
-        save_portrait_version(
-            group_id=group_id, member_id=member_id,
-            version=latest_ver + 1,
-            portrait_json=existing.get("portrait_json", "{}"),
-            analyzed_msg_count=existing.get("total_analyzed_messages", 0),
-            data_start=existing.get("data_start_date", ""),
-            data_end=existing.get("data_end_date", ""),
-            model_used=task.model_used or config.OLLAMA_MODEL,
-            duration_ms=task.duration_ms,
-        )
+        try:
+            latest_ver = get_latest_portrait_version(group_id, member_id)
+            save_portrait_version(
+                group_id=group_id, member_id=member_id,
+                version=latest_ver + 1,
+                portrait_json=existing.get("portrait_json", "{}"),
+                analyzed_msg_count=existing.get("total_analyzed_messages", 0),
+                data_start=existing.get("data_start_date", ""),
+                data_end=existing.get("data_end_date", ""),
+                model_used=task.model_used or config.OLLAMA_MODEL,
+                duration_ms=task.duration_ms,
+            )
+        except Exception as e:
+            logger.warning(f"归档旧版本失败（可能版本号冲突）: {e}")
 
     portrait_json = json.dumps(portrait_data, ensure_ascii=False)
     date_start, date_end = chat.get_date_range()

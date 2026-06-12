@@ -89,7 +89,21 @@ onUnmounted(() => eventSource?.close())
 </script>
 
 <template>
-  <div v-if="expanded" class="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transition-all">
+  <div class="fixed bottom-4 right-4 z-50">
+    <!-- v0.13.1: 折叠时显示小按钮可重新展开 -->
+    <button v-if="!expanded" @click="expanded = true"
+            :class="[
+              'w-10 h-10 rounded-full shadow-lg border flex items-center justify-center transition-colors',
+              status === 'done' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :
+              status === 'failed' ? 'bg-red-50 border-red-200 text-red-600' :
+              'bg-indigo-50 border-indigo-200 text-indigo-600',
+            ]"
+            title="展开进度面板">
+      <Loader2 v-if="status !== 'done' && status !== 'failed'" class="w-4 h-4 animate-spin" />
+      <CheckCircle2 v-else-if="status === 'done'" class="w-4 h-4" />
+      <XCircle v-else class="w-4 h-4" />
+    </button>
+    <div v-if="expanded" class="w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transition-all">
     <!-- Header -->
     <div :class="[
       'flex items-center justify-between px-4 py-2.5',
@@ -164,5 +178,6 @@ onUnmounted(() => eventSource?.close())
         <div class="mt-0.5 text-red-400">{{ error.detail }}</div>
       </div>
     </div>
+  </div>
   </div>
 </template>

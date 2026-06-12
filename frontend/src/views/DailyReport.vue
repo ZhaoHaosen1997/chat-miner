@@ -56,14 +56,17 @@ async function load() {
 }
 
 async function startAnalyze() {
-  if (analyzing.value) return
+  if (analyzing.value || activeTaskId.value) return
   analyzing.value = true
   error.value = ''
   try {
-    const data = await analyzeDate(currentGroup.value.id, props.date)
-    report.value = data.report
-    stats.value = data.stats
-    error.value = ''
+    const data = await analyzeDateAsync(currentGroup.value.id, props.date)
+    if (data.task_id) {
+      activeTaskId.value = data.task_id
+    } else {
+      // 立即完成（消息太少等）
+      await load()
+    }
   } catch (e) {
     error.value = e.message
   } finally {

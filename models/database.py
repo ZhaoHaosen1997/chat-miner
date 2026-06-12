@@ -31,6 +31,7 @@ def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
         retention_days: 保留最近 N 天的记录
         max_records: 每个表最多保留的记录数
     """
+    conn = None
     try:
         conn = get_conn()
         # 清理分析日志
@@ -45,9 +46,11 @@ def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
             )
         """, (max_records,))
         conn.commit()
-        conn.close()
     except Exception:
         pass  # 清理失败不影响主流程
+    finally:
+        if conn:
+            conn.close()
 
 
 def init_db():
@@ -315,6 +318,18 @@ def init_db():
     """)
     # 向后兼容：为已有数据库添加新列
     _migrate_db(conn)
+    # v0.13.1: portrait_versions 唯一约束（防版本号重复）
+    cur = conn.execute("PRAGMA index_list(portrait_versions)")
+    indexes = {row[1] for row in cur.fetchall()}
+    has_version_unique = any("version" in idx for idx in indexes)
+    if not has_version_unique:
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_portrait_versions_unique "
+                "ON portrait_versions(group_id, member_id, version)"
+            )
+        except Exception:
+            pass  # 已存在则跳过
     # v0.9.3: 装备栏
     cur = conn.execute("PRAGMA table_info(fish_pond)")
     cols = {row[1] for row in cur.fetchall()}
@@ -1180,48 +1195,60 @@ def ensure_coin_wallet(group_id: int, wxid: str) -> dict:
 
 def earn_coins(group_id: int, wxid: str, amount: int,
                reason: str, description: str = "") -> dict:
-    """获得鳞币"""
+    """获得鳞币（v0.13.1: 加事务保护）"""
     ensure_coin_wallet(group_id, wxid)
     conn = get_conn()
-    conn.execute(
-        """UPDATE scale_coin_wallet
-           SET balance = balance + ?, total_earned = total_earned + ?,
-               updated_at = datetime('now')
-           WHERE group_id=? AND wxid=?""",
-        (amount, amount, group_id, wxid)
-    )
-    # 流水
-    conn.execute(
-        """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
-           VALUES (?, ?, ?, ?, ?)""",
-        (group_id, wxid, amount, reason, description)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            """UPDATE scale_coin_wallet
+               SET balance = balance + ?, total_earned = total_earned + ?,
+                   updated_at = datetime('now')
+               WHERE group_id=? AND wxid=?""",
+            (amount, amount, group_id, wxid)
+        )
+        # 流水
+        conn.execute(
+            """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
+               VALUES (?, ?, ?, ?, ?)""",
+            (group_id, wxid, amount, reason, description)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return get_coin_wallet(group_id, wxid)
 
 
 def spend_coins(group_id: int, wxid: str, amount: int,
                 reason: str, description: str = "") -> dict | None:
-    """消费鳞币，余额不足返回 None"""
+    """消费鳞币，余额不足返回 None（v0.13.1: 加事务保护）"""
     wallet = ensure_coin_wallet(group_id, wxid)
     if wallet["balance"] < amount:
         return None
     conn = get_conn()
-    conn.execute(
-        """UPDATE scale_coin_wallet
-           SET balance = balance - ?, total_spent = total_spent + ?,
-               updated_at = datetime('now')
-           WHERE group_id=? AND wxid=?""",
-        (amount, amount, group_id, wxid)
-    )
-    conn.execute(
-        """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
-           VALUES (?, ?, ?, ?, ?)""",
-        (group_id, wxid, -amount, reason, description)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            """UPDATE scale_coin_wallet
+               SET balance = balance - ?, total_spent = total_spent + ?,
+                   updated_at = datetime('now')
+               WHERE group_id=? AND wxid=?""",
+            (amount, amount, group_id, wxid)
+        )
+        conn.execute(
+            """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
+               VALUES (?, ?, ?, ?, ?)""",
+            (group_id, wxid, -amount, reason, description)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return get_coin_wallet(group_id, wxid)
 
 
