@@ -49,9 +49,10 @@ export const getAnalyzedDates = (gid) => request(`/groups/${gid}/dates/analyzed`
 export const analyzeDate = (gid, date) =>
   request(`/groups/${gid}/analyze/${date}`, { method: 'POST' })
 // 异步分析：返回 task_id。v0.12.0: 支持 modelId 参数
-export const analyzeDateAsync = async (gid, date, modelId = null) => {
+export const analyzeDateAsync = async (gid, date, modelId = null, force = false) => {
   const params = new URLSearchParams()
   if (modelId) params.set('model_id', modelId)
+  if (force) params.set('force', 'true')
   const qs = params.toString() ? `?${params.toString()}` : ''
   const res = await fetch(`${BASE}/groups/${gid}/analyze/${date}${qs}`, { method: 'POST' })
   const data = await res.json()

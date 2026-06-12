@@ -179,6 +179,13 @@ async def api_analyze_date(group_id: int, date: str, force: bool = False, model_
         except json.JSONDecodeError:
             pass
 
+    # v0.12.5: 提前校验 model_id，避免创建无效任务
+    if model_id is not None:
+        from models.database import get_model_config
+        db_config = get_model_config(model_id)
+        if not db_config or not db_config.get("is_enabled", 1):
+            raise HTTPException(400, detail=f"模型 ID={model_id} 不存在或已禁用")
+
     # 文本消息太少
     text_msgs = chat.get_text_messages_for_date(date)
     if len(text_msgs) < 5:

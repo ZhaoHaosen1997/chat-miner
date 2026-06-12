@@ -2,6 +2,7 @@
 import { ref, provide, onMounted } from 'vue'
 import Layout from './components/Layout.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
+import ErrorModal from './components/ErrorModal.vue'
 import { getActiveTasks, listGroups } from './api/index.js'
 
 const currentGroup = ref(null)
@@ -10,6 +11,13 @@ const refreshKey = ref(0)
 // 全局任务管理
 const activeTaskId = ref('')
 const taskHistory = ref([])  // [{taskId, groupName, type, status, finishedAt}]
+
+// v0.12.5: 全局错误弹窗
+const errorModalRef = ref(null)
+function showError(title, message, detail = '', context = '') {
+  errorModalRef.value?.show({ title, message, detail, context })
+}
+provide('showError', showError)
 
 // 页面刷新后恢复进行中任务 + 自动选择默认群
 onMounted(async () => {
@@ -93,5 +101,8 @@ function addTaskHistoryEntry(taskId, data) {
       @done="onTaskDone"
       @close="activeTaskId = ''"
     />
+
+    <!-- 全局错误弹窗 -->
+    <ErrorModal ref="errorModalRef" />
   </div>
 </template>

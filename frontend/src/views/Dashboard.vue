@@ -12,6 +12,7 @@ const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
 const activeTaskId = inject('activeTaskId')
+const showError = inject('showError')
 const gid = computed(() => currentGroup.value?.id)
 
 // 批量任务运行时定时刷新（逐个标绿）
@@ -128,7 +129,7 @@ async function analyzeLatest() {
     } else if (result.cached) {
       await loadAll(); triggerRefresh?.(); analyzing.value = false
     }
-  } catch (e) { console.error(e); analyzing.value = false }
+  } catch (e) { showError?.('分析失败', e.message, e.stack, '仪表盘·分析最新'); analyzing.value = false }
 }
 
 const batchTotal = ref(0)
@@ -144,7 +145,7 @@ async function startAnalyzeAll() {
     } else if (result.total_unanalyzed === 0) {
       analyzing.value = false
     }
-  } catch (e) { console.error(e); analyzing.value = false }
+  } catch (e) { showError?.('批量分析失败', e.message, e.stack, '仪表盘·一键分析全部'); analyzing.value = false }
 }
 
 function onTaskDone(data) {
@@ -176,13 +177,14 @@ async function handleGenerateReport() {
   if (!dayPopup.value) return
   dayPopupLoading.value = 'report'
   try {
-    const result = await analyzeDateAsync(gid.value, dayPopup.value.date, getDailyModelId())
+    const force = dayPopup.value.analyzed  // 已分析过 = 强制重新生成
+    const result = await analyzeDateAsync(gid.value, dayPopup.value.date, getDailyModelId(), force)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     }
     dayPopup.value = null  // v0.12.4: 生成后自动关闭弹窗
     setTimeout(() => {
-      if (gid.value) loadDates()
+      if (gid.value) loadAll(true)
     }, 2000)
   } catch (e) { dayPopupError.value = e.message }
   finally { dayPopupLoading.value = '' }
@@ -318,7 +320,7 @@ async function doGenerateWeekly(periodKey, force = false) {
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     }
-  } catch (e) { console.error(e); generatingPeriod.value = '' }
+  } catch (e) { showError?.('周报生成失败', e.message, e.stack, '仪表盘·生成周报'); generatingPeriod.value = '' }
 }
 
 // 生成月报
@@ -330,7 +332,7 @@ async function doGenerateMonthly(periodKey, force = false) {
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     }
-  } catch (e) { console.error(e); generatingPeriod.value = '' }
+  } catch (e) { showError?.('月报生成失败', e.message, e.stack, '仪表盘·生成月报'); generatingPeriod.value = '' }
 }
 
 // 导航到周报/月报/年报详情
@@ -365,7 +367,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
       // API 返回 code=200 但 data=null（如数据不足），清除 generating 状态
       generatingPeriod.value = ''
     }
-  } catch (e) { console.error(e); generatingPeriod.value = '' }
+  } catch (e) { showError?.('年报生成失败', e.message, e.stack, '仪表盘·生成年报'); generatingPeriod.value = '' }
 }
 
 </script>
