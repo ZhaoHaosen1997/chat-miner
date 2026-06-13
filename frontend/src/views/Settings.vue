@@ -10,7 +10,7 @@ import {
 import {
   Plus, Pencil, Trash2, Check, X, Loader2,
   Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles,
-  ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio,
+  ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio, FileText,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -756,6 +756,65 @@ onMounted(async () => {
                 min="1" max="365"
                 class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
               />
+            </div>
+          </div>
+        </div>
+
+        <!-- 周期报告可用性阈值 -->
+        <div class="card p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <FileText :size="16" class="text-gray-500" />
+            <h3 class="text-sm font-semibold text-gray-700">周期报告可用性阈值</h3>
+            <span class="text-xs text-gray-400">(不满足时前端标记为"数据不足")</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <!-- 周报 -->
+            <div class="p-3 bg-indigo-50/50 rounded-xl space-y-2">
+              <span class="text-xs font-semibold text-indigo-600">📰 周报</span>
+              <div>
+                <label class="text-[11px] text-gray-400">最低天数</label>
+                <input type="number" :value="appSettings.weekly_min_days?.value || 3"
+                  @change="saveAdvancedSetting('weekly_min_days', $event.target.value)"
+                  min="1" max="7" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
+              <div>
+                <label class="text-[11px] text-gray-400">最低消息数</label>
+                <input type="number" :value="appSettings.weekly_min_msgs?.value || 50"
+                  @change="saveAdvancedSetting('weekly_min_msgs', $event.target.value)"
+                  min="0" max="99999" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
+            </div>
+            <!-- 月报 -->
+            <div class="p-3 bg-purple-50/50 rounded-xl space-y-2">
+              <span class="text-xs font-semibold text-purple-600">📅 月报</span>
+              <div>
+                <label class="text-[11px] text-gray-400">最低天数</label>
+                <input type="number" :value="appSettings.monthly_min_days?.value || 5"
+                  @change="saveAdvancedSetting('monthly_min_days', $event.target.value)"
+                  min="1" max="31" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
+              <div>
+                <label class="text-[11px] text-gray-400">最低消息数</label>
+                <input type="number" :value="appSettings.monthly_min_msgs?.value || 100"
+                  @change="saveAdvancedSetting('monthly_min_msgs', $event.target.value)"
+                  min="0" max="99999" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
+            </div>
+            <!-- 年报 -->
+            <div class="p-3 bg-amber-50/50 rounded-xl space-y-2">
+              <span class="text-xs font-semibold text-amber-600">🏆 年报</span>
+              <div>
+                <label class="text-[11px] text-gray-400">最低天数</label>
+                <input type="number" :value="appSettings.annual_min_days?.value || 30"
+                  @change="saveAdvancedSetting('annual_min_days', $event.target.value)"
+                  min="1" max="366" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
+              <div>
+                <label class="text-[11px] text-gray-400">最低消息数</label>
+                <input type="number" :value="appSettings.annual_min_msgs?.value || 300"
+                  @change="saveAdvancedSetting('annual_min_msgs', $event.target.value)"
+                  min="0" max="99999" class="w-full px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              </div>
             </div>
           </div>
         </div>

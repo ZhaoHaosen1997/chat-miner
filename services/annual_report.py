@@ -33,9 +33,8 @@ from services.weekly_report import (
 
 logger = logging.getLogger(__name__)
 
-# 年度最低数据要求
-MIN_DAYS = 30
-MIN_MESSAGES = 300
+# 年度最低数据要求（从 config 动态读取，支持设置页热更新）
+# 使用 config.ANNUAL_MIN_DAYS / config.ANNUAL_MIN_MSGS
 
 # ---- 年度颁奖典礼 System Prompt ----
 ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼群聊人类学家。
@@ -112,10 +111,10 @@ async def generate_annual_report(group_id: int, year: int, chat,
     year_str = str(year)
     year_dates = sorted([d for d in all_dates if d.startswith(year_str)])
 
-    if len(year_dates) < MIN_DAYS:
+    if len(year_dates) < int(config.ANNUAL_MIN_DAYS):
         if task:
-            task.finish(success=False, error={"type": "too_few", "detail": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{MIN_DAYS}天）"})
-        return {"success": False, "error": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{MIN_DAYS}天）"}
+            task.finish(success=False, error={"type": "too_few", "detail": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{int(config.ANNUAL_MIN_DAYS)}天）"})
+        return {"success": False, "error": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{int(config.ANNUAL_MIN_DAYS)}天）"}
 
     # 3. 收集月报摘要作为上下文
     monthly_summaries = _collect_monthly_summaries(group_id, year)
@@ -125,11 +124,11 @@ async def generate_annual_report(group_id: int, year: int, chat,
     if not raw_data:
         return {"success": False, "error": "无法提取年度数据"}
 
-    if raw_data["stats"]["total_messages"] < MIN_MESSAGES:
+    if raw_data["stats"]["total_messages"] < int(config.ANNUAL_MIN_MSGS):
         if task:
-            task.finish(success=False, error={"type": "too_few", "detail": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{MIN_MESSAGES}条）"})
+            task.finish(success=False, error={"type": "too_few", "detail": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{int(config.ANNUAL_MIN_MSGS)}条）"})
         return {"success": False,
-                "error": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{MIN_MESSAGES}条）"}
+                "error": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{int(config.ANNUAL_MIN_MSGS)}条）"}
 
     # 5. 计算奖项数量
     active_count = raw_data["stats"]["active_members"]

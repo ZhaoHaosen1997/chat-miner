@@ -134,14 +134,14 @@ def compute_available_periods(
         return []
 
     if period_type == "annual":
-        min_days = 30
-        min_msgs = 300  # v1.1.0: 与 MIN_MESSAGES 保持一致
+        min_days = int(config.ANNUAL_MIN_DAYS)
+        min_msgs = int(config.ANNUAL_MIN_MSGS)
     elif period_type == "monthly":
-        min_days = 5
-        min_msgs = 100  # v1.1.0: 新管道最低消息数
+        min_days = int(config.MONTHLY_MIN_DAYS)
+        min_msgs = int(config.MONTHLY_MIN_MSGS)
     else:
-        min_days = 3
-        min_msgs = 0  # 周报不卡消息数
+        min_days = int(config.WEEKLY_MIN_DAYS)
+        min_msgs = int(config.WEEKLY_MIN_MSGS)
 
     groups = {}  # period_key -> {day_count, msg_count, date_start, date_end}
 
@@ -1204,12 +1204,12 @@ async def generate_weekly_report(
             week_dates.append(ds)
         d += timedelta(days=1)
 
-    if len(week_dates) < 3:
+    if len(week_dates) < int(config.WEEKLY_MIN_DAYS):
         if task:
-            task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 3 天）"})
+            task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 {int(config.WEEKLY_MIN_DAYS)} 天）"})
         return {
             "success": False, "data": None,
-            "error": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 3 天）",
+            "error": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 {int(config.WEEKLY_MIN_DAYS)} 天）",
         }
 
     if task:
@@ -1226,11 +1226,11 @@ async def generate_weekly_report(
     else:
         raw_data = _extract_period_raw_data(chat, week_dates, group_id)
         total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
-        if total_msgs >= 50:  # 至少 50 条文本消息才走新管道
+        if total_msgs >= int(config.WEEKLY_MIN_MSGS):
             use_new_pipeline = True
             logger.info(f"周报使用新管道: {period_key}, {total_msgs}条消息")
         else:
-            logger.info(f"周报降级: {period_key} (消息不足: {total_msgs}条<50)")
+            logger.info(f"周报降级: {period_key} (消息不足: {total_msgs}条<{int(config.WEEKLY_MIN_MSGS)})")
 
     # v0.13.4: 本地模型上下文有限，降级到旧管道（基于日报聚合，prompt 更短）
     is_local_model = model_config.get("model_type") == "local"
@@ -1309,12 +1309,12 @@ async def generate_weekly_report(
         if task:
             task.update("inference", "⚠️ 原始消息数据不足，降级为日报聚合模式...")
         analyzed_week_dates = [d for d in week_dates if d in analyzed_dates]
-        if len(analyzed_week_dates) < 3:
+        if len(analyzed_week_dates) < int(config.WEEKLY_MIN_DAYS):
             if task:
-                task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 3 天）"})
+                task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 {int(config.WEEKLY_MIN_DAYS)} 天）"})
             return {
                 "success": False, "data": None,
-                "error": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 3 天）",
+                "error": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 {int(config.WEEKLY_MIN_DAYS)} 天）",
             }
 
         if task:
@@ -1452,13 +1452,13 @@ async def generate_monthly_report(
             month_dates_list.append(ds)
         d += timedelta(days=1)
 
-    if len(month_dates_list) < 5:
+    if len(month_dates_list) < int(config.MONTHLY_MIN_DAYS):
         logger.warning(f"月报数据不足: group={group_id} period={period_key} 仅有 {len(month_dates_list)} 天")
         if task:
-            task.finish(success=False, error={"type": "too_few", "detail": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 5 天）"})
+            task.finish(success=False, error={"type": "too_few", "detail": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 {int(config.MONTHLY_MIN_DAYS)} 天）"})
         return {
             "success": False, "data": None,
-            "error": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 5 天）",
+            "error": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 {int(config.MONTHLY_MIN_DAYS)} 天）",
         }
 
     # 收集该月内的周报摘要
@@ -1512,7 +1512,7 @@ async def generate_monthly_report(
             task.update("inference", f"提取 {len(month_dates_list)} 天原始数据...")
         raw_data = _extract_period_raw_data(chat, month_dates_list, group_id, samples_per_day=5)
         total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
-        if total_msgs >= 100:
+        if total_msgs >= int(config.MONTHLY_MIN_MSGS):
             use_new_pipeline = True
             logger.info(f"月报使用新管道: {period_key}, {total_msgs}条消息")
             # 词频突变检测
@@ -1561,7 +1561,7 @@ async def generate_monthly_report(
             except Exception as e:
                 logger.warning(f"词频突变检测失败: {e}")
         else:
-            logger.info(f"月报降级: {period_key} (消息不足: {total_msgs}条<100)")
+            logger.info(f"月报降级: {period_key} (消息不足: {total_msgs}条<{int(config.MONTHLY_MIN_MSGS)})")
 
     # v0.13.4: 本地模型上下文有限，降级到旧管道
     is_local_model_monthly = model_config.get("model_type") == "local"

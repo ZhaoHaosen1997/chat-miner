@@ -22,7 +22,7 @@ BASE_DIR = _get_base_dir()
 
 class Config:
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.2.7"
+    VERSION = "1.2.8"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -57,6 +57,14 @@ class Config:
     MONTHLY_TEMPERATURE = 0.6
     DEEPSEEK_MAX_TOKENS_WEEKLY = 4096
     DEEPSEEK_MAX_TOKENS_MONTHLY = 8192
+
+    # ==================== 周期报告可用性阈值（可在设置-高级选项配置） ====================
+    WEEKLY_MIN_DAYS = 3
+    WEEKLY_MIN_MSGS = 50
+    MONTHLY_MIN_DAYS = 5
+    MONTHLY_MIN_MSGS = 100
+    ANNUAL_MIN_DAYS = 30
+    ANNUAL_MIN_MSGS = 300
 
     # ==================== 画像刷新阈值 ====================
     PORTRAIT_REFRESH_DAYS = 7
@@ -158,6 +166,23 @@ class Config:
         if not isinstance(data, dict):
             logger.warning("config.json 格式错误（非对象），使用默认值")
             return
+
+        # 检查并补充缺失字段（新版本新增的配置项）
+        missing = [k for k in cls._JSON_CONFIG_KEYS if k not in data]
+        if missing:
+            for k in missing:
+                _, default_val = cls._JSON_CONFIG_KEYS[k]
+                if k in ("data_dir", "log_dir"):
+                    data[k] = str(default_val)  # Path → 字符串
+                else:
+                    data[k] = default_val
+                logger.info(f"config.json 补充缺失字段: {k} = {data[k]}")
+            try:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info("config.json 已更新（补充缺失字段）")
+            except OSError as e:
+                logger.warning(f"config.json 写入失败: {e}")
 
         for json_key, (attr_name, default_val) in cls._JSON_CONFIG_KEYS.items():
             if json_key in data:

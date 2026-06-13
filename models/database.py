@@ -4,10 +4,13 @@
 """
 import sqlite3
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from config import config
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_path() -> Path:
@@ -457,13 +460,51 @@ def _seed_default_model_configs(conn):
     conn.commit()
 
 
-def _seed_app_settings(conn):
-    """v1.0.2: 首次启动时从 config.py 默认值 + config.DEFAULT_STOPWORDS 初始化 app_settings"""
-    count = conn.execute("SELECT COUNT(*) FROM app_settings").fetchone()[0]
-    if count > 0:
-        return  # 已有配置，不覆盖
+# v1.2.8: 所有可热更新设置的注册表（key, default_value, value_type, description）
+# 同时用于 _seed_app_settings（补种缺失键）和 upsert_app_setting（确定 value_type）
+_APP_SETTINGS_REGISTRY = None
 
-    settings = [
+
+def _get_settings_registry():
+    """惰性构建设置注册表 {key: (value, value_type, description)}"""
+    global _APP_SETTINGS_REGISTRY
+    if _APP_SETTINGS_REGISTRY is not None:
+        return _APP_SETTINGS_REGISTRY
+    _APP_SETTINGS_REGISTRY = {}
+    for entry in _SETTINGS_DEFS:
+        key, value, value_type, description = entry
+        _APP_SETTINGS_REGISTRY[key] = (value, value_type, description)
+    # 停用词特殊处理
+    _APP_SETTINGS_REGISTRY["stopwords_text"] = (config.DEFAULT_STOPWORDS, "string", "用户自定义过滤词")
+    return _APP_SETTINGS_REGISTRY
+
+
+def _seed_app_settings(conn):
+    """v1.2.8: 补足缺失的 app_settings + 修复 value_type 错误的历史数据"""
+    existing_rows = {row[0]: row[1] for row in conn.execute("SELECT key, value_type FROM app_settings").fetchall()}
+    registry = _get_settings_registry()
+
+    # 1. 补足缺失的键
+    for key, (value, value_type, description) in registry.items():
+        if key not in existing_rows:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, value_type, description) "
+                "VALUES (?, ?, ?, ?)",
+                (key, value, value_type, description)
+            )
+        elif existing_rows[key] != value_type:
+            # 2. 修复 value_type 错误的历史数据（如 upsert 误写为 'string'）
+            conn.execute(
+                "UPDATE app_settings SET value_type = ? WHERE key = ?",
+                (value_type, key)
+            )
+            logger.warning(f"已修复 app_settings.{key} 的 value_type: {existing_rows[key]} → {value_type}")
+
+    conn.commit()
+
+
+# 所有可热更新设置的定义（key, str_value, value_type, description）
+_SETTINGS_DEFS = [
         # 高级：Ollama
         ("ollama_timeout", str(config.OLLAMA_TIMEOUT), "int",
          "Ollama 请求超时(秒)"),
@@ -494,6 +535,19 @@ def _seed_app_settings(conn):
         # 高级：画像
         ("portrait_refresh_days", str(config.PORTRAIT_REFRESH_DAYS), "int",
          "画像刷新阈值(天)"),
+        # 高级：周期报告可用性阈值（周报/月报/年报 最低天数+消息数）
+        ("weekly_min_days", str(config.WEEKLY_MIN_DAYS), "int",
+         "周报最低天数"),
+        ("weekly_min_msgs", str(config.WEEKLY_MIN_MSGS), "int",
+         "周报最低消息数"),
+        ("monthly_min_days", str(config.MONTHLY_MIN_DAYS), "int",
+         "月报最低天数"),
+        ("monthly_min_msgs", str(config.MONTHLY_MIN_MSGS), "int",
+         "月报最低消息数"),
+        ("annual_min_days", str(config.ANNUAL_MIN_DAYS), "int",
+         "年报最低天数"),
+        ("annual_min_msgs", str(config.ANNUAL_MIN_MSGS), "int",
+         "年报最低消息数"),
         # WeFlow 增量同步
         ("weflow_enabled", str(config.WEFLOW_ENABLED).lower(), "bool",
          "WeFlow 自动同步开关"),
@@ -504,20 +558,7 @@ def _seed_app_settings(conn):
         ("weflow_sync_interval_hours", str(config.WEFLOW_SYNC_INTERVAL_HOURS), "int",
          "WeFlow 自动同步间隔(小时)"),
     ]
-    for key, value, value_type, description in settings:
-        conn.execute(
-            "INSERT INTO app_settings (key, value, value_type, description) "
-            "VALUES (?, ?, ?, ?)",
-            (key, value, value_type, description)
-        )
-
-    # 停用词：从 config.DEFAULT_STOPWORDS 常量导入
-    conn.execute(
-        "INSERT INTO app_settings (key, value, value_type, description) "
-        "VALUES ('stopwords_text', ?, 'string', '用户自定义过滤词')",
-        (config.DEFAULT_STOPWORDS,)
-    )
-    conn.commit()
+    # _seed_app_settings 使用 _SETTINGS_DEFS + _get_settings_registry() 统一处理
 
 
 def _migrate_db(conn):
@@ -1703,15 +1744,20 @@ def get_all_app_settings() -> list[dict]:
 
 
 def upsert_app_setting(key: str, value: str) -> bool:
-    """插入或更新单个应用设置"""
+    """插入或更新单个应用设置。v1.2.8: INSERT 时从注册表确定 value_type，避免误写为 'string'"""
+    registry = _get_settings_registry()
+    type_info = registry.get(key)
+    value_type = type_info[1] if type_info else "string"
+
     conn = get_conn()
     conn.execute(
-        """INSERT INTO app_settings (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
+        """INSERT INTO app_settings (key, value, value_type, updated_at)
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
            ON CONFLICT(key) DO UPDATE SET
            value = excluded.value,
+           value_type = excluded.value_type,
            updated_at = CURRENT_TIMESTAMP""",
-        (key, value)
+        (key, value, value_type)
     )
     conn.commit()
     conn.close()
@@ -1722,15 +1768,19 @@ def upsert_app_settings_batch(updates: dict[str, str]) -> bool:
     """批量更新应用设置"""
     if not updates:
         return False
+    registry = _get_settings_registry()
     conn = get_conn()
     for key, value in updates.items():
+        type_info = registry.get(key)
+        value_type = type_info[1] if type_info else "string"
         conn.execute(
-            """INSERT INTO app_settings (key, value, updated_at)
-               VALUES (?, ?, CURRENT_TIMESTAMP)
+            """INSERT INTO app_settings (key, value, value_type, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
+               value_type = excluded.value_type,
                updated_at = CURRENT_TIMESTAMP""",
-            (key, value)
+            (key, value, value_type)
         )
     conn.commit()
     conn.close()
@@ -1778,6 +1828,13 @@ def load_app_settings_to_config():
         "deepseek_max_tokens_weekly": "DEEPSEEK_MAX_TOKENS_WEEKLY",
         "deepseek_max_tokens_monthly": "DEEPSEEK_MAX_TOKENS_MONTHLY",
         "portrait_refresh_days": "PORTRAIT_REFRESH_DAYS",
+        # 周期报告可用性阈值
+        "weekly_min_days": "WEEKLY_MIN_DAYS",
+        "weekly_min_msgs": "WEEKLY_MIN_MSGS",
+        "monthly_min_days": "MONTHLY_MIN_DAYS",
+        "monthly_min_msgs": "MONTHLY_MIN_MSGS",
+        "annual_min_days": "ANNUAL_MIN_DAYS",
+        "annual_min_msgs": "ANNUAL_MIN_MSGS",
         # WeFlow 增量同步
         "weflow_enabled": "WEFLOW_ENABLED",
         "weflow_base_url": "WEFLOW_BASE_URL",

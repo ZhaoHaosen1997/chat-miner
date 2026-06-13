@@ -642,7 +642,7 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
     # 找最新可用的周
     if not period_key:
         all_dates = chat.all_dates()
-        periods = compute_available_periods(all_dates, "weekly")
+        periods = compute_available_periods(all_dates, "weekly", chat=chat)
         ready = [p for p in periods if p["status"] == "ready"]
         if not ready:
             return {
@@ -695,7 +695,7 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
         raise HTTPException(404, detail="群数据未加载")
 
     all_dates = chat.all_dates()
-    periods = compute_available_periods(all_dates, "weekly")
+    periods = compute_available_periods(all_dates, "weekly", chat=chat)
     ready = [p for p in periods if p["status"] == "ready"]
     # 从新到旧排序
     ready.sort(key=lambda p: p["period_key"], reverse=True)
@@ -807,7 +807,7 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
 
     if not period_key:
         all_dates = chat.all_dates()
-        periods = compute_available_periods(all_dates, "monthly")
+        periods = compute_available_periods(all_dates, "monthly", chat=chat)
         ready = [p for p in periods if p["status"] == "ready"]
         if not ready:
             return {
@@ -860,7 +860,7 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
         raise HTTPException(404, detail="群数据未加载")
 
     all_dates = chat.all_dates()
-    periods = compute_available_periods(all_dates, "monthly")
+    periods = compute_available_periods(all_dates, "monthly", chat=chat)
     ready = [p for p in periods if p["status"] == "ready"]
     ready.sort(key=lambda p: p["period_key"], reverse=True)
 
@@ -969,7 +969,7 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
 
     if not year:
         all_dates = chat.all_dates()
-        periods = compute_available_periods(all_dates, "annual")
+        periods = compute_available_periods(all_dates, "annual", chat=chat)
         ready = [p for p in periods if p["status"] == "ready"]
         if not ready:
             return {

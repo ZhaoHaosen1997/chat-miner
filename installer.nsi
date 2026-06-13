@@ -36,6 +36,9 @@ SetCompressor /SOLID lzma
 
 ; --- Install Section ---
 Section "Install"
+    ; 关闭运行中的 ChatMiner（释放文件锁，避免覆盖失败）
+    nsExec::Exec 'taskkill /f /im ChatMiner.exe'
+    Sleep 1500
     SetOutPath "$INSTDIR"
 
     ; 主程序文件（始终覆盖更新）
