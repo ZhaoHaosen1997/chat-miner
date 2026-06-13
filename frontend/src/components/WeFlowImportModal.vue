@@ -173,6 +173,10 @@ async function toggleAutoSync(session) {
     const newVal = !session.auto_sync
     await toggleWeFlowAutoSync(session.group_id, newVal)
     session.auto_sync = newVal
+    // 同步更新 currentGroup，下次打开弹窗时状态保持一致
+    if (props.group && props.group.id === session.group_id) {
+      props.group.weflow_auto_sync = newVal ? 1 : 0
+    }
   } catch (e) {
     showError?.('操作失败', e.message || '未知错误')
   }
@@ -359,7 +363,11 @@ async function doUnlink(session) {
 
         <!-- Footer -->
         <div class="px-5 py-3 border-t border-slate-100 bg-slate-50/50">
-          <p class="text-[10px] text-slate-400">已关联 {{ sessions.filter(s => s.linked).length }} / {{ sessions.length }} 个群 &nbsp;·&nbsp; 首次导入请用 ArkMe JSON</p>
+          <p class="text-[10px] text-slate-400">
+            <template v-if="autoMatch">当前群已关联 WeFlow</template>
+            <template v-else>已关联 {{ sessions.filter(s => s.linked).length }} / {{ sessions.length }} 个群</template>
+            &nbsp;·&nbsp; 首次导入请用 ArkMe JSON
+          </p>
         </div>
       </div>
     </div>

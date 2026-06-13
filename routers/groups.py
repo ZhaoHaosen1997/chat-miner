@@ -154,12 +154,17 @@ async def api_upload_group(file: UploadFile = File(...)):
 
     # 写入数据库
     date_start, date_end = chat.get_date_range()
+    # 群成员数：排除群自身的系统 sender（群聊才有，wxid 含 @chatroom）
+    real_sender_count = len([
+        s for s in chat.senders
+        if not ("@chatroom" in chat.group_wxid and s.get("wxid") == chat.group_wxid)
+    ])
     group_id = create_group(
         name=chat.group_name,
         wxid=chat.group_wxid,
         display_name=chat.group_name,
         message_count=chat.message_count,
-        sender_count=len(chat.senders),
+        sender_count=real_sender_count,
         date_start=date_start,
         date_end=date_end,
         file_path=str(file_path),
@@ -330,12 +335,16 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
     # 更新数据库
     date_start, date_end = merged_chat.get_date_range()
     conn = get_conn()
+    real_count = len([
+        s for s in merged_chat.senders
+        if not ("@chatroom" in merged_chat.group_wxid and s.get("wxid") == merged_chat.group_wxid)
+    ])
     conn.execute(
         """UPDATE chat_groups SET
            message_count=?, sender_count=?,
            date_range_start=?, date_range_end=?, file_path=?
            WHERE id=?""",
-        (len(merged_chat.messages), len(merged_chat.senders),
+        (len(merged_chat.messages), real_count,
          date_start, date_end, str(merged_path), group_id)
     )
     conn.commit()

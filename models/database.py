@@ -423,6 +423,16 @@ def _migrate_weflow_group_columns(conn):
         conn.execute("ALTER TABLE chat_groups ADD COLUMN weflow_last_sync_at TEXT DEFAULT ''")
     if "weflow_last_sync_result" not in cols:
         conn.execute("ALTER TABLE chat_groups ADD COLUMN weflow_last_sync_result TEXT DEFAULT ''")
+    # 修正存量 sender_count：排除群自身的系统 sender（wxid 含 @chatroom 的群）
+    conn.execute("""
+        UPDATE chat_groups SET sender_count = (
+            SELECT COUNT(*) FROM group_members
+            WHERE group_members.group_id = chat_groups.id
+              AND (chat_groups.wxid NOT LIKE '%@chatroom' OR group_members.wxid != chat_groups.wxid)
+        )
+        WHERE wxid LIKE '%@chatroom'
+    """)
+    conn.commit()
 
 
 def _seed_default_model_configs(conn):
@@ -684,12 +694,12 @@ def upsert_members(group_id: int, senders: list[dict]):
 
 
 def get_members(group_id: int) -> list[dict]:
-    """获取群成员列表，按消息数降序（排除群自身）"""
+    """获取群成员列表，按消息数降序（排除群自身的系统 sender，仅群聊）"""
     conn = get_conn()
-    # 获取群的 wxid，用于排除群自身的 sender 条目
     group = conn.execute("SELECT wxid FROM chat_groups WHERE id=?", (group_id,)).fetchone()
     group_wxid = group["wxid"] if group else None
-    if group_wxid:
+    # 只有群聊才需要排除群自身系统 sender（wxid 含 @chatroom），私聊不过滤
+    if group_wxid and "@chatroom" in group_wxid:
         rows = conn.execute(
             "SELECT * FROM group_members WHERE group_id=? AND wxid!=? ORDER BY message_count DESC",
             (group_id, group_wxid)
