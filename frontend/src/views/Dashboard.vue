@@ -668,5 +668,23 @@ async function _executeAnnualGenerate(periodKey, force = false) {
     </template>
     <UploadModal v-if="showUpload" @close="showUpload = false" @uploaded="showUpload = false; loadAll(); loadPeriods()" />
     <WeFlowImportModal v-if="showWeFlow" :group="currentGroup" @close="showWeFlow = false" />
+
+    <!-- 年报：月报不足确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAnnualConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showAnnualConfirm = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 text-center animate-scale-in">
+          <div class="text-5xl mb-3">📋</div>
+          <h3 class="text-lg font-bold text-slate-800 mb-2">月报数量不足</h3>
+          <p class="text-sm text-slate-500 mb-1">
+            {{ pendingAnnualYear }} 年仅生成了 <strong class="text-amber-600">{{ monthlyPeriods.filter(p => p.period_key.startsWith(pendingAnnualYear) && p.status === 'generated').length }}</strong> 个月报（建议至少 6 个）。
+          </p>
+          <p class="text-xs text-slate-400 mb-5">月报数据越丰富，年报的颁奖典礼越精彩。是否继续生成？</p>
+          <div class="flex gap-3 justify-center">
+            <button @click="showAnnualConfirm = false" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">取消</button>
+            <button @click="_executeAnnualGenerate(pendingAnnualYear, true)" class="px-5 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-xl shadow-lg shadow-amber-200 transition-all">继续生成</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

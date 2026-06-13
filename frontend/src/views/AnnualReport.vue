@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch } from 'vue'
+import { ref, inject, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAnnualReport, generateAnnual, getPeriods } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Trophy, Star, Calendar, MessageSquare, Users, TrendingUp } from 'lucide-vue-next'
@@ -17,6 +17,8 @@ const loading = ref(true)
 const generating = ref(false)
 const error = ref('')
 const adjacentYears = ref({ prev: null, next: null })
+const showConfirm = ref(false)       // 月报不足确认弹窗
+const yearMonthlyCount = ref(0)      // 该年已生成月报数
 
 function formatTime(ts) {
   if (!ts) return ''
@@ -46,23 +48,37 @@ async function load() {
     loading.value = false
   }
 
-  // 加载相邻年份
+  // 加载相邻年份 + 该年月报数量
   try {
-    const periods = await getPeriods(currentGroup.value.id, 'annual')
-    const years = periods.filter(p => p.status !== 'insufficient')
+    const [annualPeriods, monthlyPeriods] = await Promise.all([
+      getPeriods(currentGroup.value.id, 'annual'),
+      getPeriods(currentGroup.value.id, 'monthly'),
+    ])
+    const years = annualPeriods.filter(p => p.status !== 'insufficient')
     const idx = years.findIndex(p => p.period_key === props.yearId)
     if (years.length > 1) {
       adjacentYears.value.prev = idx < years.length - 1 ? years[idx + 1].period_key : years[0].period_key
       adjacentYears.value.next = idx > 0 ? years[idx - 1].period_key : years[years.length - 1].period_key
     }
+    yearMonthlyCount.value = monthlyPeriods.filter(p => {
+      const pYear = p.period_key.split('-')[0]
+      return pYear === props.yearId && p.status === 'generated'
+    }).length
   } catch (e) { /* ignore */ }
 }
 
-async function startGenerate() {
+async function startGenerate(force = false) {
   if (generating.value || activeTaskId.value) return
+  // 月报不足 6 个时先弹确认窗，用户二次确认后 force=true 跳过检查
+  if (yearMonthlyCount.value < 6 && !force) {
+    showConfirm.value = true
+    return
+  }
+  showConfirm.value = false
+  activeTaskId.value = ''  // 清除可能残留的旧任务 ID
   generating.value = true
   try {
-    const result = await generateAnnual(currentGroup.value.id, parseInt(props.yearId), true)
+    const result = await generateAnnual(currentGroup.value.id, parseInt(props.yearId), force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     } else {
@@ -87,6 +103,9 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goYear(key) { if (key) router.push(`/annual/${key}`) }
+
+// 页面挂载时清除残留的 activeTaskId，防止按钮被禁用
+onMounted(() => { activeTaskId.value = '' })
 
 // 奖项卡片颜色池
 const awardColors = [
@@ -324,6 +343,24 @@ watch(report, (r) => {
         <span>{{ report.report_json?._version || 'v0.11.0' }} · {{ report.model_used }} · {{ formatTime(report.created_at) }}</span>
       </div>
     </template>
+
+    <!-- 月报不足确认弹窗（Teleport 在 v-if 链外，避免打断 v-else-if） -->
+    <Teleport to="body">
+      <div v-if="showConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showConfirm = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 text-center animate-scale-in">
+          <div class="text-5xl mb-3">📋</div>
+          <h3 class="text-lg font-bold text-slate-800 mb-2">月报数量不足</h3>
+          <p class="text-sm text-slate-500 mb-1">
+            该年仅生成了 <strong class="text-amber-600">{{ yearMonthlyCount }}</strong> 个月报（建议至少 6 个）。
+          </p>
+          <p class="text-xs text-slate-400 mb-5">月报数据越丰富，年报的颁奖典礼越精彩。是否继续生成？</p>
+          <div class="flex gap-3 justify-center">
+            <button @click="showConfirm = false" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">取消</button>
+            <button @click="startGenerate(true)" class="px-5 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-xl shadow-lg shadow-amber-200 transition-all">继续生成</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
