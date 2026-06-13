@@ -64,9 +64,11 @@ async function load() {
     const periods = await getPeriods(currentGroup.value.id, 'weekly')
     const weeks = periods.filter(p => p.status !== 'insufficient')
     const idx = weeks.findIndex(p => p.period_key === props.weekId)
-    // 循环翻页: 到头后绕到另一端
-    adjacentWeeks.value.prev = idx < weeks.length - 1 ? weeks[idx + 1].period_key : weeks[0].period_key
-    adjacentWeeks.value.next = idx > 0 ? weeks[idx - 1].period_key : weeks[weeks.length - 1].period_key
+    // 循环翻页: 到头后绕到另一端（仅1条时隐藏按钮）
+    if (weeks.length > 1) {
+      adjacentWeeks.value.prev = idx < weeks.length - 1 ? weeks[idx + 1].period_key : weeks[0].period_key
+      adjacentWeeks.value.next = idx > 0 ? weeks[idx - 1].period_key : weeks[weeks.length - 1].period_key
+    }
   } catch (e) { /* ignore */ }
 }
 

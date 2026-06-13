@@ -18,9 +18,11 @@ async function loadAdjacentDates() {
   try {
     const dates = await getAnalyzedDates(currentGroup.value.id)
     const idx = dates.findIndex(d => d === props.date)
-    // 循环翻页: 到头后绕到另一端
-    adjacentDates.value.prev = idx < dates.length - 1 ? dates[idx + 1] : dates[0]
-    adjacentDates.value.next = idx > 0 ? dates[idx - 1] : dates[dates.length - 1]
+    // 循环翻页: 到头后绕到另一端（仅1条时隐藏按钮）
+    if (dates.length > 1) {
+      adjacentDates.value.prev = idx < dates.length - 1 ? dates[idx + 1] : dates[0]
+      adjacentDates.value.next = idx > 0 ? dates[idx - 1] : dates[dates.length - 1]
+    }
   } catch { adjacentDates.value = { prev: null, next: null } }
 }
 

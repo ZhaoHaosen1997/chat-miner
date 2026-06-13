@@ -33,16 +33,43 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
         return _chat_cache[group_id]
 
     group = get_group(group_id)
-    if not group or not group.get("file_path"):
+    if not group:
         return None
 
-    file_path = Path(group["file_path"])
-    if not file_path.exists():
+    # 优先用 file_path，缺失时回退到 merged_data.json（WeFlow 同步会生成）
+    file_path = None
+    if group.get("file_path"):
+        fp = Path(group["file_path"])
+        if fp.exists():
+            file_path = fp
+    if not file_path:
+        merged = _find_merged_data(group)
+        if merged:
+            file_path = merged
+
+    if not file_path:
         return None
 
     chat = load_and_parse(file_path)
     _chat_cache[group_id] = chat
     return chat
+
+
+def _find_merged_data(group: dict) -> Path | None:
+    """查找 merged_data.json（WeFlow 同步/导入合并后的数据文件）"""
+    # 1. 与原始文件同目录
+    if group.get("file_path"):
+        candidate = Path(group["file_path"]).parent / "merged_data.json"
+        if candidate.exists():
+            return candidate
+    # 2. data 目录下按 import_{群名} 查找
+    from config import config
+    for subdir in config.DATA_DIR.iterdir():
+        if subdir.is_dir() and subdir.name.startswith("import_"):
+            candidate = subdir / "merged_data.json"
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def _invalidate_cache(group_id: int):

@@ -545,7 +545,9 @@ async def api_periods(group_id: int, type: str = "weekly"):
     from models.database import list_periodic_reports
 
     chat = get_chat_cache(group_id)
-    all_dates = chat.all_dates() if chat else []
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载，请先导入")
+    all_dates = chat.all_dates()
     periods = compute_available_periods(all_dates, type, chat=chat)
 
     # 合并已生成状态

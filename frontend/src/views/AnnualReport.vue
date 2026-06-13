@@ -3,6 +3,7 @@ import { ref, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAnnualReport, generateAnnual, getPeriods } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Trophy, Star, Calendar, MessageSquare, Users, TrendingUp } from 'lucide-vue-next'
+import FloatingNav from '../components/FloatingNav.vue'
 import WordCloud from '../components/WordCloud.vue'
 
 const props = defineProps({ yearId: String })
@@ -15,6 +16,7 @@ const report = ref(null)
 const loading = ref(true)
 const generating = ref(false)
 const error = ref('')
+const adjacentYears = ref({ prev: null, next: null })
 
 function formatTime(ts) {
   if (!ts) return ''
@@ -43,6 +45,17 @@ async function load() {
   } finally {
     loading.value = false
   }
+
+  // 加载相邻年份
+  try {
+    const periods = await getPeriods(currentGroup.value.id, 'annual')
+    const years = periods.filter(p => p.status !== 'insufficient')
+    const idx = years.findIndex(p => p.period_key === props.yearId)
+    if (years.length > 1) {
+      adjacentYears.value.prev = idx < years.length - 1 ? years[idx + 1].period_key : years[0].period_key
+      adjacentYears.value.next = idx > 0 ? years[idx - 1].period_key : years[years.length - 1].period_key
+    }
+  } catch (e) { /* ignore */ }
 }
 
 async function startGenerate() {
@@ -73,6 +86,7 @@ watch(activeTaskId, (newVal, oldVal) => {
 })
 
 function goBack() { router.push('/') }
+function goYear(key) { if (key) router.push(`/annual/${key}`) }
 
 // 奖项卡片颜色池
 const awardColors = [
@@ -138,6 +152,15 @@ watch(report, (r) => {
 
 <template>
   <div>
+    <FloatingNav
+      :show-prev="!!adjacentYears.prev"
+      :show-next="!!adjacentYears.next"
+      :prev-label="adjacentYears.prev"
+      :next-label="adjacentYears.next"
+      @prev="goYear(adjacentYears.prev)"
+      @next="goYear(adjacentYears.next)"
+    />
+    <!-- 返回 -->
     <button @click="goBack" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 mb-5 transition-colors group">
       <ArrowLeft class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
       返回仪表盘
