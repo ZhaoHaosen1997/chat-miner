@@ -89,6 +89,7 @@ async def call_online_chat(
     extra = model_config.get("extra_params", {})
 
     if not api_key:
+        logger.warning("在线模型 '%s' 未配置 API Key", model_config.get('name', 'unknown'))
         return {
             "success": False,
             "data": None,
@@ -154,7 +155,7 @@ async def call_online_chat(
         resp.raise_for_status()
         result = resp.json()
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        logger.info(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
+        logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
 
         if content.strip():
             return {

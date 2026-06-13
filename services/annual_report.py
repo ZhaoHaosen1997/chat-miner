@@ -103,8 +103,8 @@ async def generate_annual_report(group_id: int, year: int, chat,
         if cached:
             try:
                 cached["report_json"] = json.loads(cached["report_json"])
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning("年度报告缓存 JSON 解析失败，将重新生成: %s", e)
             return {"success": True, "data": cached, "cached": True}
 
     # 2. 收集全年日期

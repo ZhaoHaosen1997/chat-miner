@@ -139,8 +139,8 @@ async def api_upload_group(file: UploadFile = File(...)):
                 os.remove(file_path)
                 if group_dir != existing_path.parent:
                     shutil.rmtree(group_dir, ignore_errors=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("清理临时文件失败: %s", e)
         return {
             "code": 200,
             "message": f"该群已存在（{existing['name']}）",
@@ -318,7 +318,7 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
                 "messages": merged_chat.messages,
                 "_by_date": merged_chat._by_date,
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
-        logger.info(f"pickle 缓存已同步: {merged_pickle}")
+        logger.debug(f"pickle 缓存已同步: {merged_pickle}")
 
         # 清理旧的 pickle（如果 file_path 变了）
         if old_pickle and old_pickle.exists() and old_pickle != merged_pickle:

@@ -49,7 +49,8 @@ def _load_user_stopwords() -> set[str]:
             if line and not line.startswith("#"):
                 words.add(line)
         return words
-    except Exception:
+    except Exception as e:
+        logger.warning("加载用户停用词失败: %s", e)
         pass
     return set()
 
@@ -919,7 +920,8 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
                             return quotes
             except (json.JSONDecodeError, TypeError):
                 continue
-    except Exception:
+    except Exception as e:
+        logger.warning("查询成员精彩发言失败: %s", e)
         pass
 
     # 如果没有找到，从该成员的消息中挑最长的一条作为亮点

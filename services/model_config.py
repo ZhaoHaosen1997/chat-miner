@@ -44,8 +44,8 @@ def _row_to_config(row: dict) -> dict:
     if row.get("extra_params"):
         try:
             extra = json.loads(row["extra_params"])
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.warning("模型 '%s' 的 extra_params JSON 解析失败: %s", row.get('name', '?'), e)
     return {
         "id": row["id"],
         "name": row["name"],
@@ -153,7 +153,8 @@ def resolve_model_with_fallback(
         # 跨类型兜底：local 默认模型
         try:
             fallback = get_effective_model("local")
-        except Exception:
+        except Exception as e:
+            logger.warning("获取本地模型回退失败: %s", e, exc_info=True)
             fallback = _build_hardcoded_fallback("local")
 
     return primary, fallback

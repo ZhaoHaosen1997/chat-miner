@@ -46,8 +46,8 @@ def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
             )
         """, (max_records,))
         conn.commit()
-    except Exception:
-        pass  # 清理失败不影响主流程
+    except Exception as e:
+        logger.warning("清理过期日志失败: %s", e)  # 清理失败不影响主流程
     finally:
         if conn:
             conn.close()
@@ -61,8 +61,8 @@ def _backup_db_if_exists():
     if db_path.exists() and db_path.stat().st_size > 0 and not backup_path.exists():
         try:
             shutil.copy2(db_path, backup_path)
-        except Exception:
-            pass  # 备份失败不影响启动
+        except Exception as e:
+            logger.warning("数据库备份失败: %s", e)  # 备份失败不影响启动
 
 
 def init_db():
@@ -501,7 +501,7 @@ def _migrate_db(conn):
             WHERE member_id NOT IN (SELECT id FROM group_members)
         """).rowcount
         if fixed_rows or deleted:
-            pass  # 静默处理
+            logger.info("数据库迁移: 修复 %d 行, 删除 %d 行", fixed_rows, deleted)
         # 3. 清理重复：按 wxid 去重，保留 id 最大的
         conn.execute("""
             DELETE FROM group_members WHERE id NOT IN (

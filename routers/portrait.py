@@ -116,8 +116,8 @@ async def _run_portrait_and_save(group_id: int, member_id: int, task):
         logger.error(f"画像生成异常 [member_id={member_id}]: {e}", exc_info=True)
         try:
             task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
-        except Exception:
-            pass
+        except Exception as e2:
+            logger.warning("标记任务完成失败: %s", e2)
 
 
 async def _do_run_portrait_and_save(group_id: int, member_id: int, task):

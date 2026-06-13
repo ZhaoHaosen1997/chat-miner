@@ -1020,7 +1020,8 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
                 )
                 if online_result["success"] and online_result["data"]:
                     return online_result
-        except Exception:
+        except Exception as e:
+            logger.warning("在线模型降级尝试异常: %s", e)
             pass
         return result
 

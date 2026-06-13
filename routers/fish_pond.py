@@ -66,7 +66,8 @@ async def generate_fish_report(group_id: int, date: str = ""):
     try:
         from routers.groups import get_chat_cache
         chat = get_chat_cache(group_id)
-    except Exception:
+    except Exception as e:
+        logger.error("加载聊天缓存失败 (group=%d): %s", group_id, e, exc_info=True)
         raise HTTPException(400, "无法加载聊天数据")
 
     # 拿当日消息解析
@@ -96,7 +97,11 @@ def get_fish_report(group_id: int, date: str):
     if not r:
         raise HTTPException(404, "该日无鱼塘日报")
     import json
-    r["report_json"] = json.loads(r["report_json"])
+    try:
+        r["report_json"] = json.loads(r["report_json"])
+    except (json.JSONDecodeError, TypeError):
+        r["report_json"] = {}
+        logger.warning("鱼塘日报 report_json 解析失败 (date=%s)", date)
     return {"code": 200, "message": "ok", "data": r}
 
 

@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于 AI 大模型",
-    version="1.0.6",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -128,8 +128,8 @@ if __name__ == "__main__":
         time.sleep(1.5)
         try:
             webbrowser.open(f"http://localhost:{config.PORT}")
-        except Exception:
-            pass  # 无浏览器也不崩溃
+        except Exception as e:
+            logger.debug("浏览器打开失败（无头环境）: %s", e)
 
     threading.Thread(target=_open_browser, daemon=True).start()
 

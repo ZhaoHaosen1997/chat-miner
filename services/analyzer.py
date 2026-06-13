@@ -240,7 +240,7 @@ async def call_ollama_chat(
 
         duration_ms = int((time.time() - start_time) * 1000)
         raw_content = result.get("message", {}).get("content", "")
-        logger.info(f"Ollama 响应 ({model}): {duration_ms}ms, {len(raw_content)} 字符")
+        logger.debug(f"Ollama 响应 ({model}): {duration_ms}ms, {len(raw_content)} 字符")
 
         # 尝试 JSON 解析，解析不到就用纯文本（pipeline 已改为纯文本提示词）
         data = _extract_json(raw_content)

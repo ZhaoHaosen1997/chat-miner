@@ -51,19 +51,23 @@ async def ai_judge_relation(name_a: str, name_b: str,
     if len(user_prompt) > 2000:
         user_prompt = user_prompt[:2000]
 
-    if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
-        from services.online_model import call_online_chat
-        result = await call_online_chat(
-            RELATION_JUDGE_PROMPT["system"], user_prompt, model_config,
-            temperature=0.3, max_tokens=20, timeout=15,
-        )
-    else:
-        result = await call_ollama_chat(
-            RELATION_JUDGE_PROMPT["system"],
-            user_prompt,
-            model=model or config.OLLAMA_MODEL,
-            timeout=30,
-        )
+    try:
+        if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
+            from services.online_model import call_online_chat
+            result = await call_online_chat(
+                RELATION_JUDGE_PROMPT["system"], user_prompt, model_config,
+                temperature=0.3, max_tokens=20, timeout=15,
+            )
+        else:
+            result = await call_ollama_chat(
+                RELATION_JUDGE_PROMPT["system"],
+                user_prompt,
+                model=model or config.OLLAMA_MODEL,
+                timeout=30,
+            )
+    except Exception as e:
+        logger.warning("AI 关系判断调用失败: %s", e)
+        return None
 
     if result["success"] and result["data"]:
         raw = str(result["data"]).strip()

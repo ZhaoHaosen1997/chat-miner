@@ -76,6 +76,7 @@ class TaskInfo:
 
     def cancel(self):
         self._cancelled = True
+        logger.info("任务已取消: %s", self.task_id)
         self.update("cancelled", "已取消")
 
     def add_step(self, name: str, status: str = "running", duration_ms: int = 0,
@@ -129,7 +130,7 @@ class TaskManager:
         task = TaskInfo(task_id, task_type, group_id, params)
         task.start()
         self._tasks[task_id] = task
-        logger.info(f"创建任务: {task_id} type={task_type} group={group_id}")
+        logger.debug(f"创建任务: {task_id} type={task_type} group={group_id}")
         return task
 
     def _cleanup_stale(self, max_age_seconds: int = 1800):
@@ -162,6 +163,7 @@ class TaskManager:
         if task and task.status in ("pending", "waiting_gpu", "inference"):
             task.cancel()
             return True
+        logger.warning("无法取消任务 %s: 未找到或已完成", task_id)
         return False
 
     def remove(self, task_id: str):

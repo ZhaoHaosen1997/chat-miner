@@ -195,6 +195,7 @@ async def api_check_health(config_id: int):
                         "data": {"online": False, "error": f"HTTP {resp.status_code}"},
                     }
         except Exception as e:
+            logger.warning("Ollama 健康检查失败: %s", e)
             return {
                 "code": 200,
                 "message": "连通失败",

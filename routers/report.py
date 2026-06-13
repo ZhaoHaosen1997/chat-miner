@@ -66,8 +66,8 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task,
         logger.error(f"日报分析异常 [{group_name} {date}]: {e}", exc_info=True)
         try:
             task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
-        except Exception:
-            pass  # finish 本身失败则忽略
+        except Exception as e2:
+            logger.warning("标记任务完成失败: %s", e2)
 
 
 async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, task, model_id: int = None):
@@ -262,8 +262,8 @@ async def _run_analyze_all(group_id: int, group_name: str, task, model_id: int =
         logger.error(f"批量分析异常 [{group_name}]: {e}", exc_info=True)
         try:
             task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
-        except Exception:
-            pass
+        except Exception as e2:
+            logger.warning("标记任务完成失败: %s", e2)
 
 
 async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: int = None):

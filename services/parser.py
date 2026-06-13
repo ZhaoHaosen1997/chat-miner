@@ -372,7 +372,7 @@ class ParsedChat:
             try:
                 pickle_mtime = self._pickle_path.stat().st_mtime
                 if pickle_mtime >= json_mtime:
-                    logger.info(f"pickle 缓存命中: {self._pickle_path} "
+                    logger.debug(f"pickle 缓存命中: {self._pickle_path} "
                                 f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
                     with open(self._pickle_path, "rb") as f:
                         data = pickle.load(f)
@@ -382,7 +382,7 @@ class ParsedChat:
                     self._by_date = data.get("_by_date")
                     # 兼容旧 pickle（可能还有多余字段）
                     _trim_message_fields(self.messages)
-                    logger.info(f"pickle 加载完成: 群={self.group_name}, "
+                    logger.debug(f"pickle 加载完成: 群={self.group_name}, "
                                 f"消息={len(self.messages)}, 成员={len(self.senders)}")
                     return self
             except Exception as e:
@@ -405,7 +405,7 @@ class ParsedChat:
                             "messages": self.messages,
                             "_by_date": self._by_date,
                         }, f, protocol=pickle.HIGHEST_PROTOCOL)
-                    logger.info(f"pickle 缓存已保存: {self._pickle_path} "
+                    logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                                 f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
                 except Exception as e:
                     logger.warning(f"保存 pickle 缓存失败: {e}")
@@ -413,7 +413,7 @@ class ParsedChat:
             else:
                 raise ValueError("不支持的 ZIP 文件格式，请上传 QQChatExporter V5 导出的群聊 ZIP 文件")
 
-        logger.info(f"JSON 解析: {self.file_path} ({self.file_path.stat().st_size / 1024 / 1024:.1f} MB)")
+        logger.debug(f"JSON 解析: {self.file_path} ({self.file_path.stat().st_size / 1024 / 1024:.1f} MB)")
         with open(self.file_path, "r", encoding="utf-8") as f:
             self.raw = json.load(f)
 
@@ -432,7 +432,7 @@ class ParsedChat:
                         "messages": self.messages,
                         "_by_date": self._by_date,
                     }, f, protocol=pickle.HIGHEST_PROTOCOL)
-                logger.info(f"pickle 缓存已保存: {self._pickle_path} "
+                logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                             f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
             except Exception as e:
                 logger.warning(f"保存 pickle 缓存失败: {e}")
@@ -464,7 +464,7 @@ class ParsedChat:
         # 删除解析后不再使用的字段，节省 ~40MB 内存（180K条消息×6字段）
         _trim_message_fields(self.messages)
 
-        logger.info(f"JSON 解析完成: 群={self.group_name}, 消息={len(self.messages)}, 成员={len(self.senders)}")
+        logger.debug(f"JSON 解析完成: 群={self.group_name}, 消息={len(self.messages)}, 成员={len(self.senders)}")
 
         # 写入 pickle 缓存（异步不阻塞，下次启动受益）
         try:
@@ -475,7 +475,7 @@ class ParsedChat:
                     "messages": self.messages,
                     "_by_date": self._by_date,
                 }, f, protocol=pickle.HIGHEST_PROTOCOL)
-            logger.info(f"pickle 缓存已保存: {self._pickle_path} "
+            logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                         f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
         except Exception as e:
             logger.warning(f"保存 pickle 缓存失败: {e}")

@@ -417,7 +417,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
         label = f"({step_idx}/{total}) {step_name}" if attempt == 1 else f"({step_idx}/{total}) {step_name} 重试{attempt}/{MAX_RETRIES}"
         if task:
             task.update("inference", f"{label}...")
-        logger.info(f"{step_name} 第{attempt}次尝试, 模型={model or config.OLLAMA_MODEL}")
+        logger.debug(f"{step_name} 第{attempt}次尝试, 模型={model or config.OLLAMA_MODEL}")
 
         # 重试时在 prompt 末尾追加格式提醒
         retry_user = user
@@ -429,7 +429,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
         result = await call_ollama_chat(system, retry_user, model, timeout=60)
 
         duration = int((time.time() - start) * 1000)
-        logger.info(f"{step_name} 主模型: success={result['success']}, duration={duration}ms, model={result.get('model','')}")
+        logger.debug(f"{step_name} 主模型: success={result['success']}, duration={duration}ms, model={result.get('model','')}")
 
         # 1. 主模型成功
         if result["success"] and result["data"] is not None:
