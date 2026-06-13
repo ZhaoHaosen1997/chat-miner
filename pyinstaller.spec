@@ -32,6 +32,11 @@ a = Analysis(
         'collections',
         'datetime',
         'pathlib',
+        # WeFlow 同步依赖
+        'requests',
+        'apscheduler',
+        'apscheduler.schedulers.asyncio',
+        'tzlocal',
     ],
     hookspath=[],
     hooksconfig={},

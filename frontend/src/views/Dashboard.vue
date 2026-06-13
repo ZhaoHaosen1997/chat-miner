@@ -6,8 +6,9 @@ import {
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
   generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
+import WeFlowImportModal from '../components/WeFlowImportModal.vue'
 
 const router = useRouter()
 const currentGroup = inject('currentGroup')
@@ -18,11 +19,13 @@ const gid = computed(() => currentGroup.value?.id)
 
 // 批量任务运行时定时刷新（逐个标绿）
 let _refreshTimer = null
-watch(activeTaskId, (newVal) => {
+watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
     _refreshTimer = setInterval(() => loadAll(true), 3000)
-  } else {
+  } else if (oldVal) {
+    // 任务结束时刷新数据
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
+    loadAll()
   }
 })
 onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
@@ -36,6 +39,7 @@ const portraits = ref([])
 const taskHistory = ref([])
 const trending = ref(null)
 const showUpload = ref(false)
+const showWeFlow = ref(false)
 const dayPopup = ref(null)
 const dayPopupLoading = ref('')
 const dayPopupError = ref('')
@@ -496,6 +500,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         </div>
         <div class="flex gap-1.5 ml-auto">
           <button @click="showUpload = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors flex items-center gap-1"><Upload :size="12" />导入</button>
+          <button @click="showWeFlow = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 border border-slate-200 transition-colors flex items-center gap-1"><Radio :size="12" />同步</button>
           <button v-if="(stats?.total_days_with_data - (stats?.analyzed_count || 0)) > 1" @click="startAnalyzeAll" :disabled="analyzing"
             :class="['px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1', !analyzing ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-300']"><Zap :size="12" />一键分析</button>
           <button @click="analyzeLatest" :disabled="analyzing || !latestUnanalyzed"
@@ -668,5 +673,6 @@ async function _executeAnnualGenerate(periodKey, force = false) {
       </Teleport>
     </template>
     <UploadModal v-if="showUpload" @close="showUpload = false" @uploaded="loadAll(); loadPeriods()" />
+    <WeFlowImportModal v-if="showWeFlow" :group="currentGroup" @close="showWeFlow = false" />
   </div>
 </template>

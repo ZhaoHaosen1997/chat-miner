@@ -371,10 +371,42 @@ def init_db():
         conn.execute("ALTER TABLE fish_pond ADD COLUMN equipped_item TEXT DEFAULT ''")
     if "active_consumable" not in cols:
         conn.execute("ALTER TABLE fish_pond ADD COLUMN active_consumable TEXT DEFAULT ''")
+    # WeFlow 同步设置（v0.x）：补足已有数据库缺失的配置项
+    _migrate_weflow_settings(conn)
     conn.commit()
     conn.close()
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
+
+
+def _migrate_weflow_settings(conn):
+    """v0.x: 为已有数据库补足 WeFlow 相关 app_settings"""
+    existing = {
+        row[0] for row in
+        conn.execute("SELECT key FROM app_settings WHERE key LIKE 'weflow_%'").fetchall()
+    }
+    weflow_defaults = [
+        ("weflow_enabled", str(config.WEFLOW_ENABLED).lower(), "bool",
+         "WeFlow 自动同步开关"),
+        ("weflow_base_url", config.WEFLOW_BASE_URL, "string",
+         "WeFlow API 地址"),
+        ("weflow_access_token", config.WEFLOW_ACCESS_TOKEN, "string",
+         "WeFlow Access Token"),
+        ("weflow_sync_interval_hours", str(config.WEFLOW_SYNC_INTERVAL_HOURS), "int",
+         "WeFlow 自动同步间隔(小时)"),
+    ]
+    added = 0
+    for key, value, value_type, description in weflow_defaults:
+        if key not in existing:
+            conn.execute(
+                "INSERT OR IGNORE INTO app_settings (key, value, value_type, description) "
+                "VALUES (?, ?, ?, ?)",
+                (key, value, value_type, description)
+            )
+            added += 1
+    if added:
+        import logging
+        logging.getLogger(__name__).info("DB migrate: added %d WeFlow settings", added)
 
 
 def _seed_default_model_configs(conn):
@@ -436,6 +468,15 @@ def _seed_app_settings(conn):
         # 高级：画像
         ("portrait_refresh_days", str(config.PORTRAIT_REFRESH_DAYS), "int",
          "画像刷新阈值(天)"),
+        # WeFlow 增量同步
+        ("weflow_enabled", str(config.WEFLOW_ENABLED).lower(), "bool",
+         "WeFlow 自动同步开关"),
+        ("weflow_base_url", config.WEFLOW_BASE_URL, "string",
+         "WeFlow API 地址"),
+        ("weflow_access_token", config.WEFLOW_ACCESS_TOKEN, "string",
+         "WeFlow Access Token"),
+        ("weflow_sync_interval_hours", str(config.WEFLOW_SYNC_INTERVAL_HOURS), "int",
+         "WeFlow 自动同步间隔(小时)"),
     ]
     for key, value, value_type, description in settings:
         conn.execute(
@@ -1711,6 +1752,11 @@ def load_app_settings_to_config():
         "deepseek_max_tokens_weekly": "DEEPSEEK_MAX_TOKENS_WEEKLY",
         "deepseek_max_tokens_monthly": "DEEPSEEK_MAX_TOKENS_MONTHLY",
         "portrait_refresh_days": "PORTRAIT_REFRESH_DAYS",
+        # WeFlow 增量同步
+        "weflow_enabled": "WEFLOW_ENABLED",
+        "weflow_base_url": "WEFLOW_BASE_URL",
+        "weflow_access_token": "WEFLOW_ACCESS_TOKEN",
+        "weflow_sync_interval_hours": "WEFLOW_SYNC_INTERVAL_HOURS",
     }
 
     for row in rows:

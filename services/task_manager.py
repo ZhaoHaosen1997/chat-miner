@@ -68,11 +68,11 @@ class TaskInfo:
             except asyncio.QueueFull:
                 logger.debug(f'SSE 队列已满，丢弃 fallback 清除事件: task={self.task_id}')
 
-    def finish(self, success: bool = True, error: dict = None):
+    def finish(self, success: bool = True, error: dict = None, step: str = ""):
         if success:
-            self.update("done", "完成")
+            self.update("done", step or "完成")
         else:
-            self.update("failed", "失败", error=error)
+            self.update("failed", step or "失败", error=error)
 
     def cancel(self):
         self._cancelled = True

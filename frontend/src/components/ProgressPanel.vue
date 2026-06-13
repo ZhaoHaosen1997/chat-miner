@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onUnmounted } from 'vue'
-import { Loader2, CheckCircle2, XCircle, X, Clock, AlertTriangle } from 'lucide-vue-next'
+import { Loader2, CheckCircle2, XCircle, X, Clock, AlertTriangle, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps({
   taskId: { type: String, required: true },
@@ -17,6 +17,7 @@ const modelUsed = ref('')
 const fallback = ref(false)
 const expanded = ref(true)
 const showCancelConfirm = ref(false)
+const taskType = ref('')
 let eventSource = null
 
 function connect() {
@@ -34,6 +35,7 @@ function connect() {
       if (data.model_used) modelUsed.value = data.model_used
       fallback.value = !!data.fallback
       duration.value = data.duration_ms || 0
+      if (data.type) taskType.value = data.type
 
       if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
         emit('done', data)
@@ -80,6 +82,7 @@ const stepLabels = {
   'inference':  { text: 'AI 推理中', icon: Loader2 },
   'parsing':    { text: '解析结果', icon: Loader2 },
   'done':       { text: '完成', icon: CheckCircle2 },
+  'weflow_sync':{ text: 'WeFlow 同步', icon: RefreshCw },
 }
 
 const errorLabels = {
@@ -94,6 +97,17 @@ const errorLabels = {
 function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
+}
+
+const typeLabels = {
+  'weflow_sync': 'WeFlow 同步',
+  'analyze_day': '日报分析',
+  'analyze_all': '批量分析',
+  'full_portrait': '画像分析',
+  'analyze_all_portraits': '全群画像',
+  'generate_weekly': '周报生成',
+  'generate_monthly': '月报生成',
+  'generate_annual': '年报生成',
 }
 
 watch(() => props.taskId, (id) => {
@@ -132,7 +146,8 @@ onUnmounted(() => eventSource?.close())
         <CheckCircle2 v-if="status === 'done'" class="w-4 h-4" />
         <XCircle v-else-if="status === 'failed'" class="w-4 h-4" />
         <Loader2 v-else class="w-4 h-4 animate-spin" />
-        {{ status === 'done' ? '分析完成' : status === 'failed' ? '分析失败' : step }}
+        <span v-if="typeLabels[taskType]" class="text-[10px] px-1.5 py-0.5 rounded-full bg-white/50 font-normal">{{ typeLabels[taskType] }}</span>
+        {{ status === 'done' ? '完成' : status === 'failed' ? '失败' : step }}
       </div>
       <div class="flex items-center gap-1">
         <span v-if="duration > 0" class="text-xs text-slate-400">{{ formatDuration(duration) }}</span>
@@ -156,7 +171,7 @@ onUnmounted(() => eventSource?.close())
         <AlertTriangle :size="12" class="flex-shrink-0" />
         <span>在线模型未能响应，已自动切换本地模型</span>
       </div>
-      <!-- 批量进度条 -->
+      <!-- 进度条（已知总量） -->
       <div v-if="progress.total > 0" class="mb-2">
         <div class="flex justify-between text-xs text-slate-500 mb-1">
           <span>{{ progress.total > 10 ? `已分析 ${progress.current}/${progress.total} 天` : `步骤 ${progress.current}/${progress.total}` }}</span>
@@ -166,6 +181,11 @@ onUnmounted(() => eventSource?.close())
           <div :class="['h-full rounded-full transition-all', status === 'failed' ? 'bg-red-400' : 'bg-indigo-400']"
                :style="{ width: Math.round(progress.current / progress.total * 100) + '%' }" />
         </div>
+      </div>
+      <!-- 运行中计数（总量未知时） -->
+      <div v-else-if="progress.current > 0" class="mb-2 flex items-center gap-2 text-xs text-slate-500">
+        <Loader2 :size="12" class="animate-spin text-indigo-400" />
+        <span>已拉取 <strong class="text-indigo-600">{{ progress.current }}</strong> 条消息</span>
       </div>
 
       <!-- 子步骤列表 -->

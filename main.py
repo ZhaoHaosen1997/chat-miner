@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import config
 from models.database import init_db
-from routers import groups, report, portrait, stats, tasks, fish_pond, settings
+from routers import groups, report, portrait, stats, tasks, fish_pond, settings, weflow
 
 
 # --- PyInstaller 兼容：获取静态资源路径 ---
@@ -79,8 +79,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"预加载失败（不影响正常使用）: {e}")
 
+    # 启动 WeFlow 定时调度
+    try:
+        from services.scheduler import init_scheduler
+        init_scheduler()
+    except Exception as e:
+        logger.warning(f"WeFlow 调度器初始化失败: {e}")
+
     logger.info("=" * 50)
     yield
+    # 关闭调度器
+    try:
+        from services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
     logger.info("Chat-Miner 已关闭")
 
 
@@ -114,6 +127,7 @@ app.include_router(stats.router)
 app.include_router(tasks.router)
 app.include_router(fish_pond.router)
 app.include_router(settings.router)
+app.include_router(weflow.router)
 
 # 挂载前端静态文件（API 路由优先，未匹配的走静态文件）
 dist_path = _get_dist_path()

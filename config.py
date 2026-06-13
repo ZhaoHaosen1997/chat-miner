@@ -22,7 +22,7 @@ BASE_DIR = _get_base_dir()
 
 class Config:
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.1.2"
+    VERSION = "1.2.0"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -60,6 +60,12 @@ class Config:
 
     # ==================== 画像刷新阈值 ====================
     PORTRAIT_REFRESH_DAYS = 7
+
+    # ==================== WeFlow 增量同步 ====================
+    WEFLOW_ENABLED = False
+    WEFLOW_BASE_URL = "http://127.0.0.1:5031"
+    WEFLOW_ACCESS_TOKEN = ""
+    WEFLOW_SYNC_INTERVAL_HOURS = 24
 
     # ==================== 日志 ====================
     LOG_DIR = BASE_DIR / "logs"

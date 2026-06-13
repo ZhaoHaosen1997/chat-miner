@@ -10,7 +10,7 @@ import {
 import {
   Plus, Pencil, Trash2, Check, X, Loader2,
   Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles,
-  ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock,
+  ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -46,6 +46,14 @@ const appSettings = ref({})
 const stopwordsText = ref('')
 const stopwordsLoading = ref(false)
 const stopwordsSaved = ref(false)
+
+// WeFlow 同步设置
+const weflowSettings = ref({
+  weflow_enabled: false,
+  weflow_base_url: 'http://127.0.0.1:5031',
+  weflow_access_token: '',
+  weflow_sync_interval_hours: 24,
+})
 
 // ---- Computed ----
 const localConfigs = computed(() => configs.value.filter(c => c.model_type === 'local'))
@@ -205,9 +213,41 @@ async function loadAppSettings() {
     const map = {}
     for (const s of settings) {
       map[s.key] = { value: s.value, value_type: s.value_type, description: s.description }
+      // 同步 WeFlow 设置
+      if (s.key in weflowSettings.value) {
+        if (s.value_type === 'bool') {
+          weflowSettings.value[s.key] = s.value === 'true'
+        } else if (s.value_type === 'int') {
+          weflowSettings.value[s.key] = parseInt(s.value) || 0
+        } else {
+          weflowSettings.value[s.key] = s.value
+        }
+      }
     }
     appSettings.value = map
   } catch (e) { /* ignore */ }
+}
+
+async function saveWeFlowSetting(key, value) {
+  try {
+    await updateAppSetting(key, String(value))
+    // 更新本地状态
+    const setting = appSettings.value[key]
+    if (setting) {
+      if (setting.value_type === 'bool') {
+        weflowSettings.value[key] = value === 'true'
+        setting.value = String(value)
+      } else if (setting.value_type === 'int') {
+        weflowSettings.value[key] = parseInt(value) || 0
+        setting.value = String(value)
+      } else {
+        weflowSettings.value[key] = value
+        setting.value = value
+      }
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  }
 }
 
 async function loadStopwords() {
@@ -486,6 +526,65 @@ onMounted(async () => {
           >
             {{ stopwordsLoading ? '加载中...' : '保存' }}
           </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- WeFlow 同步设置 -->
+    <section>
+      <div class="flex items-center gap-2 mb-4">
+        <Radio :size="20" class="text-gray-600" />
+        <h2 class="text-lg font-semibold text-gray-800">WeFlow 同步</h2>
+        <span class="text-xs text-gray-400">(增量拉取新消息)</span>
+      </div>
+      <div class="card p-4 space-y-4">
+        <p class="text-sm text-gray-500">
+          配置 WeFlow 本地 API 连接，实现定时自动拉取微信新消息。首次导入请用 ArkMe JSON（首页"导入"按钮）。
+        </p>
+        <!-- 启用开关 -->
+        <div class="flex items-center justify-between">
+          <label class="text-sm font-medium text-gray-700">启用自动同步</label>
+          <button
+            @click="saveWeFlowSetting('weflow_enabled', (!weflowSettings.weflow_enabled).toString())"
+            :class="['w-10 h-5 rounded-full transition-colors', weflowSettings.weflow_enabled ? 'bg-emerald-500' : 'bg-gray-300']"
+          >
+            <div :class="['w-4 h-4 rounded-full bg-white shadow transition-transform', weflowSettings.weflow_enabled ? 'translate-x-5' : 'translate-x-0.5']" />
+          </button>
+        </div>
+        <!-- API 地址 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">API 地址</label>
+          <input
+            :value="weflowSettings.weflow_base_url"
+            @change="saveWeFlowSetting('weflow_base_url', $event.target.value)"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400 outline-none"
+            placeholder="http://127.0.0.1:5031"
+          />
+        </div>
+        <!-- Access Token -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Access Token</label>
+          <input
+            :value="weflowSettings.weflow_access_token"
+            @change="saveWeFlowSetting('weflow_access_token', $event.target.value)"
+            type="password"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400 outline-none"
+            placeholder="WeFlow 设置页面中获取"
+          />
+          <p v-if="weflowSettings.weflow_access_token" class="text-[10px] text-gray-400 mt-1">
+            已配置 ({{ weflowSettings.weflow_access_token.slice(-4).padStart(weflowSettings.weflow_access_token.length, '*') }})
+          </p>
+        </div>
+        <!-- 同步间隔 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">自动同步间隔（小时）</label>
+          <input
+            :value="weflowSettings.weflow_sync_interval_hours"
+            @change="saveWeFlowSetting('weflow_sync_interval_hours', $event.target.value)"
+            type="number" min="1" max="168"
+            class="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400 outline-none"
+          />
+          <p class="text-[10px] text-gray-400 mt-0.5">只拉取新消息，不触发 AI 分析。默认 24 小时。</p>
         </div>
       </div>
     </section>

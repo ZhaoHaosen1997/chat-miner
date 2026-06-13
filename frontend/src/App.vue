@@ -62,11 +62,17 @@ function onGroupChange(group) {
   activeTaskId.value = ''
 }
 
+let _doneTimer = null
 function onTaskDone(data) {
   if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
-    // 记录到历史
     addTaskHistoryEntry(activeTaskId.value, data)
-    activeTaskId.value = ''
+    // 成功时延迟关闭，让用户看清结果；失败/取消立即关闭
+    const delay = data.status === 'done' ? 2500 : 0
+    clearTimeout(_doneTimer)
+    _doneTimer = setTimeout(() => {
+      activeTaskId.value = ''
+      _doneTimer = null
+    }, delay)
   }
 }
 

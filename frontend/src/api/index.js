@@ -314,3 +314,18 @@ export const updateStopwords = (text) =>
     method: 'PUT', body: JSON.stringify({ text })
   })
 
+// ==================== WeFlow 同步 ====================
+export const getWeFlowSessions = (keyword = '') =>
+  request(`/weflow/sessions?keyword=${encodeURIComponent(keyword)}&limit=200`)
+export async function triggerWeFlowSync(group_id) {
+  const res = await fetch(`${BASE}/weflow/sync/${group_id}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '同步失败')
+  return data.data
+}
+export const linkWeFlowGroup = (group_id, chatroom_id) =>
+  request('/weflow/link', {
+    method: 'POST', body: JSON.stringify({ group_id, chatroom_id })
+  })
+export const getWeFlowStatus = () => request('/weflow/status')
+
