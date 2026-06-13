@@ -982,11 +982,12 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
     # 数据量预检
     all_dates = chat.all_dates()
     year_dates = [d for d in all_dates if d.startswith(str(year))]
-    if len(year_dates) < 30:
+    min_days = int(config.ANNUAL_MIN_DAYS)
+    if len(year_dates) < min_days:
         logger.warning(f"年报数据不足: group={group_id} year={year} 仅有 {len(year_dates)} 天")
         return {
             "code": 200,
-            "message": f"{year}年数据不足（仅{len(year_dates)}天有消息，需要≥30天）",
+            "message": f"{year}年数据不足（仅{len(year_dates)}天有消息，需要≥{min_days}天）",
             "data": None,
         }
 
