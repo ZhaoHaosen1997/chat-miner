@@ -120,7 +120,7 @@ def _normalize_qq(raw: dict) -> tuple[dict, list[dict], list[dict]]:
         sid_to_info[next_sid] = {
             "senderID": next_sid,
             "wxid": uid,
-            "displayName": sender.get("remark") or sender.get("groupCard") or sender.get("name") or sender.get("nickname") or "",
+            "displayName": sender.get("groupCard") or sender.get("nickname") or sender.get("remark") or sender.get("name") or "",
             "nickname": sender.get("nickname") or "",
             "uin": uin,
         }
@@ -313,10 +313,10 @@ def _normalize_qq_chunked(file_path: Path) -> tuple[dict, list[dict], list[dict]
                         "senderID": next_sid,
                         "wxid": uid,
                         "displayName": (
-                            sender.get("remark")
-                            or sender.get("groupCard")
-                            or sender.get("name")
+                            sender.get("groupCard")
                             or sender.get("nickname")
+                            or sender.get("remark")
+                            or sender.get("name")
                             or ""
                         ),
                         "nickname": sender.get("nickname") or "",

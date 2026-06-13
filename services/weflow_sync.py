@@ -42,7 +42,9 @@ def normalize_chatlab_to_parsed(chatlab_data: dict) -> dict:
     将 WeFlow ChatLab Pull 返回的 {meta, members, messages, sync}
     转换为 ParsedChat 兼容的 {session, senders, messages}：
     - members[].platformId     → senders[].wxid
-    - members[].accountName    → senders[].displayName
+    - members[].groupNickname  → senders[].displayName 优先
+    - members[].nickName       → senders[].displayName 次选（微信昵称）
+    - members[].accountName    → senders[].displayName 兜底（备注）
     - members[].groupNickname  → senders[].groupNickname
     - messages[].sender        → messages[].wxid
     - messages[].timestamp     → messages[].createTime
@@ -75,12 +77,16 @@ def normalize_chatlab_to_parsed(chatlab_data: dict) -> dict:
         if wxid in wxid_to_sid:
             continue
         wxid_to_sid[wxid] = next_sid
+        # v1.2.11: 显示名优先级 群昵称 > 微信昵称 > 备注
+        nick_name = member.get("nickName", "")
+        account_name = member.get("accountName", "")
+        group_nick = member.get("groupNickname", "")
         sid_to_sender[next_sid] = {
             "senderID": next_sid,
             "wxid": wxid,
-            "displayName": member.get("accountName", ""),
-            "nickname": member.get("accountName", ""),
-            "groupNickname": member.get("groupNickname", ""),
+            "displayName": group_nick or nick_name or account_name or "",
+            "nickname": nick_name or account_name or "",
+            "groupNickname": group_nick,
             "avatar": member.get("avatar", ""),
         }
         next_sid += 1
@@ -93,13 +99,16 @@ def normalize_chatlab_to_parsed(chatlab_data: dict) -> dict:
         # 排除群 ID 自身（系统消息的 sender 可能是 chatroom id）
         if "@chatroom" in sender_wxid:
             continue
+        nick_name = msg.get("nickName", "")
+        account_name = msg.get("accountName", "")
+        group_nick = msg.get("groupNickname", "")
         wxid_to_sid[sender_wxid] = next_sid
         sid_to_sender[next_sid] = {
             "senderID": next_sid,
             "wxid": sender_wxid,
-            "displayName": msg.get("accountName", ""),
-            "nickname": msg.get("accountName", ""),
-            "groupNickname": msg.get("groupNickname", ""),
+            "displayName": group_nick or nick_name or account_name or "",
+            "nickname": nick_name or account_name or "",
+            "groupNickname": group_nick,
             "avatar": "",
         }
         logger.debug(f"动态补充成员: {sender_wxid} → senderID={next_sid}")
@@ -384,7 +393,7 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
             senders_for_db.append({
                 "senderID": 0,  # 不重要，upsert 会按 wxid 更新
                 "wxid": wm.get("wxid", ""),
-                "displayName": wm.get("displayName") or wm.get("nickname") or "",
+                "displayName": wm.get("groupNickname") or wm.get("nickname") or wm.get("remark") or wm.get("displayName") or "",
                 "nickname": wm.get("nickname") or "",
                 "remark": wm.get("remark") or "",
                 "groupNickname": wm.get("groupNickname") or "",
@@ -451,7 +460,7 @@ def link_group_to_weflow(group_id: int, chatroom_id: str,
             senders.append({
                 "senderID": 0,
                 "wxid": wm.get("wxid", ""),
-                "displayName": wm.get("displayName") or wm.get("nickname") or "",
+                "displayName": wm.get("groupNickname") or wm.get("nickname") or wm.get("remark") or wm.get("displayName") or "",
                 "nickname": wm.get("nickname") or "",
                 "remark": wm.get("remark") or "",
                 "groupNickname": wm.get("groupNickname") or "",

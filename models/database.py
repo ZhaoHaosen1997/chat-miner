@@ -388,6 +388,8 @@ def init_db():
         _migrate_weflow_settings(conn)
         # WeFlow 按群同步开关 + 状态
         _migrate_weflow_group_columns(conn)
+        # v1.2.11: 修正 display_name 优先级（群昵称 > 昵称 > 备注）
+        _migrate_display_name_priority(conn)
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
 
@@ -444,6 +446,22 @@ def _migrate_weflow_group_columns(conn):
         WHERE wxid LIKE '%@chatroom'
     """)
     conn.commit()
+
+
+def _migrate_display_name_priority(conn):
+    """v1.2.11: 修正存量成员 display_name 优先级（群昵称 > 昵称 > 备注）
+
+    旧优先级：remark → groupCard → name → nickname（备注优先，不合群聊习惯）
+    新优先级：groupCard → nickname → remark → name（群昵称优先）
+    """
+    updated = conn.execute("""
+        UPDATE group_members SET display_name =
+            COALESCE(NULLIF(group_nickname, ''), NULLIF(nickname, ''), NULLIF(remark, ''), display_name)
+        WHERE COALESCE(NULLIF(group_nickname, ''), NULLIF(nickname, '')) != ''
+    """).rowcount
+    if updated:
+        import logging
+        logging.getLogger(__name__).info("DB migrate: 修正 %d 个成员的 display_name 优先级", updated)
 
 
 def _seed_default_model_configs(conn):
