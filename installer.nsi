@@ -37,7 +37,16 @@ SetCompressor /SOLID lzma
 ; --- Install Section ---
 Section "Install"
     SetOutPath "$INSTDIR"
-    File /r "releases\ChatMiner\*.*"
+
+    ; 主程序文件（始终覆盖更新）
+    SetOverwrite on
+    File /r /x config.json "releases\ChatMiner\*.*"
+
+    ; config.json — 已存在则不覆盖，保留用户配置
+    SetOverwrite off
+    File "releases\ChatMiner\config.json"
+    SetOverwrite on
+
     CreateDirectory "$INSTDIR\data"
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
