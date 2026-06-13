@@ -1218,12 +1218,19 @@ async def generate_weekly_report(
     # ---- v0.7.2 新管道：Python统计 + 匿名化采样 ----
     use_new_pipeline = False
     raw_data = {}
-    if chat and len(chat.messages) > 0:
+    total_msgs = 0
+    if not chat:
+        logger.info(f"周报降级: {period_key} (chat未加载)")
+    elif len(chat.messages) == 0:
+        logger.info(f"周报降级: {period_key} (chat消息为空)")
+    else:
         raw_data = _extract_period_raw_data(chat, week_dates, group_id)
         total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
         if total_msgs >= 50:  # 至少 50 条文本消息才走新管道
             use_new_pipeline = True
             logger.info(f"周报使用新管道: {period_key}, {total_msgs}条消息")
+        else:
+            logger.info(f"周报降级: {period_key} (消息不足: {total_msgs}条<50)")
 
     # v0.13.4: 本地模型上下文有限，降级到旧管道（基于日报聚合，prompt 更短）
     is_local_model = model_config.get("model_type") == "local"
@@ -1297,7 +1304,8 @@ async def generate_weekly_report(
         }
     else:
         # ---- 降级：旧日报聚合管道 ----
-        logger.warning(f"周报降级到旧管道: {period_key} (消息不足或chat未加载)")
+        if not chat:
+            logger.warning(f"周报降级到旧管道: {period_key} (chat未加载)")
         if task:
             task.update("inference", "⚠️ 原始消息数据不足，降级为日报聚合模式...")
         analyzed_week_dates = [d for d in week_dates if d in analyzed_dates]
@@ -1493,14 +1501,20 @@ async def generate_monthly_report(
     # ---- v0.7.2 新管道：Python统计 + 匿名化采样 ----
     use_new_pipeline = False
     raw_data = {}
+    total_msgs = 0
     bursting_words = "暂无词频突变数据"
-    if chat and len(chat.messages) > 0:
+    if not chat:
+        logger.info(f"月报降级: {period_key} (chat未加载)")
+    elif len(chat.messages) == 0:
+        logger.info(f"月报降级: {period_key} (chat消息为空)")
+    else:
         if task:
             task.update("inference", f"提取 {len(month_dates_list)} 天原始数据...")
         raw_data = _extract_period_raw_data(chat, month_dates_list, group_id, samples_per_day=5)
         total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
         if total_msgs >= 100:
             use_new_pipeline = True
+            logger.info(f"月报使用新管道: {period_key}, {total_msgs}条消息")
             # 词频突变检测
             try:
                 # 获取上月消息
@@ -1546,6 +1560,8 @@ async def generate_monthly_report(
                         logger.info(f"词频突变检测: {len(bursting)} 个候选词")
             except Exception as e:
                 logger.warning(f"词频突变检测失败: {e}")
+        else:
+            logger.info(f"月报降级: {period_key} (消息不足: {total_msgs}条<100)")
 
     # v0.13.4: 本地模型上下文有限，降级到旧管道
     is_local_model_monthly = model_config.get("model_type") == "local"
@@ -1631,7 +1647,8 @@ async def generate_monthly_report(
         }
     else:
         # ---- 降级：旧日报聚合管道 ----
-        logger.warning(f"月报降级到旧管道: {period_key} (消息不足或chat未加载)")
+        if not chat:
+            logger.warning(f"月报降级到旧管道: {period_key} (chat未加载)")
         if task:
             task.update("inference", "⚠️ 原始消息数据不足，降级为日报聚合模式...")
         analyzed_month_dates = [d for d in month_dates_list if d in analyzed_dates]
