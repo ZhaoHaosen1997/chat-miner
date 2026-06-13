@@ -106,6 +106,7 @@ cd frontend && npx vite --port 5173
 - **Frontend router**: Hash-based, routes: `/`, `/report/:date`, `/portraits`, `/portrait/:memberId`.
 - **JSON parsing safety**: All message content access uses `(m.get("content") or "").strip()` because `content` can be `None`.
 - **Git**: Commit in Chinese with version tag. Do NOT commit `docs/`.
+- **提交纪律**：用户测试确认功能无误后再 commit + push。AI 不自行提交，等用户明确说"提交"。
 - **版本号规则**：新功能大版本（v0.x.0）独立提交；每次提交 bug fix 时版本号最后一位 +1（如 v0.12.0 → v0.12.1），禁止两次提交使用同一个版本号。
 
 ## Input JSON format
@@ -126,3 +127,36 @@ cd frontend && npx vite --port 5173
 Message types: 文本消息, 图片消息, 表情消息, 语音消息, 系统消息, 引用消息, 视频消息.
 Daily reports include 引用消息 (for context), portrait analysis excludes them (to avoid contamination).
 Portrait analysis also excludes ultra-short messages (<2 Chinese chars) and pure confirmation messages ("1", "ok").
+
+## 踩坑记录
+
+### bat / nsi 文件禁止中文
+
+`build.bat`、`installer.nsi` 等 Windows 脚本文件只用 **ASCII/英文**。NSIS makensis 只认 ANSI 编码，中文注释和 Unicode 字符（如 `—` 长破折号）会直接报 `Bad text encoding` 导致构建失败。bat 脚本同理，中文在 cmd 控制台可能乱码。
+
+### app_settings 类型陷阱
+
+`app_settings` 表的 `value` 列是 `TEXT`，`value_type` 列标记类型（int/float/bool/string）。`load_app_settings_to_config()` 根据 `value_type` 选择转换器。
+
+**坑**：`upsert_app_setting()` 用 `INSERT ... ON CONFLICT DO UPDATE` 时，若 key 不存在，`value_type` 走表默认值 `DEFAULT 'string'`。之后 `load_app_settings_to_config` 用 `str` 转换 → config 属性变成字符串 → `total_msgs >= "50"` → `TypeError`。
+
+**教训**：
+1. `upsert_app_setting` INSERT 时必须显式指定 `value_type`，从 `_SETTINGS_DEFS` 注册表查
+2. `_seed_app_settings` 每次启动校验已有 key 的 `value_type`，错的自动修复
+3. 所有数值比较处加 `int()` 防御（`compute_available_periods` 已做，`generate_*_report` 易遗漏）
+
+### Git Bash 命令行参数 `/D` 陷阱
+
+Git Bash 会把 `/DVERSION=1.2.8` 中的 `/D` 解释为 D: 盘路径。调用 makensis 等 Windows 原生工具时，用 `cmd //c "makensis /DVERSION=..."` 包装，避免路径转换。
+
+### PyInstaller 构建后杀软锁文件
+
+杀毒软件（Defender）会在 PyInstaller 刚生成 exe 时扫描，导致后续 `Compress-Archive` 读不到文件。`build.bat` 只 sleep 2 秒有时不够。用 Python `zipfile` 替代 PowerShell，加重试延迟更可靠。
+
+### WSL 生产 DB 查询路径
+
+```bash
+# 正确：通过 bash -c 执行，WSL 内路径
+wsl -d DebianDev -- bash -c "sqlite3 /home/zhaohaosen/applications/chat-miner/data/chat_miner.db 'SELECT ...'"
+# 错误：直接在 wsl 命令中写 WSL 路径（Git Bash 会拼接 Windows 路径）
+```

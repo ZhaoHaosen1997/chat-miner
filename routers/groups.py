@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from config import config
 from models.database import (
     create_group, list_groups, get_group, delete_group,
-    upsert_members, update_member_message_count, get_members,
+    upsert_members, upsert_avatars_only, update_member_message_count, get_members,
     get_conn,
 )
 from services.parser import load_and_parse, ParsedChat, merge_chat_data
@@ -168,6 +168,20 @@ async def api_upload_group(file: UploadFile = File(...)):
                     shutil.rmtree(group_dir, ignore_errors=True)
             except Exception as e:
                 logger.warning("清理临时文件失败: %s", e)
+
+        # 将新上传数据中的头像写入已有群成员（首次导入可能无头像）
+        new_av_by_wxid = {s.get("wxid", ""): s.get("avatar", "") for s in chat.senders if s.get("avatar")}
+        if new_av_by_wxid:
+            upsert_avatars_only(existing["id"], new_av_by_wxid)
+            # 同步更新内存缓存
+            cached = _chat_cache.get(existing["id"])
+            if cached:
+                for s in cached.senders:
+                    av = new_av_by_wxid.get(s.get("wxid", ""))
+                    if av:
+                        s["avatar"] = av
+            logger.info(f"已更新 {len(new_av_by_wxid)} 个成员头像")
+
         return {
             "code": 200,
             "message": f"该群已存在（{existing['name']}）",
@@ -323,6 +337,16 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         merged_chat = existing_chat
         added = len(merge_result["added"])
         skipped = merge_result["skipped"]
+
+        # 将新数据中的头像合并到已有 senders（首次导入可能无头像，重新导入了才有）
+        new_sender_by_wxid = {s.get("wxid", ""): s for s in new_chat.senders}
+        for s in existing_chat.senders:
+            wxid = s.get("wxid", "")
+            ns = new_sender_by_wxid.get(wxid)
+            if ns:
+                new_av = ns.get("avatar", "")
+                if new_av and not s.get("avatar"):
+                    s["avatar"] = new_av
 
     # 写回完整数据集到磁盘（原子写入，防数据丢失）
     merged_path = group_dir / "merged_data.json"

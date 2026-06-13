@@ -116,13 +116,23 @@ def _normalize_qq(raw: dict) -> tuple[dict, list[dict], list[dict]]:
         if not uid or uid in uid_to_sid:
             continue
         uid_to_sid[uid] = next_sid
+        uin = sender.get("uin", "")
         sid_to_info[next_sid] = {
             "senderID": next_sid,
             "wxid": uid,
-            "displayName": sender.get("remark") or sender.get("name") or sender.get("nickname") or "",
+            "displayName": sender.get("remark") or sender.get("groupCard") or sender.get("name") or sender.get("nickname") or "",
             "nickname": sender.get("nickname") or "",
+            "uin": uin,
         }
         next_sid += 1
+
+    # Step 2.5: 从 avatars 字典匹配头像（key 为 uin/QQ号）
+    avatars = raw.get("avatars", {})
+    if avatars:
+        for info in sid_to_info.values():
+            uin = info.get("uin", "")
+            if uin and uin in avatars:
+                info["avatar"] = avatars[uin]
 
     senders = list(sid_to_info.values())
 
@@ -298,6 +308,7 @@ def _normalize_qq_chunked(file_path: Path) -> tuple[dict, list[dict], list[dict]
                 # 构建 sender（首次遇到时登记）
                 if uid not in uid_to_sid:
                     uid_to_sid[uid] = next_sid
+                    uin = sender.get("uin", "")
                     sid_to_info[next_sid] = {
                         "senderID": next_sid,
                         "wxid": uid,
@@ -309,6 +320,7 @@ def _normalize_qq_chunked(file_path: Path) -> tuple[dict, list[dict], list[dict]
                             or ""
                         ),
                         "nickname": sender.get("nickname") or "",
+                        "uin": uin,
                     }
                     next_sid += 1
 
@@ -333,6 +345,24 @@ def _normalize_qq_chunked(file_path: Path) -> tuple[dict, list[dict], list[dict]
 
     # 按时间排序
     all_messages.sort(key=lambda x: x.get("createTime", 0))
+
+    # 头像匹配：优先 manifest.avatars，其次 ZIP 内 avatars.json
+    chunked_avatars = manifest.get("avatars", {})
+    if not chunked_avatars:
+        for name in namelist:
+            if name.endswith("/avatars.json") or name == "avatars.json":
+                try:
+                    chunked_avatars = json.loads(zf.read(name).decode("utf-8"))
+                    if isinstance(chunked_avatars, dict):
+                        logger.info(f"从 {name} 加载了 {len(chunked_avatars)} 个头像")
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+                break
+    if chunked_avatars:
+        for info in sid_to_info.values():
+            uin = info.get("uin", "")
+            if uin and uin in chunked_avatars:
+                info["avatar"] = chunked_avatars[uin]
 
     senders = list(sid_to_info.values())
     logger.info(f"QQ chunked-jsonl 解析完成: 群={session['nickname']}, "

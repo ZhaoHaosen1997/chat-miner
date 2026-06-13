@@ -734,6 +734,20 @@ def upsert_members(group_id: int, senders: list[dict]):
     conn.close()
 
 
+def upsert_avatars_only(group_id: int, wxid_avatar_map: dict[str, str]):
+    """仅更新已有成员的 avatar 字段（用于已有群重新导入时补充头像）"""
+    if not wxid_avatar_map:
+        return
+    conn = get_conn()
+    for wxid, avatar in wxid_avatar_map.items():
+        conn.execute(
+            "UPDATE group_members SET avatar=? WHERE group_id=? AND wxid=? AND (avatar IS NULL OR avatar='')",
+            (avatar, group_id, wxid)
+        )
+    conn.commit()
+    conn.close()
+
+
 def get_members(group_id: int) -> list[dict]:
     """获取群成员列表，按消息数降序（排除群自身的系统 sender，仅群聊）"""
     conn = get_conn()

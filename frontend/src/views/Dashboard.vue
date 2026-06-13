@@ -666,7 +666,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         </div>
       </Teleport>
     </template>
-    <UploadModal v-if="showUpload" @close="showUpload = false" @uploaded="loadAll(); loadPeriods()" />
+    <UploadModal v-if="showUpload" @close="showUpload = false" @uploaded="showUpload = false; loadAll(); loadPeriods()" />
     <WeFlowImportModal v-if="showWeFlow" :group="currentGroup" @close="showWeFlow = false" />
   </div>
 </template>
