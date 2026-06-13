@@ -73,7 +73,7 @@ async function startGenerate() {
   generating.value = true
   error.value = ''
   try {
-    const result = await generateWeekly(currentGroup.value.id, props.weekId)
+    const result = await generateWeekly(currentGroup.value.id, props.weekId, true)
     if (result.task_id) {
       activeTaskId.value = result.task_id
     } else if (result === null) {

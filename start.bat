@@ -1,9 +1,12 @@
 @echo off
 title Chat-Miner Dev Server
 
+REM Get version from config.py (single source of truth)
+for /f %%i in ('python -c "from config import config; print(config.VERSION)"') do set V=%%i
+
 echo.
 echo ============================================
-echo   Chat-Miner v1.1.0 - Dev Mode
+echo   Chat-Miner v%V% - Dev Mode
 echo   Backend:  http://localhost:8857
 echo   Frontend: http://localhost:5173
 echo   API Docs: http://localhost:8857/docs

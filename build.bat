@@ -1,7 +1,11 @@
 @echo off
 cd /d "%~dp0"
+
+REM Get version from config.py (single source of truth)
+for /f %%i in ('python -c "from config import config; print(config.VERSION)"') do set VERSION=%%i
+
 echo ============================================
-echo   Chat-Miner v1.1.0 Packaging Script
+echo   Chat-Miner v%VERSION% Packaging Script
 echo ============================================
 
 REM Build frontend if needed
@@ -46,15 +50,22 @@ if errorlevel 1 (
     echo [ERROR] Copy to releases failed
     goto :error
 )
-copy /y "newbie-guide.txt" "releases\ChatMiner\" >NUL
 copy /y "config.json" "releases\ChatMiner\" >NUL
+REM Inject version into newbie-guide
+python -c "v=__import__('config').__version__;t=open('newbie-guide.txt',encoding='utf-8').read();open('releases\ChatMiner\newbie-guide.txt','w',encoding='utf-8').write(t.replace('{VERSION}',v))"
 
 REM Create portable zip
 echo.
 echo [3/4] Creating portable ZIP...
-if exist "releases\ChatMiner-v1.1.0-portable.zip" del "releases\ChatMiner-v1.1.0-portable.zip"
-powershell -Command "$ErrorActionPreference='SilentlyContinue'; Compress-Archive -Path 'releases\ChatMiner\*' -DestinationPath 'releases\ChatMiner-v1.1.0-portable.zip' -Force"
-echo   ZIP created (locked-log-file warnings are harmless)
+if exist "releases\ChatMiner-v%VERSION%-portable.zip" del "releases\ChatMiner-v%VERSION%-portable.zip"
+REM Wait 2s for antivirus to release file handles on fresh exe
+timeout /t 2 /nobreak >NUL
+powershell -Command "Compress-Archive -Path 'releases\ChatMiner\*' -DestinationPath 'releases\ChatMiner-v%VERSION%-portable.zip' -Force -ErrorAction SilentlyContinue; if (-not (Test-Path 'releases\ChatMiner-v%VERSION%-portable.zip')) { exit 1 }"
+if errorlevel 1 (
+    echo [ERROR] ZIP creation failed
+    goto :error
+)
+echo   ZIP created
 
 REM Build NSIS installer (auto-detect makensis)
 echo.
@@ -70,21 +81,21 @@ if "%MAKENSIS%"=="" (
     echo [SKIP] NSIS not found. Run: makensis installer.nsi
 ) else (
     echo   Found: %MAKENSIS%
-    "%MAKENSIS%" installer.nsi
+    "%MAKENSIS%" /DVERSION=%VERSION% installer.nsi
     if errorlevel 1 (
         echo [ERROR] NSIS build failed
         goto :error
     )
-    if exist "ChatMiner-v1.1.0-setup.exe" move /y "ChatMiner-v1.1.0-setup.exe" "releases\"
+    if exist "ChatMiner-v%VERSION%-setup.exe" move /y "ChatMiner-v%VERSION%-setup.exe" "releases\"
 )
 
 echo.
 echo ============================================
 echo   Build complete!
 echo   Output: releases\
-echo     ChatMiner\                         (portable folder)
-echo     ChatMiner-v1.1.0-portable.zip      (portable zip)
-if exist "releases\ChatMiner-v1.1.0-setup.exe" echo     ChatMiner-v1.1.0-setup.exe          (installer)
+echo     ChatMiner\                              (portable folder)
+echo     ChatMiner-v%VERSION%-portable.zip       (portable zip)
+if exist "releases\ChatMiner-v%VERSION%-setup.exe" echo     ChatMiner-v%VERSION%-setup.exe           (installer)
 echo ============================================
 goto :done
 

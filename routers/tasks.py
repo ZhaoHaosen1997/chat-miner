@@ -14,12 +14,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["任务"])
 
 
-# 注意：/history 必须在 /{task_id} 之前，否则会被动态路由吃掉
+# 注意：固定路径必须在 /{task_id} 之前注册，否则会被动态路由拦截
 @router.get("/history")
 async def api_task_history(group_id: int = None, limit: int = 20):
     """查询任务历史"""
     records = get_task_history(group_id, limit)
     return {"code": 200, "message": "获取成功", "data": records}
+
+
+@router.get("/active")
+async def api_active_tasks():
+    """获取所有正在运行的任务（用于页面刷新后恢复进度追踪）"""
+    all_tasks = task_manager.list_tasks()
+    active = [t for t in all_tasks if t["status"] not in ("done", "failed", "cancelled")]
+    return {"code": 200, "message": "获取成功", "data": active}
 
 
 @router.get("/{task_id}")
@@ -51,14 +59,6 @@ async def api_task_stream(task_id: str):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.get("/active")
-async def api_active_tasks():
-    """获取所有正在运行的任务（用于页面刷新后恢复进度追踪）"""
-    all_tasks = task_manager.list_tasks()
-    active = [t for t in all_tasks if t["status"] not in ("done", "failed", "cancelled")]
-    return {"code": 200, "message": "获取成功", "data": active}
 
 
 @router.delete("/{task_id}")

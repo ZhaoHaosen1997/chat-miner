@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chat-Miner",
     description="微信群聊内容分析 — 基于 AI 大模型",
-    version="1.1.0",
+    version=config.VERSION,
     lifespan=lifespan,
 )
 
@@ -100,6 +100,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 版本/健康检查
+@app.get("/api/health")
+async def api_health():
+    return {"code": 200, "message": "ok", "data": {"version": config.VERSION}}
 
 # 路由注册（API 必须在静态文件之前注册）
 app.include_router(groups.router)

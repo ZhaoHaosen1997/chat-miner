@@ -1,15 +1,19 @@
-; Chat-Miner v1.1.0 Installer
+; Chat-Miner Installer
 ; NSIS 3.x script — generates setup.exe
 ;
-; Build: makensis installer.nsi
-; Output: ChatMiner-v1.1.0-setup.exe
+; Build: makensis /DVERSION=x.y.z installer.nsi
+; Note: build.bat auto-passes /DVERSION from config.py
+
+!ifndef VERSION
+  !define VERSION "0.0.0"
+!endif
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
 ; --- General ---
 Name "ChatMiner"
-OutFile "ChatMiner-v1.1.0-setup.exe"
+OutFile "ChatMiner-v${VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\ChatMiner"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
@@ -51,7 +55,7 @@ Section "Install"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
         "UninstallString" "$INSTDIR\uninstall.exe"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
-        "DisplayVersion" "1.1.0"
+        "DisplayVersion" "${VERSION}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
         "Publisher" "ChatMiner"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \

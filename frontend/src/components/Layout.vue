@@ -24,7 +24,7 @@ const appVersion = ref('')
 onMounted(async () => {
   try {
     const health = await apiGet('/health')
-    appVersion.value = health?.data?.version || ''
+    appVersion.value = health?.version || ''
   } catch (e) { /* ignore */ }
 })
 
@@ -72,17 +72,12 @@ async function onUploaded(data) {
       <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
         <div class="flex items-center gap-6">
           <!-- Logo -->
-          <div class="flex items-center gap-2 font-bold text-lg relative group cursor-default">
+          <div class="flex items-center gap-2">
             <span class="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <MessageCircle class="w-4 h-4 text-white" />
             </span>
-            <span class="hidden sm:inline text-slate-800">Chat-Miner</span>
-            <span v-if="appVersion"
-              class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg"
-            >
-              {{ appVersion }}
-              <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-0 w-2 h-2 bg-slate-800 rotate-45"></span>
-            </span>
+            <span class="hidden sm:inline text-slate-800 font-bold text-lg">Chat-Miner</span>
+            <span v-if="appVersion" class="text-[10px] text-slate-400 font-medium">{{ appVersion }}</span>
           </div>
           <!-- 群选择器 -->
           <GroupSelector

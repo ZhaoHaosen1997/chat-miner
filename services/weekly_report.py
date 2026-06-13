@@ -118,14 +118,16 @@ def month_dates(year: int, month: int) -> tuple[str, str]:
 def compute_available_periods(
     dates: list[str],
     period_type: str = "weekly",
+    chat=None,  # 可选：用于统计文本消息条数
 ) -> list[dict]:
     """根据有聊天数据的日期，计算所有可用的自然周/自然月
 
     O(n) 单次遍历：按周期分组计数，不枚举空周期。
     新管道直接从原始消息提取数据，不依赖日报。
+    若传入 chat，同时统计文本消息条数，用于判断消息量是否达标。
 
     Returns:
-        [{period_key, date_start, date_end, day_count, status}, ...]
+        [{period_key, date_start, date_end, day_count, msg_count, status}, ...]
         status: 'ready' | 'insufficient'
     """
     if not dates:
@@ -133,9 +135,18 @@ def compute_available_periods(
 
     if period_type == "annual":
         min_days = 30
+        min_msgs = 300  # v1.1.0: 与 MIN_MESSAGES 保持一致
+    elif period_type == "monthly":
+        min_days = 5
+        min_msgs = 100  # v1.1.0: 新管道最低消息数
     else:
-        min_days = 3 if period_type == "weekly" else 5  # 月报 5 天即可
-    groups = {}  # period_key -> {day_count, date_start, date_end}
+        min_days = 3
+        min_msgs = 0  # 周报不卡消息数
+
+    groups = {}  # period_key -> {day_count, msg_count, date_start, date_end}
+
+    # 按日期预取消息（一次 chunk_by_date，避免 N 次调用）
+    by_date = chat.chunk_by_date() if chat else {}
 
     for date_str in dates:
         d = datetime.strptime(date_str, "%Y-%m-%d")
@@ -150,8 +161,17 @@ def compute_available_periods(
             start, end = month_dates(d.year, d.month)
 
         if key not in groups:
-            groups[key] = {"day_count": 0, "date_start": start, "date_end": end}
+            groups[key] = {"day_count": 0, "msg_count": 0,
+                           "date_start": start, "date_end": end}
         groups[key]["day_count"] += 1
+
+        # 统计当天文本消息条数
+        if chat and min_msgs > 0 and date_str in by_date:
+            groups[key]["msg_count"] += sum(
+                1 for m in by_date[date_str]
+                if m.get("type") in ("文本消息", "引用消息")
+                and (m.get("content") or "").strip()
+            )
 
     # 按 period_key 降序排列（从新到旧）
     result = sorted(
@@ -161,7 +181,8 @@ def compute_available_periods(
                 "date_start": g["date_start"],
                 "date_end": g["date_end"],
                 "day_count": g["day_count"],
-                "status": "ready" if g["day_count"] >= min_days else "insufficient",
+                "msg_count": g["msg_count"],
+                "status": "ready" if (g["day_count"] >= min_days and g["msg_count"] >= min_msgs) else "insufficient",
             }
             for key, g in groups.items()
         ],
@@ -1373,6 +1394,8 @@ async def generate_monthly_report(
     """
     from services.model_config import resolve_model_for_report, get_effective_model
 
+    logger.info(f"月报生成开始: group={group_id} period={period_key} force={force}")
+
     # v0.12.0: 解析模型配置（优先在线，无则本地）
     try:
         model_config = resolve_model_for_report("online", requested_model_id=model_id)
@@ -1416,6 +1439,7 @@ async def generate_monthly_report(
         d += timedelta(days=1)
 
     if len(month_dates_list) < 5:
+        logger.warning(f"月报数据不足: group={group_id} period={period_key} 仅有 {len(month_dates_list)} 天")
         return {
             "success": False, "data": None,
             "error": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 5 天）",

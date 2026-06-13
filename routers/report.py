@@ -546,7 +546,7 @@ async def api_periods(group_id: int, type: str = "weekly"):
 
     chat = get_chat_cache(group_id)
     all_dates = chat.all_dates() if chat else []
-    periods = compute_available_periods(all_dates, type)
+    periods = compute_available_periods(all_dates, type, chat=chat)
 
     # 合并已生成状态
     existing = list_periodic_reports(group_id, type)
@@ -561,6 +561,7 @@ async def api_periods(group_id: int, type: str = "weekly"):
             "date_start": p["date_start"],
             "date_end": p["date_end"],
             "day_count": p["day_count"],
+            "msg_count": p.get("msg_count", 0),
             "status": "generated" if is_generated else p["status"],
         })
 
@@ -815,6 +816,7 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
                 task.update("done", f"月报 {period_key} 生成完成")
                 task.finish(success=True)
             else:
+                logger.warning(f"月报生成失败: group={group_id} period={period_key} error={result.get('error')}")
                 task.finish(success=False,
                             error={"type": "monthly_failed", "detail": result.get("error", "")})
         except Exception as e:
@@ -967,6 +969,7 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
     all_dates = chat.all_dates()
     year_dates = [d for d in all_dates if d.startswith(str(year))]
     if len(year_dates) < 30:
+        logger.warning(f"年报数据不足: group={group_id} year={year} 仅有 {len(year_dates)} 天")
         return {
             "code": 200,
             "message": f"{year}年数据不足（仅{len(year_dates)}天有消息，需要≥30天）",
@@ -978,6 +981,7 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
     task.update("pending", f"开始{'重新' if force else ''}生成{year}年度报告...")
 
     async def _run():
+        logger.info(f"年报后台任务启动: group={group_id} year={year}")
         try:
             result = await generate_annual_report(
                 group_id, year, chat, task=task, force=force,
@@ -986,10 +990,11 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
                 task.update("done", f"{year}年度报告生成完成")
                 task.finish(success=True)
             else:
+                logger.warning(f"年报生成失败: group={group_id} year={year} error={result.get('error')}")
                 task.finish(success=False,
                             error={"type": "annual_failed", "detail": result.get("error", "")})
         except Exception as e:
-            logger.error(f"年度报告生成异常: {e}")
+            logger.error(f"年度报告生成异常: {e}", exc_info=True)
             task.finish(success=False, error={"type": "unknown", "detail": str(e)})
 
     asyncio.create_task(_run())

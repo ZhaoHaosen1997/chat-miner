@@ -21,6 +21,9 @@ BASE_DIR = _get_base_dir()
 
 
 class Config:
+    # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
+    VERSION = "1.1.1"
+
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
     OLLAMA_MODEL = "qwen2.5:14b"
@@ -158,6 +161,8 @@ class Config:
                         val = Path(str(val))
                     if json_key == "port":
                         val = int(val)
+                    if json_key == "log_level":
+                        val = str(val).upper()
                     setattr(cls, attr_name, val)
                     logger.info(f"config.json → {attr_name} = {val}")
                 except (ValueError, TypeError) as e:

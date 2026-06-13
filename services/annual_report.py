@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # 年度最低数据要求
 MIN_DAYS = 30
-MIN_MESSAGES = 500
+MIN_MESSAGES = 300
 
 # ---- 年度颁奖典礼 System Prompt ----
 ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼群聊人类学家。
