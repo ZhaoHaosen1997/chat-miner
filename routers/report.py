@@ -540,33 +540,45 @@ async def api_get_recent_reports(group_id: int, limit: int = 7):
 
 @router.get("/periods")
 async def api_periods(group_id: int, type: str = "weekly"):
-    """获取可用的自然周/自然月列表（O(n) 单次遍历，13ms 内完成）"""
+    """获取可用的自然周/自然月列表（已生成报告优先，chat不可用时仍返回已生成）"""
     from services.weekly_report import compute_available_periods
     from models.database import list_periodic_reports
 
-    chat = get_chat_cache(group_id)
-    if not chat:
-        raise HTTPException(404, detail="群数据未加载，请先导入")
-    all_dates = chat.all_dates()
-    periods = compute_available_periods(all_dates, type, chat=chat)
-
-    # 合并已生成状态
+    # 1. 先从 DB 获取已生成的报告（不依赖 chat 数据加载）
     existing = list_periodic_reports(group_id, type)
-    generated_keys = {e["period_key"] for e in existing}
-
     result = []
-    for p in periods:
-        pk = p["period_key"]
-        is_generated = pk in generated_keys
+    seen_keys = set()
+    for e in existing:
+        pk = e["period_key"]
+        seen_keys.add(pk)
         result.append({
             "period_key": pk,
-            "date_start": p["date_start"],
-            "date_end": p["date_end"],
-            "day_count": p["day_count"],
-            "msg_count": p.get("msg_count", 0),
-            "status": "generated" if is_generated else p["status"],
+            "date_start": e["date_start"],
+            "date_end": e["date_end"],
+            "day_count": e.get("day_count", 0),
+            "msg_count": e.get("total_messages", 0),
+            "status": "generated",
         })
 
+    # 2. 尝试加载 chat 数据，补充可生成但尚未生成的周期
+    chat = get_chat_cache(group_id)
+    if chat:
+        all_dates = chat.all_dates()
+        periods = compute_available_periods(all_dates, type, chat=chat)
+        for p in periods:
+            pk = p["period_key"]
+            if pk not in seen_keys:
+                result.append({
+                    "period_key": pk,
+                    "date_start": p["date_start"],
+                    "date_end": p["date_end"],
+                    "day_count": p["day_count"],
+                    "msg_count": p.get("msg_count", 0),
+                    "status": p["status"],
+                })
+
+    # 按 period_key 降序排列（从新到旧）
+    result.sort(key=lambda x: x["period_key"], reverse=True)
     return {"code": 200, "message": "获取成功", "data": result}
 
 
