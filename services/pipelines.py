@@ -1404,16 +1404,24 @@ def _as_list(data) -> list:
 
 
 def _save_pipeline_record(task, group_name: str, target: str):
-    """持久化任务记录到数据库"""
+    """持久化任务记录到数据库（v1.3.0: 批量任务子步骤状态修正）"""
     try:
         failed_steps = [s for s in task.steps if s["status"] == "failed"]
         model = task.model_used or config.OLLAMA_MODEL
+        # v1.3.0: 批量任务（analyze_all/full_portrait 等）外层控制 finish，
+        # 子步骤调用时 task.status 仍为 "inference"，需修正为 "done"
+        batch_types = ("analyze_all", "full_portrait", "analyze_all_portraits",
+                       "portrait_all", "generate_all_weekly", "generate_all_monthly")
+        if task.type in batch_types:
+            status = "failed" if failed_steps else "done"
+        else:
+            status = "failed" if failed_steps else task.status
         save_task_record(
             task_id=task.task_id,
             group_id=task.group_id,
             task_type=task.type,
             target=f"{group_name}/{target}",
-            status="failed" if failed_steps else task.status,
+            status=status,
             total_duration_ms=task.duration_ms,
             model_used=model,
             steps_json=json.dumps(task.steps, ensure_ascii=False),

@@ -13,6 +13,7 @@ from models.database import (
     get_group, get_daily_report, save_daily_report, get_analyzed_dates,
     get_recent_reports, log_analysis, update_group_stats,
     mark_date_analyzing, unmark_date_analyzing, is_date_analyzing,
+    save_task_record,
 )
 from services.analyzer import analyze_daily_chat
 from services.parser import format_messages_for_prompt
@@ -668,6 +669,14 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
         except Exception as e:
             logger.error(f"周报生成异常: {e}")
             task.finish(success=False, error={"type": "unknown", "detail": str(e)})
+        # v1.3.0: 持久化任务记录
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type=task.type,
+            target=f"{group['name']}/{period_key}", status=task.status,
+            total_duration_ms=task.duration_ms, model_used=task.model_used or "",
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=(task.error or {}).get("detail", "") if task.error else "",
+        )
 
     asyncio.create_task(_run())
 
@@ -736,6 +745,14 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
         task.update("done", f"批量生成完成: {total - failed}/{total} 份周报",
                    progress={"current": total, "total": total})
         task.finish(success=failed == 0)
+        # v1.3.0: 持久化任务记录
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type=task.type,
+            target=f"{group['name']}/批量 {total} 份", status=task.status,
+            total_duration_ms=task.duration_ms, model_used=task.model_used or "",
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=f"{failed} 失败" if failed else "",
+        )
 
     asyncio.create_task(_run())
 
@@ -833,6 +850,14 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
         except Exception as e:
             logger.error(f"月报生成异常: {e}")
             task.finish(success=False, error={"type": "unknown", "detail": str(e)})
+        # v1.3.0: 持久化任务记录
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type=task.type,
+            target=f"{group['name']}/{period_key}", status=task.status,
+            total_duration_ms=task.duration_ms, model_used=task.model_used or "",
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=(task.error or {}).get("detail", "") if task.error else "",
+        )
 
     asyncio.create_task(_run())
 
@@ -900,6 +925,14 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
         task.update("done", f"批量生成完成: {total - failed}/{total} 份月报",
                    progress={"current": total, "total": total})
         task.finish(success=failed == 0)
+        # v1.3.0: 持久化任务记录
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type=task.type,
+            target=f"{group['name']}/批量 {total} 份", status=task.status,
+            total_duration_ms=task.duration_ms, model_used=task.model_used or "",
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=f"{failed} 失败" if failed else "",
+        )
 
     asyncio.create_task(_run())
 
@@ -1008,6 +1041,14 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
         except Exception as e:
             logger.error(f"年度报告生成异常: {e}", exc_info=True)
             task.finish(success=False, error={"type": "unknown", "detail": str(e)})
+        # v1.3.0: 持久化任务记录
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type=task.type,
+            target=f"{group['name']}/{year}", status=task.status,
+            total_duration_ms=task.duration_ms, model_used=task.model_used or "",
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=(task.error or {}).get("detail", "") if task.error else "",
+        )
 
     asyncio.create_task(_run())
 

@@ -13,6 +13,7 @@ import FishPond from './views/FishPond.vue'
 import FishDailyReport from './views/FishDailyReport.vue'
 import AnnualReport from './views/AnnualReport.vue'
 import Settings from './views/Settings.vue'
+import TaskHistory from './views/TaskHistory.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -25,6 +26,7 @@ const routes = [
   { path: '/fish-report/:date', component: FishDailyReport, props: true },
   { path: '/annual/:yearId', component: AnnualReport, props: true },
   { path: '/settings', component: Settings },
+  { path: '/tasks', component: TaskHistory },
 ]
 
 const router = createRouter({

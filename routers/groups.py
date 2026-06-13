@@ -6,6 +6,7 @@ import os
 import pickle
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
@@ -15,7 +16,7 @@ from config import config
 from models.database import (
     create_group, list_groups, get_group, delete_group,
     upsert_members, upsert_avatars_only, update_member_message_count, get_members,
-    db,
+    db, save_task_record,
 )
 from services.parser import load_and_parse, ParsedChat, merge_chat_data
 
@@ -406,6 +407,16 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
     # 刷新缓存
     _invalidate_cache(group_id)
     _chat_cache[group_id] = merged_chat
+
+    # v1.13.0: 持久化导入任务记录
+    save_task_record(
+        task_id=f"import_{group_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        group_id=group_id, task_type="import_json",
+        target=group["name"], status="done",
+        total_duration_ms=0, model_used="",
+        steps_json=json.dumps({"added": added, "skipped": skipped, "mode": mode}),
+        error_summary="",
+    )
 
     return {
         "code": 200,

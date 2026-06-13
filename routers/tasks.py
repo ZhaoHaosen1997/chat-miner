@@ -16,9 +16,11 @@ router = APIRouter(prefix="/api/tasks", tags=["任务"])
 
 # 注意：固定路径必须在 /{task_id} 之前注册，否则会被动态路由拦截
 @router.get("/history")
-async def api_task_history(group_id: int = None, limit: int = 20):
-    """查询任务历史"""
-    records = get_task_history(group_id, limit)
+async def api_task_history(group_id: int = None, task_type: str = None,
+                            status: str = None, limit: int = 20, offset: int = 0):
+    """查询任务历史（v1.13.0: 支持 type/status 筛选 + 分页）"""
+    records = get_task_history(group_id=group_id, task_type=task_type,
+                                status=status, limit=limit, offset=offset)
     return {"code": 200, "message": "获取成功", "data": records}
 
 

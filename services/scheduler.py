@@ -4,9 +4,11 @@
 """
 import asyncio
 import logging
+from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import config
+from models.database import save_task_record
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +115,11 @@ async def run_scheduled_sync():
             continue
 
         try:
+            start = asyncio.get_event_loop().time()
             result = await asyncio.to_thread(
                 sync_messages_incremental, client, g["id"]
             )
+            duration = int((asyncio.get_event_loop().time() - start) * 1000)
             added = result.get("added", 0)
             if added > 0:
                 synced += 1
@@ -123,12 +127,28 @@ async def run_scheduled_sync():
                 logger.info(f"[WeFlow Scheduler] {g['name']}: +{added} 条新消息")
             else:
                 _update_sync_status(g["id"], "无新消息")
+            # v1.13.0: 持久化任务记录
+            save_task_record(
+                task_id=f"auto_{g['id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                group_id=g["id"], task_type="weflow_auto_sync",
+                target=g["name"], status="done",
+                total_duration_ms=duration, model_used="",
+                steps_json="[]", error_summary="",
+            )
             if result.get("cancelled"):
                 break
         except Exception as e:
             failed += 1
             _update_sync_status(g["id"], f"失败: {str(e)[:80]}")
             logger.error(f"[WeFlow Scheduler] {g['name']} 同步失败: {e}")
+            # v1.13.0: 失败也持久化
+            save_task_record(
+                task_id=f"auto_{g['id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                group_id=g["id"], task_type="weflow_auto_sync",
+                target=g["name"], status="failed",
+                total_duration_ms=0, model_used="",
+                steps_json="[]", error_summary=str(e)[:200],
+            )
 
     client.close()
     logger.info(f"[WeFlow Scheduler] 完成: {synced} 群有新消息, "

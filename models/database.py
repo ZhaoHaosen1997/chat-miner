@@ -1024,19 +1024,25 @@ def save_task_record(task_id: str, group_id: int, task_type: str, target: str,
         )
 
 
-def get_task_history(group_id: int = None, limit: int = 20) -> list[dict]:
-    """查询任务历史"""
+def get_task_history(group_id: int = None, task_type: str = None,
+                     status: str = None, limit: int = 20, offset: int = 0) -> list[dict]:
+    """查询任务历史（v1.13.0: 支持 type/status 筛选 + 分页）"""
     with db() as conn:
+        where = []
+        params = []
         if group_id:
-            rows = conn.execute(
-                "SELECT * FROM task_records WHERE group_id=? ORDER BY created_at DESC LIMIT ?",
-                (group_id, limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM task_records ORDER BY created_at DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
+            where.append("group_id=?")
+            params.append(group_id)
+        if task_type:
+            where.append("task_type=?")
+            params.append(task_type)
+        if status:
+            where.append("status=?")
+            params.append(status)
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        sql = f"SELECT * FROM task_records {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

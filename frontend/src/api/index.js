@@ -127,6 +127,15 @@ export const getGroupStats = (gid) => request(`/groups/${gid}/stats`)
 export const getGlobalStats = () => request('/stats/global')
 export const getHealth = () => request('/health')
 export const getTaskHistory = (gid, limit = 10) => request(`/tasks/history?group_id=${gid}&limit=${limit}`)
+export const getTaskHistoryAll = ({ groupId, taskType, status, limit = 50, offset = 0 } = {}) => {
+  const params = new URLSearchParams()
+  if (groupId) params.set('group_id', groupId)
+  if (taskType) params.set('task_type', taskType)
+  if (status) params.set('status', status)
+  params.set('limit', limit)
+  params.set('offset', offset)
+  return request(`/tasks/history?${params.toString()}`)
+}
 
 // --- 批量分析 ---
 export const analyzeAll = async (gid, modelId = null) => {

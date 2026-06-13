@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from config import config
-from models.database import get_group, list_groups
+from models.database import get_group, list_groups, save_task_record
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +107,26 @@ async def trigger_sync(group_id: int):
             )
             if result.get("cancelled"):
                 return
-            logger.info(f"[WeFlow Sync] {group['name']}: +{result['added']} 新消息")
+            added = result.get("added", 0)
+            logger.info(f"[WeFlow Sync] {group['name']}: +{added} 新消息")
+            task.finish(success=True)
+            # v1.3.0: 持久化任务记录
+            save_task_record(
+                task_id=task.task_id, group_id=group_id, task_type="weflow_sync",
+                target=group["name"], status=task.status,
+                total_duration_ms=task.duration_ms, model_used="",
+                steps_json="[]", error_summary="",
+            )
         except Exception as e:
             logger.error(f"[WeFlow Sync] {group['name']} 失败: {e}")
             task.finish(success=False, error={"message": str(e)})
+            # v1.13.0: 失败也持久化
+            save_task_record(
+                task_id=task.task_id, group_id=group_id, task_type="weflow_sync",
+                target=group["name"], status="failed",
+                total_duration_ms=task.duration_ms, model_used="",
+                steps_json="[]", error_summary=str(e)[:200],
+            )
         finally:
             client.close()
 

@@ -3,7 +3,7 @@ import { ref, inject, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
-import { MessageCircle, Users, LayoutDashboard, Loader2, Fish, Settings } from 'lucide-vue-next'
+import { MessageCircle, Users, LayoutDashboard, Loader2, Fish, Settings, ClipboardList } from 'lucide-vue-next'
 import { listGroups, apiGet } from '../api/index.js'
 
 const props = defineProps({ currentGroup: Object })
@@ -122,6 +122,7 @@ const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
   { path: '/portraits', label: '群友画像', icon: Users },
   { path: '/fishpond', label: '群鱼塘', icon: Fish },
+  { path: '/tasks', label: '任务记录', icon: ClipboardList },
   { path: '/settings', label: '设置', icon: Settings },
 ]
 
