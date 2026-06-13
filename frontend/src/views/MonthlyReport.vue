@@ -3,6 +3,7 @@ import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMonthlyReport, generateMonthly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, TrendingUp, Calendar, MessageSquare, Users, Brain, GitBranch, Telescope, Activity, Film, Hash } from 'lucide-vue-next'
+import FloatingNav from '../components/FloatingNav.vue'
 
 const props = defineProps({ monthId: String })
 const router = useRouter()
@@ -183,11 +184,21 @@ const healthItems = [
 
 <template>
   <div>
+    <FloatingNav
+      :show-prev="!!adjacentMonths.prev"
+      :show-next="!!adjacentMonths.next"
+      :prev-label="adjacentMonths.prev"
+      :next-label="adjacentMonths.next"
+      @prev="goMonth(adjacentMonths.prev)"
+      @next="goMonth(adjacentMonths.next)"
+    />
     <button @click="goBack" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 mb-5 transition-colors group">
       <ArrowLeft class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
       返回仪表盘
     </button>
 
+    <Transition name="page-slide" mode="out-in">
+    <div :key="props.monthId" class="report-content">
     <div v-if="loading" class="flex items-center justify-center py-32">
       <Loader2 class="w-8 h-8 animate-spin text-indigo-400" />
     </div>
@@ -392,5 +403,7 @@ const healthItems = [
         <span v-else class="text-sm text-slate-300">已是最新月</span>
       </div>
     </template>
+    </div>
+    </Transition>
   </div>
 </template>

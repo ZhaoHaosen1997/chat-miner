@@ -1,5 +1,5 @@
 ; Chat-Miner Installer
-; NSIS 3.x script — generates setup.exe
+; NSIS 3.x script - generates setup.exe
 ;
 ; Build: makensis /DVERSION=x.y.z installer.nsi
 ; Note: build.bat auto-passes /DVERSION from config.py
@@ -13,7 +13,7 @@
 
 ; --- General ---
 Name "ChatMiner"
-OutFile "ChatMiner-v${VERSION}-setup.exe"
+OutFile "releases\ChatMiner-v${VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\ChatMiner"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma

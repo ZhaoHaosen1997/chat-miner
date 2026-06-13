@@ -1,8 +1,9 @@
 <script setup>
 import { ref, inject, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getReport, analyzeDateAsync, deleteReport } from '../api/index.js'
+import { getReport, analyzeDateAsync, deleteReport, getAnalyzedDates } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Clock, MessageSquare, Users, Hash, RefreshCw } from 'lucide-vue-next'
+import FloatingNav from '../components/FloatingNav.vue'
 
 const props = defineProps({ date: String })
 const router = useRouter()
@@ -10,6 +11,22 @@ const currentGroup = inject('currentGroup')
 const activeTaskId = inject('activeTaskId')
 
 const reanalyzing = ref(false)
+const adjacentDates = ref({ prev: null, next: null })
+
+async function loadAdjacentDates() {
+  if (!currentGroup.value) return
+  try {
+    const dates = await getAnalyzedDates(currentGroup.value.id)
+    const idx = dates.findIndex(d => d === props.date)
+    adjacentDates.value.prev = idx > 0 ? dates[idx - 1] : null
+    adjacentDates.value.next = idx < dates.length - 1 ? dates[idx + 1] : null
+  } catch { adjacentDates.value = { prev: null, next: null } }
+}
+
+function goDate(date) {
+  if (!date) return
+  router.push(`/report/${date}`)
+}
 
 async function reanalyze() {
   if (reanalyzing.value || activeTaskId.value) return
@@ -66,6 +83,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  loadAdjacentDates()
 }
 
 async function startAnalyze() {
@@ -110,11 +128,21 @@ watch(stats, (s) => {
 
 <template>
   <div>
+    <FloatingNav
+      :show-prev="!!adjacentDates.prev"
+      :show-next="!!adjacentDates.next"
+      :prev-label="adjacentDates.prev"
+      :next-label="adjacentDates.next"
+      @prev="goDate(adjacentDates.prev)"
+      @next="goDate(adjacentDates.next)"
+    />
     <!-- 返回 -->
     <button @click="goBack" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 mb-5 transition-colors group">
       <ArrowLeft class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" /> 返回仪表盘
     </button>
 
+    <Transition name="page-slide" mode="out-in">
+    <div :key="props.date" class="report-content">
     <!-- 加载 -->
     <div v-if="loading" class="flex items-center justify-center py-20">
       <Loader2 class="w-8 h-8 animate-spin text-indigo-400" />
@@ -266,5 +294,7 @@ watch(stats, (s) => {
         </div>
       </div>
     </template>
+    </div>
+    </Transition>
   </div>
 </template>

@@ -587,18 +587,6 @@ async function _executeAnnualGenerate(periodKey, force = false) {
 
           <div v-if="!periodsLoading && weeklyPeriods.length === 0 && monthlyPeriods.length === 0 && annualPeriods.length === 0 && periodsLoaded" class="card p-6 text-center text-sm text-slate-400">📭 暂无足够的日报数据<br><span class="text-[10px] text-slate-300">至少需要3天日报才能生成周报</span></div>
 
-          <!-- 热搜 -->
-          <div v-if="trending?.topics?.length" class="card p-4 bg-gradient-to-b from-red-50 to-white">
-            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm"><span>🔥</span> 群聊热搜 <span class="text-xs text-slate-400 font-normal ml-auto">{{ trending.period }}</span></h3>
-            <div class="grid grid-cols-2 gap-1">
-              <div v-for="(t, i) in trending.topics.slice(0, 8)" :key="i" class="flex items-center gap-1.5 text-xs py-1 px-2 rounded hover:bg-red-50/50 transition-colors">
-                <span :class="['w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0', i === 0 ? 'bg-red-500 text-white' : i === 1 ? 'bg-orange-400 text-white' : i === 2 ? 'bg-amber-400 text-white' : 'bg-slate-200 text-slate-500']">{{ i + 1 }}</span>
-                <span class="text-slate-700 truncate">{{ t.text }}</span>
-                <span class="text-[10px] text-slate-400 flex-shrink-0 ml-auto">{{ t.heat }}℃</span>
-              </div>
-            </div>
-          </div>
-
           <!-- 最近日报 -->
           <div v-if="recentReports.length > 0" class="card p-4">
             <h3 class="font-semibold text-slate-700 mb-3 text-sm flex items-center justify-between">最近日报 <span class="text-[10px] text-slate-300 font-normal">{{ recentReports.length }}篇</span></h3>
@@ -631,6 +619,18 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    @click="day?.hasData && openDayPopup(day)">{{ day ? day.day : '' }}</div>
             </div>
             <div class="flex items-center gap-3 mt-2 pt-2 border-t border-slate-50 text-[10px] text-slate-300"><span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-50" />数据</span><span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-100" />已分析</span></div>
+          </div>
+
+          <!-- 热搜 -->
+          <div v-if="trending?.topics?.length" class="card p-4 bg-gradient-to-b from-red-50 to-white">
+            <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-1.5 text-sm"><span>🔥</span> 群聊热搜 <span class="text-xs text-slate-400 font-normal ml-auto">{{ trending.period }}</span></h3>
+            <div class="space-y-1">
+              <div v-for="(t, i) in trending.topics.slice(0, 8)" :key="i" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded hover:bg-red-50/50 transition-colors">
+                <span :class="['w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center flex-shrink-0', i === 0 ? 'bg-red-500 text-white' : i === 1 ? 'bg-orange-400 text-white' : i === 2 ? 'bg-amber-400 text-white' : 'bg-slate-200 text-slate-500']">{{ i + 1 }}</span>
+                <span class="text-slate-700 truncate flex-1">{{ t.text }}</span>
+                <span class="text-[10px] text-slate-400 flex-shrink-0">{{ t.heat }}℃</span>
+              </div>
+            </div>
           </div>
 
           <div v-if="stats?.member_ranking" class="card p-4">

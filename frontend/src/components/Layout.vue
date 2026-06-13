@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
@@ -13,6 +13,96 @@ const router = useRouter()
 const route = useRoute()
 const showUpload = ref(false)
 const importLoading = ref(false)
+
+// ---- Keyboard: W/S or Up/Down to switch report type ----
+function getISOWeekNumber(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
+  const weekNo = Math.ceil(((date - yearStart) / 86400000 + 1) / 7)
+  return weekNo
+}
+
+function dateToWeek(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  const week = getISOWeekNumber(d)
+  const year = d.getFullYear()
+  return `${year}-W${String(week).padStart(2, '0')}`
+}
+
+function weekToMonth(weekStr) {
+  // Parse "2026-W24" → first day of that week → month
+  const [y, w] = weekStr.split('-W')
+  const jan4 = new Date(Date.UTC(+y, 0, 4))
+  const firstMonday = new Date(jan4)
+  firstMonday.setUTCDate(jan4.getUTCDate() - (jan4.getUTCDay() || 7) + 1)
+  const monday = new Date(firstMonday)
+  monday.setUTCDate(firstMonday.getUTCDate() + (+w - 1) * 7)
+  return `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function monthToYear(monthStr) {
+  return monthStr.split('-')[0]
+}
+
+function reportTypeSwitch(direction) {
+  const p = route.path
+  const up = direction === 'up'
+
+  // Daily → Weekly
+  const dailyMatch = p.match(/^\/report\/(\d{4}-\d{2}-\d{2})$/)
+  if (dailyMatch) {
+    if (up) { router.push(`/weekly/${dateToWeek(dailyMatch[1])}`); return }
+    return // daily is lowest, can't go down
+  }
+
+  // Weekly → Monthly (up) or Daily (down)
+  const weeklyMatch = p.match(/^\/weekly\/(\d{4}-W\d{2})$/)
+  if (weeklyMatch) {
+    if (up) { router.push(`/monthly/${weekToMonth(weeklyMatch[1])}`); return }
+    // Down: go to the Monday of this week
+    const [y, w] = weeklyMatch[1].split('-W')
+    const jan4 = new Date(Date.UTC(+y, 0, 4))
+    const firstMonday = new Date(jan4)
+    firstMonday.setUTCDate(jan4.getUTCDate() - (jan4.getUTCDay() || 7) + 1)
+    const monday = new Date(firstMonday)
+    monday.setUTCDate(firstMonday.getUTCDate() + (+w - 1) * 7)
+    router.push(`/report/${monday.toISOString().slice(0, 10)}`)
+    return
+  }
+
+  // Monthly → Annual (up) or Weekly (down)
+  const monthlyMatch = p.match(/^\/monthly\/(\d{4}-\d{2})$/)
+  if (monthlyMatch) {
+    if (up) { router.push(`/annual/${monthToYear(monthlyMatch[1])}`); return }
+    // Down: go to first week of this month
+    const [y, m] = monthlyMatch[1].split('-')
+    const firstDay = new Date(+y, +m - 1, 1)
+    router.push(`/weekly/${dateToWeek(firstDay.toISOString().slice(0, 10))}`)
+    return
+  }
+
+  // Annual → Monthly (down only)
+  const annualMatch = p.match(/^\/annual\/(\d{4})$/)
+  if (annualMatch) {
+    if (!up) { router.push(`/monthly/${annualMatch[1]}-01`); return }
+    return // annual is highest, can't go up
+  }
+}
+
+function onReportTypeKey(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+    e.preventDefault()
+    reportTypeSwitch('up')
+  } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+    e.preventDefault()
+    reportTypeSwitch('down')
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onReportTypeKey))
+onUnmounted(() => window.removeEventListener('keydown', onReportTypeKey))
 const activeTaskId = inject('activeTaskId', ref(''))
 const groupSelectorRef = ref(null)
 const appVersion = ref('')

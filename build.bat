@@ -52,7 +52,7 @@ if errorlevel 1 (
 )
 copy /y "config.json" "releases\ChatMiner\" >NUL
 REM Inject version into newbie-guide
-python -c "v=__import__('config').__version__;t=open('newbie-guide.txt',encoding='utf-8').read();open('releases\ChatMiner\newbie-guide.txt','w',encoding='utf-8').write(t.replace('{VERSION}',v))"
+python -c "from config import config;v=config.VERSION;t=open('newbie-guide.txt',encoding='utf-8').read();open('releases/ChatMiner/newbie-guide.txt','w',encoding='utf-8').write(t.replace('{VERSION}',v))"
 
 REM Create portable zip
 echo.
@@ -70,23 +70,16 @@ echo   ZIP created
 REM Build NSIS installer (auto-detect makensis)
 echo.
 echo [4/4] Building NSIS installer...
-set MAKENSIS=
-REM Use temp vars to avoid (x86) parens breaking cmd parser
-set "NSIS_X86=C:\Program Files (x86)\NSIS\makensis.exe"
-set "NSIS_X64=C:\Program Files\NSIS\makensis.exe"
-if exist "%NSIS_X86%" set "MAKENSIS=%NSIS_X86%"
-if exist "%NSIS_X64%" set "MAKENSIS=%NSIS_X64%"
-where makensis >NUL 2>&1 && set MAKENSIS=makensis
-if "%MAKENSIS%"=="" (
+where makensis >NUL 2>&1
+if errorlevel 1 (
     echo [SKIP] NSIS not found. Run: makensis installer.nsi
 ) else (
-    echo   Found: %MAKENSIS%
-    "%MAKENSIS%" /DVERSION=%VERSION% installer.nsi
+    echo   Found: makensis
+    makensis /DVERSION=%VERSION% installer.nsi
     if errorlevel 1 (
         echo [ERROR] NSIS build failed
         goto :error
     )
-    if exist "ChatMiner-v%VERSION%-setup.exe" move /y "ChatMiner-v%VERSION%-setup.exe" "releases\"
 )
 
 echo.
@@ -95,7 +88,7 @@ echo   Build complete!
 echo   Output: releases\
 echo     ChatMiner\                              (portable folder)
 echo     ChatMiner-v%VERSION%-portable.zip       (portable zip)
-if exist "releases\ChatMiner-v%VERSION%-setup.exe" echo     ChatMiner-v%VERSION%-setup.exe           (installer)
+echo     ChatMiner-v%VERSION%-setup.exe          (installer)
 echo ============================================
 goto :done
 
