@@ -57,8 +57,9 @@ async function load() {
     const periods = await getPeriods(currentGroup.value.id, 'monthly')
     const months = periods.filter(p => p.status !== 'insufficient')
     const idx = months.findIndex(p => p.period_key === props.monthId)
-    adjacentMonths.value.prev = idx > 0 ? months[idx - 1].period_key : null
-    adjacentMonths.value.next = idx < months.length - 1 ? months[idx + 1].period_key : null
+    // 循环翻页: 到头后绕到另一端
+    adjacentMonths.value.prev = idx < months.length - 1 ? months[idx + 1].period_key : months[0].period_key
+    adjacentMonths.value.next = idx > 0 ? months[idx - 1].period_key : months[months.length - 1].period_key
   } catch (e) { /* ignore */ }
 }
 

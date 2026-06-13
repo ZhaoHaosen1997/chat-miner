@@ -113,6 +113,8 @@ async def generate_annual_report(group_id: int, year: int, chat,
     year_dates = sorted([d for d in all_dates if d.startswith(year_str)])
 
     if len(year_dates) < MIN_DAYS:
+        if task:
+            task.finish(success=False, error={"type": "too_few", "detail": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{MIN_DAYS}天）"})
         return {"success": False, "error": f"数据不足：全年仅有 {len(year_dates)} 天有消息（需要 ≥{MIN_DAYS}天）"}
 
     # 3. 收集月报摘要作为上下文
@@ -124,6 +126,8 @@ async def generate_annual_report(group_id: int, year: int, chat,
         return {"success": False, "error": "无法提取年度数据"}
 
     if raw_data["stats"]["total_messages"] < MIN_MESSAGES:
+        if task:
+            task.finish(success=False, error={"type": "too_few", "detail": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{MIN_MESSAGES}条）"})
         return {"success": False,
                 "error": f"消息量不足：全年仅 {raw_data['stats']['total_messages']} 条文本消息（需要 ≥{MIN_MESSAGES}条）"}
 

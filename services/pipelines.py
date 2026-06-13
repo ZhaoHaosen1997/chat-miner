@@ -721,7 +721,7 @@ async def run_daily_pipeline_online(
         logger.error(f"在线模型日报异常: {e}，降级到本地管线")
 
     # 降级：使用本地 8 子任务管线
-    logger.info(f"降级到本地管线为 {group_name} {date} 生成日报")
+    logger.warning(f"降级到本地管线为 {group_name} {date} 生成日报")
     if task:
         task.update("inference", "⚠️ 在线模型未能响应，切换本地模型接力...", fallback=True)
     try:
@@ -1103,7 +1103,7 @@ async def run_portrait_pipeline_online(
         logger.error(f"在线模型画像异常: {e}，降级到本地管线")
 
     # 降级：使用本地 4 步子任务管线
-    logger.info(f"降级到本地管线为 {sender_name} 生成画像")
+    logger.warning(f"降级到本地管线为 {sender_name} 生成画像")
     if task:
         task.update("inference", f"⚠️ 在线模型未能响应，切换本地模型继续描绘 {sender_name}...", fallback=True)
     try:

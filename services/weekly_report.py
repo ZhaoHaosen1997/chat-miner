@@ -988,7 +988,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
             truncated_user = user_prompt
             if len(user_prompt) > 3000:
                 truncated_user = user_prompt[:3000] + "\n\n（内容过长已截断，请基于已有数据生成）"
-                logger.info(f"本地模型降级：prompt 从 {len(user_prompt)} 截断至 3000 字符")
+                logger.warning(f"本地模型降级：prompt 从 {len(user_prompt)} 截断至 3000 字符")
             ollama_result = await call_ollama_chat(
                 system_prompt, truncated_user,
                 model=local_cfg.get("model_name", ""),
@@ -1205,6 +1205,8 @@ async def generate_weekly_report(
         d += timedelta(days=1)
 
     if len(week_dates) < 3:
+        if task:
+            task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 3 天）"})
         return {
             "success": False, "data": None,
             "error": f"该周仅有 {len(week_dates)} 天有聊天数据（最少需要 3 天）",
@@ -1226,7 +1228,7 @@ async def generate_weekly_report(
     # v0.13.4: 本地模型上下文有限，降级到旧管道（基于日报聚合，prompt 更短）
     is_local_model = model_config.get("model_type") == "local"
     if is_local_model and use_new_pipeline:
-        logger.info(f"周报检测到本地模型，切换旧管道（prompt 较短）")
+        logger.warning(f"周报检测到本地模型，切换旧管道（prompt 较短）")
         use_new_pipeline = False  # 强制走旧管道
 
     if use_new_pipeline:
@@ -1295,9 +1297,13 @@ async def generate_weekly_report(
         }
     else:
         # ---- 降级：旧日报聚合管道 ----
-        logger.info(f"周报降级到旧管道: {period_key} (消息不足或chat未加载)")
+        logger.warning(f"周报降级到旧管道: {period_key} (消息不足或chat未加载)")
+        if task:
+            task.update("inference", "⚠️ 原始消息数据不足，降级为日报聚合模式...")
         analyzed_week_dates = [d for d in week_dates if d in analyzed_dates]
         if len(analyzed_week_dates) < 3:
+            if task:
+                task.finish(success=False, error={"type": "too_few", "detail": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 3 天）"})
             return {
                 "success": False, "data": None,
                 "error": f"该周仅有 {len(analyzed_week_dates)} 天日报数据（最少需要 3 天）",
@@ -1440,6 +1446,8 @@ async def generate_monthly_report(
 
     if len(month_dates_list) < 5:
         logger.warning(f"月报数据不足: group={group_id} period={period_key} 仅有 {len(month_dates_list)} 天")
+        if task:
+            task.finish(success=False, error={"type": "too_few", "detail": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 5 天）"})
         return {
             "success": False, "data": None,
             "error": f"该月仅有 {len(month_dates_list)} 天有聊天数据（最少需要 5 天）",
@@ -1542,7 +1550,7 @@ async def generate_monthly_report(
     # v0.13.4: 本地模型上下文有限，降级到旧管道
     is_local_model_monthly = model_config.get("model_type") == "local"
     if is_local_model_monthly and use_new_pipeline:
-        logger.info(f"月报检测到本地模型，切换旧管道（prompt 较短）")
+        logger.warning(f"月报检测到本地模型，切换旧管道（prompt 较短）")
         use_new_pipeline = False
 
     if use_new_pipeline:
@@ -1623,8 +1631,13 @@ async def generate_monthly_report(
         }
     else:
         # ---- 降级：旧日报聚合管道 ----
+        logger.warning(f"月报降级到旧管道: {period_key} (消息不足或chat未加载)")
+        if task:
+            task.update("inference", "⚠️ 原始消息数据不足，降级为日报聚合模式...")
         analyzed_month_dates = [d for d in month_dates_list if d in analyzed_dates]
         if len(analyzed_month_dates) < 10:
+            if task:
+                task.finish(success=False, error={"type": "too_few", "detail": f"该月仅有 {len(analyzed_month_dates)} 天日报数据（最少需要 10 天）"})
             return {
                 "success": False, "data": None,
                 "error": f"该月仅有 {len(analyzed_month_dates)} 天日报数据（最少需要 10 天）",

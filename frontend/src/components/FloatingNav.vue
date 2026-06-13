@@ -12,11 +12,10 @@ const props = defineProps({
 const emit = defineEmits(['prev', 'next'])
 
 function onKey(e) {
-  // Ignore if user is typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return
-  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'a' || e.key === 'A' || e.key === 'w' || e.key === 'W') {
     if (props.showPrev) emit('prev')
-  } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'd' || e.key === 'D' || e.key === 's' || e.key === 'S') {
     if (props.showNext) emit('next')
   }
 }
