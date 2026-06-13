@@ -90,7 +90,9 @@ async def run_scheduled_sync():
             continue
 
         try:
-            result = sync_messages_incremental(client, g["id"])
+            result = await asyncio.to_thread(
+                sync_messages_incremental, client, g["id"]
+            )
             if result.get("added", 0) > 0:
                 synced += 1
                 logger.info(f"[WeFlow Scheduler] {g['name']}: "

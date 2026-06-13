@@ -99,7 +99,9 @@ async def trigger_sync(group_id: int):
 
     async def _run():
         try:
-            result = sync_messages_incremental(client, group_id, task=task)
+            result = await asyncio.to_thread(
+                sync_messages_incremental, client, group_id, task=task
+            )
             if result.get("cancelled"):
                 return
             logger.info(f"[WeFlow Sync] {group['name']}: +{result['added']} 新消息")

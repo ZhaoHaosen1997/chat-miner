@@ -23,9 +23,14 @@ watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
     _refreshTimer = setInterval(() => loadAll(true), 3000)
   } else if (oldVal) {
-    // 任务结束时刷新数据
+    // 任务结束时清理状态 + 刷新数据
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
+    analyzing.value = false
+    batchTotal.value = 0
+    generatingPeriod.value = ''
     loadAll()
+    loadPeriods()
+    triggerRefresh?.()
   }
 })
 onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
@@ -124,17 +129,6 @@ async function loadAll(silent = false) {
 }
 
 watch(currentGroup, () => { monthOffset.value = 0; loadAll(); loadPeriods() }, { immediate: true })
-
-watch(activeTaskId, (newVal, oldVal) => {
-  if (oldVal && !newVal) {
-    analyzing.value = false
-    batchTotal.value = 0
-    generatingPeriod.value = ''
-    loadAll()
-    loadPeriods()
-    triggerRefresh?.()
-  }
-})
 
 const latestUnanalyzed = ref(null)
 const skippedDates = ref(new Set())

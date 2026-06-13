@@ -66,11 +66,14 @@ let _doneTimer = null
 function onTaskDone(data) {
   if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
     addTaskHistoryEntry(activeTaskId.value, data)
-    // 成功时延迟关闭，让用户看清结果；失败/取消立即关闭
+    const doneTaskId = activeTaskId.value
     const delay = data.status === 'done' ? 2500 : 0
     clearTimeout(_doneTimer)
     _doneTimer = setTimeout(() => {
-      activeTaskId.value = ''
+      // 只在没有新任务时清除
+      if (activeTaskId.value === doneTaskId) {
+        activeTaskId.value = ''
+      }
       _doneTimer = null
     }, delay)
   }
