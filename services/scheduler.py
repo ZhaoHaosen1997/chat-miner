@@ -60,8 +60,27 @@ def reload_scheduler():
         init_scheduler()
 
 
+def _update_sync_status(group_id: int, result: str):
+    """更新群的上次同步时间和结果"""
+    from models.database import get_conn
+    from datetime import datetime
+    conn = None
+    try:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE chat_groups SET weflow_last_sync_at=?, weflow_last_sync_result=? WHERE id=?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), result, group_id)
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
+
+
 async def run_scheduled_sync():
-    """定时任务：遍历所有已配 WeFlow 的群，执行增量同步"""
+    """定时任务：只同步开启了 weflow_auto_sync 的群"""
     from models.database import list_groups
     from services.weflow_client import WeFlowClient, WeFlowError
     from services.weflow_sync import sync_messages_incremental
@@ -82,27 +101,36 @@ async def run_scheduled_sync():
     groups = list_groups()
     synced = 0
     failed = 0
+    skipped = 0
 
     for g in groups:
         wxid = g.get("wxid", "")
-        # 只同步群聊（wxid 含 @chatroom）
-        if not wxid or "@chatroom" not in wxid:
+        if not wxid:
+            continue
+        # 只同步开启了自动同步的群
+        if not g.get("weflow_auto_sync", 0):
+            skipped += 1
             continue
 
         try:
             result = await asyncio.to_thread(
                 sync_messages_incremental, client, g["id"]
             )
-            if result.get("added", 0) > 0:
+            added = result.get("added", 0)
+            if added > 0:
                 synced += 1
-                logger.info(f"[WeFlow Scheduler] {g['name']}: "
-                            f"+{result['added']} 条新消息")
+                _update_sync_status(g["id"], f"+{added} 条")
+                logger.info(f"[WeFlow Scheduler] {g['name']}: +{added} 条新消息")
+            else:
+                _update_sync_status(g["id"], "无新消息")
             if result.get("cancelled"):
                 break
         except Exception as e:
             failed += 1
+            _update_sync_status(g["id"], f"失败: {str(e)[:80]}")
             logger.error(f"[WeFlow Scheduler] {g['name']} 同步失败: {e}")
 
     client.close()
     logger.info(f"[WeFlow Scheduler] 完成: {synced} 群有新消息, "
-                f"{failed} 失败, {len(groups) - synced - failed} 无变化")
+                f"{failed} 失败, {skipped} 未开启, "
+                f"{len(groups) - synced - failed - skipped} 无变化")

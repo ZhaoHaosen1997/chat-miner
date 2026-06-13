@@ -25,7 +25,7 @@ class SyncRequest(BaseModel):
 
 class LinkRequest(BaseModel):
     group_id: int = Field(..., description="chat-miner 群 ID")
-    chatroom_id: str = Field(..., description="WeFlow 会话 ID (xxx@chatroom)")
+    chatroom_id: str = Field(..., description="WeFlow 会话 ID (群聊: xxx@chatroom / 私聊: wxid_xxx)")
 
 
 # ---- 辅助函数 ----
@@ -51,7 +51,7 @@ async def get_sessions(keyword: str = "", limit: int = 200):
         groups = list_groups()
         linked_wxids = {g["wxid"] for g in groups if g.get("wxid")}
 
-        # 标记关联状态
+        # 标记关联状态 + 附带自动同步信息
         for s in sessions:
             s["linked"] = s.get("id") in linked_wxids
             if s["linked"]:
@@ -61,6 +61,9 @@ async def get_sessions(keyword: str = "", limit: int = 200):
                 if linked_group:
                     s["group_id"] = linked_group["id"]
                     s["group_name"] = linked_group["name"]
+                    s["auto_sync"] = bool(linked_group.get("weflow_auto_sync", 0))
+                    s["last_sync_at"] = linked_group.get("weflow_last_sync_at", "")
+                    s["last_sync_result"] = linked_group.get("weflow_last_sync_result", "")
         return {
             "code": 200,
             "message": "ok",
@@ -84,8 +87,8 @@ async def trigger_sync(group_id: int):
         raise HTTPException(404, f"群不存在: group_id={group_id}")
 
     wxid = group.get("wxid", "")
-    if not wxid or "@chatroom" not in wxid:
-        raise HTTPException(400, f"群 wxid 不是合法群聊: {wxid}，请先关联 WeFlow 会话")
+    if not wxid:
+        raise HTTPException(400, f"群 wxid 为空，请先关联 WeFlow 会话")
 
     client = _get_client()
 
@@ -129,8 +132,8 @@ async def link_group(req: LinkRequest):
     if not group:
         raise HTTPException(404, f"群不存在: group_id={req.group_id}")
 
-    if "@chatroom" not in req.chatroom_id:
-        raise HTTPException(400, "chatroom_id 必须是 xxx@chatroom 格式")
+    if not req.chatroom_id:
+        raise HTTPException(400, "chatroom_id 不能为空")
 
     client = _get_client()
     try:
@@ -167,13 +170,16 @@ async def get_status():
     group_status = []
     for g in groups:
         wxid = g.get("wxid", "")
-        if "@chatroom" in wxid:
+        if wxid:
             group_status.append({
                 "group_id": g["id"],
                 "name": g["name"],
                 "chatroom_id": wxid,
                 "date_range_end": g.get("date_range_end", ""),
                 "message_count": g.get("message_count", 0),
+                "auto_sync": bool(g.get("weflow_auto_sync", 0)),
+                "last_sync_at": g.get("weflow_last_sync_at", ""),
+                "last_sync_result": g.get("weflow_last_sync_result", ""),
             })
 
     return {
@@ -185,4 +191,58 @@ async def get_status():
             "sync_interval_hours": config.WEFLOW_SYNC_INTERVAL_HOURS,
             "groups": group_status,
         },
+    }
+
+
+@router.post("/unlink/{group_id}")
+async def unlink_group(group_id: int):
+    """取消群与 WeFlow 会话的关联"""
+    from models.database import get_conn
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    conn = None
+    try:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE chat_groups SET weflow_auto_sync=0 WHERE id=?",
+            (group_id,)
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+    return {
+        "code": 200,
+        "message": "已取消关联",
+        "data": {"group_id": group_id},
+    }
+
+
+class AutoSyncToggle(BaseModel):
+    enabled: bool = Field(..., description="是否开启自动同步")
+
+
+@router.put("/auto-sync/{group_id}")
+async def toggle_auto_sync(group_id: int, body: AutoSyncToggle):
+    """按群开关 WeFlow 自动同步"""
+    from models.database import get_conn
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    conn = None
+    try:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE chat_groups SET weflow_auto_sync=? WHERE id=?",
+            (1 if body.enabled else 0, group_id)
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+    return {
+        "code": 200,
+        "message": f"自动同步已{'开启' if body.enabled else '关闭'}",
+        "data": {"group_id": group_id, "auto_sync": body.enabled},
     }

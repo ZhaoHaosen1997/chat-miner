@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
-import { X, Search, Link2, RefreshCw, Loader2, CheckCircle, AlertCircle, Sparkles } from 'lucide-vue-next'
-import { getWeFlowSessions, triggerWeFlowSync, linkWeFlowGroup } from '../api'
+import { X, Search, Link2, RefreshCw, Loader2, CheckCircle, AlertCircle, Sparkles, Clock } from 'lucide-vue-next'
+import { getWeFlowSessions, triggerWeFlowSync, linkWeFlowGroup, toggleWeFlowAutoSync, unlinkWeFlowGroup } from '../api'
 
 const props = defineProps({
   group: { type: Object, default: null },  // currentGroup from Dashboard
@@ -30,18 +30,47 @@ const filteredSessions = computed(() => {
   )
 })
 
+// 判断群是否已有合法 WeFlow wxid（已关联）
+function isAlreadyLinked(group) {
+  const wxid = group?.wxid || ''
+  return wxid.startsWith('wxid_') || wxid.includes('@chatroom')
+}
+
 onMounted(async () => {
+  if (!props.group) {
+    loading.value = false
+    return
+  }
+
+  // 已关联：直接显示确认框，免去拉取会话列表
+  if (isAlreadyLinked(props.group)) {
+    autoMatch.value = {
+      session: {
+        id: props.group.wxid,
+        name: props.group.display_name || props.group.name,
+        linked: true,
+        group_id: props.group.id,
+        auto_sync: !!props.group.weflow_auto_sync,
+        last_sync_at: props.group.weflow_last_sync_at || '',
+        last_sync_result: props.group.weflow_last_sync_result || '',
+      },
+      reason: 'linked',
+    }
+    loading.value = false
+    return
+  }
+
+  // 未关联：拉取会话列表做自动匹配
   try {
     const data = await getWeFlowSessions()
     sessions.value = (data.sessions || [])
-      .filter(s => s.type === 'group')
+      .filter(s => s.type === 'group' || s.type === 'private')
       .sort((a, b) => {
         if (a.linked && !b.linked) return -1
         if (!a.linked && b.linked) return 1
         return (b.messageCount || 0) - (a.messageCount || 0)
       })
 
-    // 自动匹配：当前群名 vs WeFlow 会话名
     if (props.group) {
       tryAutoMatch()
     }
@@ -56,21 +85,14 @@ function tryAutoMatch() {
   const groupName = props.group?.display_name || props.group?.name || ''
   if (!groupName) { autoMatch.value = false; return }
 
-  // 1. wxid 精确匹配（已关联）→ 直接跳过匹配阶段
-  const byWxid = sessions.value.find(s => s.linked && s.group_id === props.group.id)
-  if (byWxid) {
-    autoMatch.value = { session: byWxid, reason: 'linked' }
-    return
-  }
-
-  // 2. 群名唯一匹配
+  // 1. 群名唯一匹配
   const byName = sessions.value.filter(s => !s.linked && s.name === groupName)
   if (byName.length === 1) {
     autoMatch.value = { session: byName[0], reason: 'name_match' }
     return
   }
 
-  // 3. 群名包含匹配（唯一结果）
+  // 2. 群名包含匹配（唯一结果）
   const byFuzzy = sessions.value.filter(s =>
     !s.linked &&
     s.name && groupName &&
@@ -145,6 +167,28 @@ async function doLinkAndSyncForSession(session) {
     showError?.('操作失败', e.message || '未知错误')
   }
 }
+
+async function toggleAutoSync(session) {
+  try {
+    const newVal = !session.auto_sync
+    await toggleWeFlowAutoSync(session.group_id, newVal)
+    session.auto_sync = newVal
+  } catch (e) {
+    showError?.('操作失败', e.message || '未知错误')
+  }
+}
+
+async function doUnlink(session) {
+  if (!confirm(`确定取消「${session.name || session.id}」与 WeFlow 的关联？\n不会删除已有数据，仅取消关联关系。`)) return
+  try {
+    await unlinkWeFlowGroup(session.group_id)
+    session.linked = false
+    session.auto_sync = false
+    autoMatch.value = null  // 回退到列表视图
+  } catch (e) {
+    showError?.('操作失败', e.message || '未知错误')
+  }
+}
 </script>
 
 <template>
@@ -201,11 +245,32 @@ async function doLinkAndSyncForSession(session) {
               </div>
             </div>
 
+            <!-- Auto-sync toggle (linked only) -->
+            <div v-if="autoMatch.reason === 'linked'" class="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5">
+              <div class="flex items-center gap-2">
+                <Clock :size="14" class="text-slate-400" />
+                <span class="text-sm text-slate-600">自动同步</span>
+              </div>
+              <button @click="toggleAutoSync(autoMatch.session)"
+                      :class="['w-10 h-5 rounded-full transition-colors', autoMatch.session.auto_sync ? 'bg-emerald-400' : 'bg-gray-300']">
+                <div :class="['w-4 h-4 rounded-full bg-white shadow transition-transform mt-0.5', autoMatch.session.auto_sync ? 'translate-x-5' : 'translate-x-0.5']" />
+              </button>
+            </div>
+            <!-- Last sync info (linked only) -->
+            <div v-if="autoMatch.reason === 'linked' && autoMatch.session.last_sync_at" class="text-center text-[10px] text-slate-400">
+              上次同步：{{ autoMatch.session.last_sync_at }} &nbsp;{{ autoMatch.session.last_sync_result }}
+            </div>
+
             <div class="flex gap-2">
               <button v-if="autoMatch.reason !== 'linked'"
                       @click="cancelAutoMatch"
                       class="flex-1 py-2.5 text-sm text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                 从列表选择
+              </button>
+              <button v-if="autoMatch.reason === 'linked'"
+                      @click="doUnlink(autoMatch.session)"
+                      class="px-3 py-2.5 text-sm text-red-400 border border-red-200 rounded-xl hover:bg-red-50 transition-colors">
+                取消关联
               </button>
               <button @click="autoMatch.reason === 'linked' ? doSync(autoMatch.session) : doLinkAndSync()"
                       :disabled="linking || !!activeTaskId"
@@ -241,32 +306,52 @@ async function doLinkAndSyncForSession(session) {
             </div>
             <div v-else class="space-y-1 py-1">
               <div v-for="s in filteredSessions" :key="s.id"
-                   class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors"
+                   class="flex flex-col px-3 py-2.5 rounded-xl transition-colors"
                    :class="s.linked ? 'bg-emerald-50/50 border border-emerald-100/50' : 'hover:bg-slate-50 border border-transparent'">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                     :class="s.linked ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'">
-                  <CheckCircle v-if="s.linked" :size="16" />
-                  <Link2 v-else :size="16" />
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                       :class="s.linked ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'">
+                    <CheckCircle v-if="s.linked" :size="16" />
+                    <Link2 v-else :size="16" />
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium text-slate-700 truncate">{{ s.name }}</div>
+                    <div class="text-[10px] text-slate-400 truncate">{{ s.id }}</div>
+                  </div>
+                  <button v-if="s.linked"
+                          @click="doUnlink(s)"
+                          class="px-2 py-1 rounded-lg text-[10px] text-red-400 hover:text-red-600 hover:bg-red-50 transition-all flex-shrink-0"
+                          title="取消关联">
+                    <X :size="12" />
+                  </button>
+                  <button v-if="s.linked"
+                          @click="doSync(s)"
+                          :disabled="!!syncing[s.id] || !!activeTaskId"
+                          class="px-2.5 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-90 disabled:opacity-40 transition-all flex items-center gap-1 flex-shrink-0">
+                    <Loader2 v-if="syncing[s.id] === 'loading'" :size="10" class="animate-spin" />
+                    <RefreshCw v-else :size="10" />
+                  </button>
+                  <button v-else
+                          @click="doLinkAndSyncForSession(s)"
+                          :disabled="!!syncing[s.id]"
+                          class="px-2.5 py-1.5 rounded-lg text-[10px] font-medium border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 transition-all flex items-center gap-1 flex-shrink-0">
+                    <Link2 :size="10" />
+                    关联
+                  </button>
                 </div>
-                <div class="flex-1 min-w-0">
-                  <div class="text-xs font-medium text-slate-700 truncate">{{ s.name }}</div>
-                  <div class="text-[10px] text-slate-400 truncate">{{ s.id }}</div>
+                <!-- Auto-sync toggle + last sync status (linked only) -->
+                <div v-if="s.linked" class="flex items-center gap-3 mt-1.5 ml-12 text-[10px]">
+                  <button @click="toggleAutoSync(s)"
+                          :class="['w-8 h-4 rounded-full transition-colors flex-shrink-0', s.auto_sync ? 'bg-emerald-400' : 'bg-gray-300']">
+                    <div :class="['w-3 h-3 rounded-full bg-white shadow transition-transform mt-0.5', s.auto_sync ? 'translate-x-4' : 'translate-x-0.5']" />
+                  </button>
+                  <span class="text-slate-400">自动同步</span>
+                  <span v-if="s.last_sync_at" class="text-slate-300 flex items-center gap-1">
+                    <Clock :size="10" />
+                    {{ s.last_sync_at.slice(5) }} &nbsp;{{ s.last_sync_result }}
+                  </span>
+                  <span v-else class="text-slate-300">尚未同步</span>
                 </div>
-                <button v-if="s.linked"
-                        @click="doSync(s)"
-                        :disabled="!!syncing[s.id] || !!activeTaskId"
-                        class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-90 disabled:opacity-40 transition-all flex items-center gap-1 flex-shrink-0">
-                  <Loader2 v-if="syncing[s.id] === 'loading'" :size="10" class="animate-spin" />
-                  <RefreshCw v-else :size="10" />
-                  {{ syncing[s.id] === 'loading' ? '同步中' : '同步' }}
-                </button>
-                <button v-else
-                        @click="doLinkAndSyncForSession(s)"
-                        :disabled="!!syncing[s.id]"
-                        class="px-3 py-1.5 rounded-lg text-[10px] font-medium border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 transition-all flex items-center gap-1 flex-shrink-0">
-                  <Link2 :size="10" />
-                  关联
-                </button>
               </div>
             </div>
           </div>

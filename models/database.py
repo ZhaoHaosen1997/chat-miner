@@ -373,6 +373,8 @@ def init_db():
         conn.execute("ALTER TABLE fish_pond ADD COLUMN active_consumable TEXT DEFAULT ''")
     # WeFlow 同步设置（v0.x）：补足已有数据库缺失的配置项
     _migrate_weflow_settings(conn)
+    # WeFlow 按群同步开关 + 状态
+    _migrate_weflow_group_columns(conn)
     conn.commit()
     conn.close()
     # 清理过期日志（不阻塞启动）
@@ -407,6 +409,20 @@ def _migrate_weflow_settings(conn):
     if added:
         import logging
         logging.getLogger(__name__).info("DB migrate: added %d WeFlow settings", added)
+
+
+def _migrate_weflow_group_columns(conn):
+    """v1.2.x: chat_groups 新增 WeFlow 按群同步开关 + 状态列"""
+    cur = conn.execute("PRAGMA table_info(chat_groups)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "weflow_auto_sync" not in cols:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN weflow_auto_sync INTEGER DEFAULT 0")
+        import logging
+        logging.getLogger(__name__).info("DB migrate: added chat_groups.weflow_auto_sync")
+    if "weflow_last_sync_at" not in cols:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN weflow_last_sync_at TEXT DEFAULT ''")
+    if "weflow_last_sync_result" not in cols:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN weflow_last_sync_result TEXT DEFAULT ''")
 
 
 def _seed_default_model_configs(conn):

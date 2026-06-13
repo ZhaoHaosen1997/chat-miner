@@ -210,8 +210,8 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
         raise ValueError(f"群不存在: group_id={group_id}")
 
     chatroom_id = group.get("wxid", "")
-    if not chatroom_id or "@chatroom" not in chatroom_id:
-        raise ValueError(f"群 wxid 不是合法 chatroom: {chatroom_id}")
+    if not chatroom_id:
+        raise ValueError(f"群 wxid 为空: group_id={group_id}")
 
     # 1. 计算 since
     since = _get_last_message_timestamp(group_id)

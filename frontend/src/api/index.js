@@ -328,4 +328,10 @@ export const linkWeFlowGroup = (group_id, chatroom_id) =>
     method: 'POST', body: JSON.stringify({ group_id, chatroom_id })
   })
 export const getWeFlowStatus = () => request('/weflow/status')
+export const toggleWeFlowAutoSync = (group_id, enabled) =>
+  request(`/weflow/auto-sync/${group_id}`, {
+    method: 'PUT', body: JSON.stringify({ enabled })
+  })
+export const unlinkWeFlowGroup = (group_id) =>
+  request(`/weflow/unlink/${group_id}`, { method: 'POST' })
 
