@@ -15,7 +15,7 @@ from config import config
 from models.database import (
     create_group, list_groups, get_group, delete_group,
     upsert_members, upsert_avatars_only, update_member_message_count, get_members,
-    get_conn,
+    db,
 )
 from services.parser import load_and_parse, ParsedChat, merge_chat_data
 
@@ -282,11 +282,9 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
 
     # 用 JSON 中的群名替换当前群名
     if rename in ("1", "true") and new_chat.group_name and new_chat.group_name != group["name"]:
-        conn = get_conn()
-        conn.execute("UPDATE chat_groups SET name=?, display_name=? WHERE id=?",
-                    (new_chat.group_name, new_chat.group_name, group_id))
-        conn.commit()
-        conn.close()
+        with db() as conn:
+            conn.execute("UPDATE chat_groups SET name=?, display_name=? WHERE id=?",
+                        (new_chat.group_name, new_chat.group_name, group_id))
         _invalidate_cache(group_id)
         group = get_group(group_id)  # 刷新
         logger.info(f"群名已更新: {new_chat.group_name}")
@@ -385,21 +383,19 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
 
     # 更新数据库
     date_start, date_end = merged_chat.get_date_range()
-    conn = get_conn()
     real_count = len([
         s for s in merged_chat.senders
         if not ("@chatroom" in merged_chat.group_wxid and s.get("wxid") == merged_chat.group_wxid)
     ])
-    conn.execute(
-        """UPDATE chat_groups SET
-           message_count=?, sender_count=?,
-           date_range_start=?, date_range_end=?, file_path=?
-           WHERE id=?""",
-        (len(merged_chat.messages), real_count,
-         date_start, date_end, str(merged_path), group_id)
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        conn.execute(
+            """UPDATE chat_groups SET
+               message_count=?, sender_count=?,
+               date_range_start=?, date_range_end=?, file_path=?
+               WHERE id=?""",
+            (len(merged_chat.messages), real_count,
+             date_start, date_end, str(merged_path), group_id)
+        )
 
     # 更新成员
     upsert_members(group_id, merged_chat.senders)
@@ -433,13 +429,11 @@ async def api_rename_group(group_id: int, name: str = None, display_name: str = 
     if not name and not display_name:
         raise HTTPException(400, detail="请提供 name 或 display_name")
 
-    conn = get_conn()
-    if name:
-        conn.execute("UPDATE chat_groups SET name=? WHERE id=?", (name.strip(), group_id))
-    if display_name:
-        conn.execute("UPDATE chat_groups SET display_name=? WHERE id=?", (display_name.strip(), group_id))
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        if name:
+            conn.execute("UPDATE chat_groups SET name=? WHERE id=?", (name.strip(), group_id))
+        if display_name:
+            conn.execute("UPDATE chat_groups SET display_name=? WHERE id=?", (display_name.strip(), group_id))
 
     _invalidate_cache(group_id)
     updated = get_group(group_id)

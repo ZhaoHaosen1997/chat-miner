@@ -10,9 +10,15 @@ from typing import Optional
 
 from models.database import save_task_record
 from services.analyzer import call_ollama_chat
+from services.task_manager import task_manager
 from config import config
 
 logger = logging.getLogger(__name__)
+
+
+def _is_cancelled(task) -> bool:
+    """v1.2.11: 统一的取消检查，替代分散的 hasattr(task, '_cancelled') 模式"""
+    return task is not None and task_manager.is_cancelled(task.task_id)
 
 # ---- 私聊适配 ----
 # 当群聊只有 2 人时，自动将 prompt 中的群聊话术替换为私聊话术
@@ -127,8 +133,8 @@ _circuit_state = {
     "tripped": False,
 }
 # v0.13.1: 熔断器异步锁，防止并发竞态
-import asyncio as _asyncio
-_circuit_lock = _asyncio.Lock()
+import asyncio
+_circuit_lock = asyncio.Lock()
 
 
 async def _check_circuit() -> bool:
@@ -389,25 +395,31 @@ def _parse_active_hours(raw) -> dict:
 async def _run_sub(task, step_name: str, step_idx: int, total: int,
                    system: str, user: str, model: str = "") -> Optional[dict]:
     """执行一个子任务，失败自动重试（最多 3 次），返回解析后的 dict"""
-    import asyncio
 
     last_error = ""
     total_start = time.time()
+    circuit_waits = 0  # v1.2.11: 熔断器等待计数，防止无限循环
 
     for attempt in range(1, MAX_RETRIES + 1):
         result2 = None  # 每轮重置，避免跨迭代污染
 
         # 取消检查
-        if task and hasattr(task, '_cancelled') and task._cancelled:
+        if _is_cancelled(task):
             logger.info(f"{step_name}: 任务已取消")
             return None
 
-        # 熔断器检查
+        # 熔断器检查（v1.2.11: 加最大等待次数，防止无限循环）
         if _circuit_state["tripped"] and not await _check_circuit():
+            circuit_waits += 1
+            if circuit_waits > 6:
+                last_error = f"熔断器等待超时（{circuit_waits * 5}s），放弃重试"
+                logger.error(f"{step_name}: {last_error}")
+                break
             last_error = f"熔断器触发，冷却中（还需 {CIRCUIT_BREAKER_COOLDOWN - int(time.time() - _circuit_state['last_failure_time'])}s）"
             logger.warning(f"{step_name}: {last_error}")
             await asyncio.sleep(5)
             continue
+        circuit_waits = 0  # 熔断器恢复，重置计数
         # 总超时检查
         if time.time() - total_start > STEP_TIMEOUT:
             last_error = f"子任务总超时 ({STEP_TIMEOUT}s)"
@@ -506,12 +518,8 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         # prompt 是 {"system": ..., "user": ...} dict
         return {k: _adapt_for_private(v) for k, v in prompt.items()}
 
-    # 取消检查辅助
-    def _cancelled():
-        return task and hasattr(task, '_cancelled') and task._cancelled
-
     # 1. 话题（每行一个）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     topics_data = await _run_sub(task, "🔍 挖掘今日话题", 1, total,
                                   _p("topics")["system"],
                                   f"{chat_text}\n\n{_p('topics')['user']}",
@@ -522,7 +530,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("topics")
 
     # 2. 搞笑发言（发言人|原话|吐槽）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     quotes_data = await _run_sub(task, "😂 捕捉名场面", 2, total,
                                   _p("quotes")["system"],
                                   f"{chat_text}\n\n{_p('quotes')['user']}",
@@ -532,7 +540,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("quotes")
 
     # 3. 情绪（一个词）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     mood_data = await _run_sub(task, "🎭 感知群聊情绪", 3, total,
                                 _p("mood")["system"],
                                 f"{chat_text}\n\n{_p('mood')['user']}",
@@ -542,7 +550,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("mood")
 
     # 4. 关键词（逗号分隔）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     kw_data = await _run_sub(task, "🏷️ 提取热词", 4, total,
                               _p("keywords")["system"],
                               f"{chat_text}\n\n{_p('keywords')['user']}",
@@ -552,7 +560,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("keywords")
 
     # 5. 一句话总结（两行：总结+高光）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     ol_data = await _run_sub(task, "✍️ 写一句话总结", 5, total,
                               _p("oneline")["system"],
                               f"{chat_text}\n\n{_p('oneline')['user']}",
@@ -562,7 +570,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("oneline")
 
     # 6. 活跃时段（一句话描述）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     hs = (hourly_stats or "(无小时分布数据)").replace("{", "{{").replace("}", "}}")
     hs_user = PROMPTS["active_hours"]["user"].replace("{hourly_stats}", hs)
     ah_data = await _run_sub(task, "⏰ 分析活跃时段", 6, total,
@@ -573,7 +581,7 @@ async def run_daily_pipeline(chat_text: str, group_name: str,
         failed_steps.append("active_hours")
 
     # 7. 趣味标题（UC震惊体/综艺预告片风）
-    if _cancelled(): return {}
+    if _is_cancelled(task): return {}
     headline_data = await _run_sub(task, "📺 编导起标题", 7, total,
                                     _p("headline")["system"],
                                     f"{chat_text}\n\n{_p('headline')['user']}",
@@ -872,11 +880,8 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
     if task:
         task.model_used = config.OLLAMA_MODEL  # v0.12.4: 入口即设
 
-    def _cancelled_portrait():
-        return task and hasattr(task, '_cancelled') and task._cancelled
-
     # 1. 性格+角色（三行文本）
-    if _cancelled_portrait(): return {}
+    if _is_cancelled(task): return {}
     p_data = await _run_sub(task, "🧠 分析性格角色", 1, total,
                              _pp("persona")["system"],
                              f"{prompt_user}{_pp('persona')['user'].replace('{name}', sender_name)}")
@@ -1270,11 +1275,8 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
     safe_name = sender_name.replace("{", "{{").replace("}", "}}")
     TOTAL_STEPS = 5
 
-    def _cancelled_deep():
-        return task and hasattr(task, '_cancelled') and task._cancelled
-
     # ---- 1. 月度切片分析（先收集数据，后续情绪分析依赖这些数据） ----
-    if _cancelled_deep(): return {}
+    if _is_cancelled(task): return {}
     from services.parser import ParsedChat
     monthly_chunks = chunk_messages_by_month(messages, lambda sid: sender_name, max_chars_per_chunk=3000)
 
@@ -1283,7 +1285,7 @@ async def run_deep_portrait_pipeline(chat_text: str,  # 目标成员的部分发
         task.update("inference", f"月度切片分析 (0/{len(monthly_chunks)})...")
 
     for i, (month_label, chunk) in enumerate(monthly_chunks):
-        if _cancelled_deep(): break
+        if _is_cancelled(task): break
         if task:
             task.update("inference", f"月度切片 ({i+1}/{len(monthly_chunks)}) {month_label}...")
         analysis = await _run_monthly_slice(task, month_label, chunk, sender_name, model)

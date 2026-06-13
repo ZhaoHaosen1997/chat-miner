@@ -142,15 +142,13 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
 @router.delete("/report/{date}")
 async def api_delete_report(group_id: int, date: str):
     """删除某天的分析报告"""
-    from models.database import get_conn
-    conn = get_conn()
-    cur = conn.execute(
-        "DELETE FROM daily_reports WHERE group_id=? AND date=?",
-        (group_id, date)
-    )
-    conn.commit()
-    deleted = cur.rowcount
-    conn.close()
+    from models.database import db
+    with db() as conn:
+        cur = conn.execute(
+            "DELETE FROM daily_reports WHERE group_id=? AND date=?",
+            (group_id, date)
+        )
+        deleted = cur.rowcount
     if deleted:
         # 更新已分析天数
         analyzed_count = len(get_analyzed_dates(group_id))
@@ -419,7 +417,6 @@ async def api_analyze_all(group_id: int, model_id: int = None):
 @router.get("/trending")
 async def api_trending_topics(group_id: int, days: int = 7):
     """群聊热搜榜：聚合最近 N 天日报中的话题和关键词，排行"""
-    import json
     from collections import Counter
     from datetime import datetime, timedelta
 
