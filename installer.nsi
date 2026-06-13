@@ -36,16 +36,16 @@ SetCompressor /SOLID lzma
 
 ; --- Install Section ---
 Section "Install"
-    ; 关闭运行中的 ChatMiner（释放文件锁，避免覆盖失败）
+    ; Kill running ChatMiner to release file locks before overwrite
     nsExec::Exec 'taskkill /f /im ChatMiner.exe'
     Sleep 1500
     SetOutPath "$INSTDIR"
 
-    ; 主程序文件（始终覆盖更新）
+    ; Main program files (always overwrite)
     SetOverwrite on
     File /r /x config.json "releases\ChatMiner\*.*"
 
-    ; config.json — 已存在则不覆盖，保留用户配置
+    ; config.json: preserve existing user config, do not overwrite
     SetOverwrite off
     File "releases\ChatMiner\config.json"
     SetOverwrite on
