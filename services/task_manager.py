@@ -66,7 +66,7 @@ class TaskInfo:
             try:
                 self._queue.put_nowait(self.to_event())
             except asyncio.QueueFull:
-                pass
+                logger.debug(f'SSE 队列已满，丢弃 fallback 清除事件: task={self.task_id}')
 
     def finish(self, success: bool = True, error: dict = None):
         if success:

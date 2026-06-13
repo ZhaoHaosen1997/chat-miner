@@ -960,6 +960,8 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
         from services.model_config import get_effective_model
         try:
             local_cfg = get_effective_model("local")
+            if not local_cfg:
+                raise ValueError("未找到本地模型配置")
             from services.analyzer import call_ollama_chat
             # v0.13.4: 本地模型上下文有限，截断 prompt 防卡死
             truncated_user = user_prompt
@@ -1038,7 +1040,11 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
     # 降级：本地 Ollama
     logger.warning(f"DeepSeek 不可用，降级到本地模型: {result.get('error')}")
     from services.analyzer import call_ollama_chat
-    ollama_result = await call_ollama_chat(system_prompt, user_prompt)
+    # v1.0.6: 与新版路径一致的截断和超时保护
+    truncated_user = user_prompt
+    if len(user_prompt) > 3000:
+        truncated_user = user_prompt[:3000] + "\n\n（内容过长已截断，请基于已有数据生成）"
+    ollama_result = await call_ollama_chat(system_prompt, truncated_user, timeout=180)
     if ollama_result["success"] and ollama_result["data"]:
         return {
             "success": True,

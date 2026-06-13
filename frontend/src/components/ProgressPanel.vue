@@ -97,6 +97,7 @@ function formatDuration(ms) {
 }
 
 watch(() => props.taskId, (id) => {
+  if (eventSource) { eventSource.close(); eventSource = null }  // v1.0.6: 防止舊連接泄漏
   if (id) connect()
 }, { immediate: true })
 

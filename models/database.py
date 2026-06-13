@@ -1722,4 +1722,5 @@ def load_app_settings_to_config():
         try:
             setattr(config, attr, converter(row["value"]))
         except (ValueError, TypeError):
-            pass  # 转换失败则保留 config.py 默认值
+            logger.warning(f'DB 设置 {key} 值转换失败({row["value"]})，使用默认值')
+            pass

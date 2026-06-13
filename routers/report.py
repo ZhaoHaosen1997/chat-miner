@@ -698,6 +698,7 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
 
     async def _run():
         total = len(ready)
+        failed = 0
         for i, p in enumerate(ready):
             if task_manager.is_cancelled(task.task_id):
                 task.update("cancelled", f"已取消 (完成 {i}/{total})")
@@ -710,17 +711,19 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
                                                       is_private=len(chat.senders) <= 2,
                                                       model_id=model_id)
                 if not result["success"]:
+                    failed += 1
                     task.update("inference",
                                f"周报 [{i+1}/{total}] {pk} 失败: {result.get('error', '')[:60]}",
                                progress={"current": i + 1, "total": total})
             except Exception as e:
+                failed += 1
                 logger.error(f"周报 {pk} 生成异常: {e}")
                 task.update("inference",
                            f"周报 [{i+1}/{total}] {pk} 异常: {str(e)[:60]}",
                            progress={"current": i + 1, "total": total})
-        task.update("done", f"批量生成完成: {total} 份周报",
+        task.update("done", f"批量生成完成: {total - failed}/{total} 份周报",
                    progress={"current": total, "total": total})
-        task.finish(success=True)
+        task.finish(success=failed == 0)
 
     asyncio.create_task(_run())
 
@@ -858,6 +861,7 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
 
     async def _run():
         total = len(ready)
+        failed = 0
         for i, p in enumerate(ready):
             if task_manager.is_cancelled(task.task_id):
                 task.update("cancelled", f"已取消 (完成 {i}/{total})")
@@ -870,17 +874,19 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
                                                        is_private=len(chat.senders) <= 2,
                                                        model_id=model_id)
                 if not result["success"]:
+                    failed += 1
                     task.update("inference",
                                f"月报 [{i+1}/{total}] {pk} 失败: {result.get('error', '')[:60]}",
                                progress={"current": i + 1, "total": total})
             except Exception as e:
+                failed += 1
                 logger.error(f"月报 {pk} 生成异常: {e}")
                 task.update("inference",
                            f"月报 [{i+1}/{total}] {pk} 异常: {str(e)[:60]}",
                            progress={"current": i + 1, "total": total})
-        task.update("done", f"批量生成完成: {total} 份月报",
+        task.update("done", f"批量生成完成: {total - failed}/{total} 份月报",
                    progress={"current": total, "total": total})
-        task.finish(success=True)
+        task.finish(success=failed == 0)
 
     asyncio.create_task(_run())
 

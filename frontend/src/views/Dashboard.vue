@@ -48,7 +48,6 @@ const monthlyPeriods = ref([])
 const annualPeriods = ref([])
 const periodsLoading = ref(false)
 const periodsLoaded = ref(false)
-const showPeriods = ref(true)
 const generatingPeriod = ref('')
 
 // v1.0.3: Hero cards — latest generated report previews
@@ -174,15 +173,6 @@ async function startAnalyzeAll() {
   } catch (e) { showError?.('批量分析失败', e.message, e.stack, '仪表盘·一键分析全部'); analyzing.value = false }
 }
 
-function onTaskDone(data) {
-  if (data.status === 'done' || data.status === 'failed') {
-    analyzing.value = false
-    batchTotal.value = 0
-    loadAll()
-    triggerRefresh?.()
-  }
-}
-
 function goReport(date) {
   router.push(`/report/${date}`)
 }
@@ -200,6 +190,7 @@ async function openDayPopup(day) {
   if (day.analyzed && gid.value) {
     try {
       const data = await getReport(gid.value, day.date)
+      if (dayPopup.value?.date !== day.date) return  // v1.0.6: 防止快速点击后旧请求覆盖新弹窗
       dayPopup.value = { ...day, report: data.report }
     } catch (e) {
       dayPopupError.value = '加载报告失败'
@@ -210,7 +201,7 @@ async function openDayPopup(day) {
 }
 
 async function handleGenerateReport() {
-  if (!dayPopup.value) return
+  if (!dayPopup.value || dayPopupLoading.value) return  // v1.0.6: 防重复调用
   dayPopupLoading.value = 'report'
   try {
     const force = dayPopup.value.analyzed
@@ -301,6 +292,7 @@ const calendarWeeks = computed(() => {
       hasData: !!info,
       analyzed: info?.analyzed || false,
       count: info?.total_messages || 0,
+      active_members: info?.active_members || 0,
       inRange,
     })
 
@@ -318,17 +310,20 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
 async function loadPeriods() {
   if (!currentGroup.value || periodsLoading.value) return
   periodsLoading.value = true
+  const groupId = currentGroup.value.id  // v1.0.6: 防切群竞态
   try {
     const [wp, mp, ap] = await Promise.all([
       getPeriods(currentGroup.value.id, 'weekly').catch(() => []),
       getPeriods(currentGroup.value.id, 'monthly').catch(() => []),
       getPeriods(currentGroup.value.id, 'annual').catch(() => []),
     ])
+    if (currentGroup.value?.id !== groupId) return  // v1.0.6: 切群后丢弃旧数据
     weeklyPeriods.value = wp || []
     monthlyPeriods.value = mp || []
     annualPeriods.value = ap || []
+    weeklyShowCount.value = DEFAULT_SHOW   // v1.0.6: 复位展开计数
+    monthlyShowCount.value = DEFAULT_SHOW
     periodsLoaded.value = true
-    // 加载最新已生成的周报/月报预览
     loadLatestReportPreviews()
   } catch (e) { console.error(e) }
   finally { periodsLoading.value = false }
@@ -351,11 +346,6 @@ async function loadLatestReportPreviews() {
       latestMonthly.value = { ...latestM, report: data }
     } else { latestMonthly.value = null }
   } catch (e) { latestMonthly.value = null }
-}
-
-function togglePeriods() {
-  showPeriods.value = !showPeriods.value
-  if (!periodsLoaded.value) loadPeriods()
 }
 
 async function doGenerateWeekly(periodKey, force = false) {

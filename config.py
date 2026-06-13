@@ -152,16 +152,16 @@ class Config:
 
         for json_key, (attr_name, default_val) in cls._JSON_CONFIG_KEYS.items():
             if json_key in data:
-                val = data[json_key]
-                # data_dir / log_dir：字符串 → Path
-                if json_key in ("data_dir", "log_dir"):
-                    val = Path(val)
-                # port：int
-                if json_key == "port":
-                    val = int(val)
-                # 更新类属性
-                setattr(cls, attr_name, val)
-                logger.info(f"config.json → {attr_name} = {val}")
+                try:
+                    val = data[json_key]
+                    if json_key in ("data_dir", "log_dir"):
+                        val = Path(str(val))
+                    if json_key == "port":
+                        val = int(val)
+                    setattr(cls, attr_name, val)
+                    logger.info(f"config.json → {attr_name} = {val}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"config.json 字段 '{json_key}' 值无效: {e}，使用默认值 {default_val}")
 
         # 如果 data_dir 被 config.json 覆盖，同步更新 DATABASE_PATH
         if "data_dir" in data:
