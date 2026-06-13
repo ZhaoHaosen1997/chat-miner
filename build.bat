@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 echo ============================================
-echo   Chat-Miner v1.0.2 Packaging Script
+echo   Chat-Miner v1.1.0 Packaging Script
 echo ============================================
 
 REM Build frontend if needed
@@ -52,8 +52,8 @@ copy /y "config.json" "releases\ChatMiner\" >NUL
 REM Create portable zip
 echo.
 echo [3/4] Creating portable ZIP...
-if exist "releases\ChatMiner-v1.0.2-portable.zip" del "releases\ChatMiner-v1.0.2-portable.zip"
-powershell -Command "$ErrorActionPreference='SilentlyContinue'; Compress-Archive -Path 'releases\ChatMiner\*' -DestinationPath 'releases\ChatMiner-v1.0.2-portable.zip' -Force"
+if exist "releases\ChatMiner-v1.1.0-portable.zip" del "releases\ChatMiner-v1.1.0-portable.zip"
+powershell -Command "$ErrorActionPreference='SilentlyContinue'; Compress-Archive -Path 'releases\ChatMiner\*' -DestinationPath 'releases\ChatMiner-v1.1.0-portable.zip' -Force"
 echo   ZIP created (locked-log-file warnings are harmless)
 
 REM Build NSIS installer (auto-detect makensis)
@@ -75,7 +75,7 @@ if "%MAKENSIS%"=="" (
         echo [ERROR] NSIS build failed
         goto :error
     )
-    if exist "ChatMiner-v1.0.2-setup.exe" move /y "ChatMiner-v1.0.2-setup.exe" "releases\"
+    if exist "ChatMiner-v1.1.0-setup.exe" move /y "ChatMiner-v1.1.0-setup.exe" "releases\"
 )
 
 echo.
@@ -83,8 +83,8 @@ echo ============================================
 echo   Build complete!
 echo   Output: releases\
 echo     ChatMiner\                         (portable folder)
-echo     ChatMiner-v1.0.2-portable.zip      (portable zip)
-if exist "releases\ChatMiner-v1.0.2-setup.exe" echo     ChatMiner-v1.0.2-setup.exe          (installer)
+echo     ChatMiner-v1.1.0-portable.zip      (portable zip)
+if exist "releases\ChatMiner-v1.1.0-setup.exe" echo     ChatMiner-v1.1.0-setup.exe          (installer)
 echo ============================================
 goto :done
 

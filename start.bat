@@ -3,7 +3,7 @@ title Chat-Miner Dev Server
 
 echo.
 echo ============================================
-echo   Chat-Miner v1.0.2 - Dev Mode
+echo   Chat-Miner v1.1.0 - Dev Mode
 echo   Backend:  http://localhost:8857
 echo   Frontend: http://localhost:5173
 echo   API Docs: http://localhost:8857/docs
