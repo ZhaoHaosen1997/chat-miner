@@ -1911,7 +1911,12 @@ def create_persona(name: str = "") -> int:
 def link_member_to_persona(persona_id: int, member_id: int) -> bool:
     """将 member 关联到 persona。若 member 已属于其他 persona，先自动解除旧关联。"""
     with db() as conn:
-        # 检查 member 是否存在
+        # 检查 persona 和 member 是否存在
+        persona = conn.execute(
+            "SELECT id FROM personas WHERE id=?", (persona_id,)
+        ).fetchone()
+        if not persona:
+            return False
         member = conn.execute(
             "SELECT id, display_name FROM group_members WHERE id=?", (member_id,)
         ).fetchone()
@@ -2033,6 +2038,37 @@ def list_personas() -> list[dict]:
                 p["comprehensive_portrait"] = None
             personas.append(p)
     return personas
+
+
+def merge_personas(from_id: int, to_id: int) -> bool:
+    """原子合并：将 from_id 的所有成员移至 to_id，删除 from。单事务防竞态。"""
+    if from_id == to_id:
+        return False
+    with db() as conn:
+        to_exists = conn.execute(
+            "SELECT id FROM personas WHERE id=?", (to_id,)
+        ).fetchone()
+        from_exists = conn.execute(
+            "SELECT id FROM personas WHERE id=?", (from_id,)
+        ).fetchone()
+        if not to_exists or not from_exists:
+            return False
+        # 获取 from 的所有成员
+        members = conn.execute(
+            "SELECT member_id FROM persona_members WHERE persona_id=?",
+            (from_id,)
+        ).fetchall()
+        # 逐个重链（先删旧关联，再插新，防 UNIQUE 冲突）
+        for m in members:
+            conn.execute(
+                "DELETE FROM persona_members WHERE member_id=?", (m["member_id"],)
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO persona_members (persona_id, member_id) VALUES (?, ?)",
+                (to_id, m["member_id"])
+            )
+        conn.execute("DELETE FROM personas WHERE id=?", (from_id,))
+    return True
 
 
 def delete_persona(persona_id: int) -> bool:

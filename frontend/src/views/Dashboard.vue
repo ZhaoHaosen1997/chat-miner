@@ -21,6 +21,7 @@ const gid = computed(() => currentGroup.value?.id)
 let _refreshTimer = null
 watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
     _refreshTimer = setInterval(() => loadTaskProgress(), 10000)
   } else if (oldVal) {
     // 任务结束时清理状态 + 刷新数据

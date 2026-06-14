@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from models.database import (
     create_persona, link_member_to_persona, unlink_member_from_persona,
     get_persona, get_persona_by_member, list_personas, delete_persona,
+    merge_personas,
     auto_link_by_wxid, get_cross_group_members, get_cross_group_wxids,
     save_comprehensive_portrait, get_model_config, get_default_model,
 )
@@ -107,10 +108,8 @@ async def api_manual_link(body: ManualLinkBody):
     if persona_a and persona_b:
         if persona_a["id"] == persona_b["id"]:
             return {"code": 200, "message": "已在同一 persona 中", "data": persona_a}
-        # 合并：将 persona_b 的成员全部移到 persona_a
-        for m in persona_b["members"]:
-            link_member_to_persona(persona_a["id"], m["id"])
-        delete_persona(persona_b["id"])
+        # v1.5.2: 原子合并，单事务防竞态
+        merge_personas(persona_b["id"], persona_a["id"])
         persona = get_persona(persona_a["id"])
         return {"code": 200, "message": "已合并两个 persona", "data": persona}
 

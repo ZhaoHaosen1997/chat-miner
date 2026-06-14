@@ -60,6 +60,8 @@ async function doGenerate() {
     const result = await analyzeComprehensivePortrait(Number(props.personaId))
     if (result.task_id) {
       activeTaskId.value = result.task_id
+    } else {
+      generating.value = false  // v1.5.2: 无task_id时重置，防止按钮永久禁用
     }
   } catch (e) {
     console.error(e)
