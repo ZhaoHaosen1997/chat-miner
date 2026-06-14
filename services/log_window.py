@@ -1,5 +1,5 @@
 """
-v1.4.1 Chat-Miner GUI 窗口 — CustomTkinter + 系统托盘
+v1.4.2 Chat-Miner GUI 窗口 — CustomTkinter + 系统托盘
 实时统计 / 启动进度 / 托盘最小化 / 查看日志
 """
 import os
@@ -114,8 +114,8 @@ class LogWindow:
         root = self._root
         self._running = True
 
-        root.title(f"Chat-Miner v1.4.1")
-        root.geometry("380x340")
+        root.title(f"Chat-Miner v1.4.2")
+        root.geometry("420x340")
         root.minsize(320, 300)
         root.configure(fg_color="#f8fafc")
 
@@ -132,7 +132,7 @@ class LogWindow:
         if not os.path.exists(icon_path):
             icon_path = sys.executable  # fallback
 
-        # 暂不启用托盘（v1.4.1: WndProc 子类化在 64 位有兼容问题）
+        # 暂不启用托盘（v1.4.2: WndProc 子类化在 64 位有兼容问题）
         self._icon_path = icon_path
 
         # ---- 主卡片 ----
@@ -147,7 +147,7 @@ class LogWindow:
         # 标题
         ctk.CTkLabel(card, text="Chat-Miner", font=("Microsoft YaHei", 16, "bold"),
                      text_color="#1e293b").pack()
-        ctk.CTkLabel(card, text="v1.4.1 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
+        ctk.CTkLabel(card, text="v1.4.2 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
                      text_color="#94a3b8").pack(pady=(0, 10))
 
         # ---- 启动进度条 ----
@@ -177,27 +177,28 @@ class LogWindow:
         self._stats_analyzed.grid(row=0, column=2, padx=10, pady=6, sticky="w")
         stats_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-        # ---- 按钮 ----
+        # ---- 按钮（等宽居中） ----
+        BTN_W = 120
         btn_font = ctk.CTkFont(family="Microsoft YaHei", size=12, weight="normal")
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.pack(pady=(2, 0))
+        btn_row.pack(pady=(6, 0))
 
-        ctk.CTkButton(btn_row, text="  打开浏览器  ", width=130, height=38,
+        ctk.CTkButton(btn_row, text="打开浏览器", width=BTN_W, height=38,
                        corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
                        font=btn_font, command=self._open_browser
-                       ).pack(side="left", padx=6)
+                       ).pack(side="left", padx=4)
 
-        ctk.CTkButton(btn_row, text="  查看日志  ", width=110, height=38,
+        ctk.CTkButton(btn_row, text="查看日志", width=BTN_W, height=38,
                        corner_radius=10, fg_color="transparent", text_color=ACCENT,
                        border_color=ACCENT, border_width=1.5, hover_color="#eef2ff",
                        font=btn_font, command=self._open_log
-                       ).pack(side="left", padx=6)
+                       ).pack(side="left", padx=4)
 
-        ctk.CTkButton(btn_row, text="  检查更新  ", width=110, height=38,
+        ctk.CTkButton(btn_row, text="检查更新", width=BTN_W, height=38,
                        corner_radius=10, fg_color="transparent", text_color="#64748b",
                        border_color="#cbd5e1", border_width=1.5, hover_color="#f8fafc",
                        font=btn_font, command=self._check_update
-                       ).pack(side="left", padx=6)
+                       ).pack(side="left", padx=4)
 
         # 快捷键
         root.bind("<Control-l>", lambda e: self._open_log())
@@ -240,7 +241,7 @@ class LogWindow:
             try:
                 req = urllib.request.Request(
                     f"http://localhost:{self.port}/api/stats/global",
-                    headers={"User-Agent": "chat-miner-gui/1.4.1"})
+                    headers={"User-Agent": "chat-miner-gui/1.4.2"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read())
                     s = data.get("data", {})
@@ -281,9 +282,18 @@ class LogWindow:
 
     def _open_log(self):
         log_path = os.path.join("logs", "chat_miner.log")
-        ps_cmd = f'Get-Content -Path "{log_path}" -Wait -Tail 30 -Encoding UTF8'
+        # PowerShell 实时 tail + 日志级别着色 + HTTP 状态码着色
+        color_script = (
+            f'Get-Content -Path "{log_path}" -Wait -Tail 50 -Encoding UTF8 | '
+            f'ForEach-Object {{ '
+            f'if ($_ -match \\"- ERROR -\\" -or $_ -match \\" 5\\\\d\\\\d \\") {{ Write-Host $_ -ForegroundColor Red }} '
+            f'elseif ($_ -match \\"- WARNING -\\" -or $_ -match \\" 4\\\\d\\\\d \\") {{ Write-Host $_ -ForegroundColor Yellow }} '
+            f'elseif ($_ -match \\" 2\\\\d\\\\d \\" -or $_ -match \\" 3\\\\d\\\\d \\") {{ Write-Host $_ -ForegroundColor Green }} '
+            f'elseif ($_ -match \\"- DEBUG -\\") {{ Write-Host $_ -ForegroundColor DarkGray }} '
+            f'else {{ Write-Host $_ -ForegroundColor Gray }} }}'
+        )
         subprocess.Popen(
-            f'start "Chat-Miner 日志" powershell -NoExit -Command "{ps_cmd}"',
+            f'start "Chat-Miner 日志" powershell -NoExit -Command "{color_script}"',
             shell=True)
 
     def _check_update(self):
@@ -293,7 +303,7 @@ class LogWindow:
             from config import config
             current = config.VERSION
         except Exception:
-            current = "1.4.1"
+            current = "1.4.2"
 
         def _run():
             result = check_update(current)
