@@ -8,21 +8,16 @@ echo ============================================
 echo   Chat-Miner v%VERSION% Packaging Script
 echo ============================================
 
-REM Build frontend if needed
+REM Build frontend
 echo.
 echo [0/4] Building frontend...
-if not exist "frontend\dist\index.html" (
-    echo   Frontend dist not found, building...
-    cd frontend
-    call npm run build
-    if errorlevel 1 (
-        echo [ERROR] Frontend build failed
-        goto :error
-    )
-    cd ..
-) else (
-    echo   Frontend dist already exists, skipping.
+cd frontend
+call npm run build
+if errorlevel 1 (
+    echo [ERROR] Frontend build failed
+    goto :error
 )
+cd ..
 
 REM Kill any running ChatMiner to release file locks
 taskkill /f /im ChatMiner.exe >NUL 2>&1

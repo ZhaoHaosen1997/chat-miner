@@ -1,18 +1,13 @@
 """
-Chat-Miner — 群聊内容分析应用 v1.0
+Chat-Miner — 群聊内容分析应用 v1.4.0
 FastAPI 入口，端口 8856
 """
 import os
 import logging
 import sys
 
-# PyInstaller console=False 兼容：重定向 None 流到 devnull
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w')
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w')
-
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,22 +22,40 @@ from routers import groups, report, portrait, stats, tasks, fish_pond, settings,
 def _get_dist_path() -> str:
     """获取前端 dist 目录路径。兼容开发模式和 PyInstaller one-folder 打包。"""
     if getattr(sys, 'frozen', False):
-        # PyInstaller: 资源在 _MEIPASS
         return os.path.join(sys._MEIPASS, "frontend", "dist")
     return os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+
+def _get_asset_path(filename: str) -> str:
+    """获取资源文件路径，兼容开发模式和 PyInstaller frozen 模式"""
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, "assets", filename)
+    return os.path.join(os.path.dirname(__file__), "assets", filename)
 
 
 # --- 日志配置 ---
 def setup_logging():
     config.ensure_dirs()
     log_file = config.LOG_DIR / "chat_miner.log"
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+
+    # v1.4.0: frozen 模式用 GUI 窗口，开发模式用控制台
+    frozen = getattr(sys, 'frozen', False)
+    if frozen:
+        # console=False 时 stdout/stderr 为 None
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, 'w')
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, 'w')
+        # 先用文件 handler，GUI 窗口创建后再重定向
+        handlers = [file_handler, logging.StreamHandler(sys.stdout)]
+    else:
+        handlers = [file_handler, logging.StreamHandler(sys.stdout)]
+
     logging.basicConfig(
         level=getattr(logging, config.LOG_LEVEL, "INFO"),
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=handlers,
     )
 
 
@@ -142,20 +155,52 @@ if __name__ == "__main__":
     import webbrowser
     import time
 
+    frozen = getattr(sys, 'frozen', False)
+
     def _open_browser():
-        """服务启动后自动打开浏览器"""
-        time.sleep(1.5)
+        time.sleep(2.0)
         try:
             webbrowser.open(f"http://localhost:{config.PORT}")
         except Exception as e:
-            logger.debug("浏览器打开失败（无头环境）: %s", e)
+            logger.debug("浏览器打开失败: %s", e)
 
-    threading.Thread(target=_open_browser, daemon=True).start()
+    if frozen:
+        # v1.4.0: GUI 模式 — uvicorn 在后台线程，LogWindow 在主线程
+        from services.log_window import LogWindow
 
-    uvicorn.run(
-        "main:app",
-        host=config.HOST,
-        port=config.PORT,
-        reload=config.RELOAD,
-        log_level=config.LOG_LEVEL.lower(),
-    )
+        lw = LogWindow(title="Chat-Miner", port=config.PORT)
+        lw._log_path = str(config.LOG_DIR / "chat_miner.log")
+
+        def _run_server():
+            uvicorn.run(
+                "main:app",
+                host=config.HOST,
+                port=config.PORT,
+                reload=False,
+                log_level="warning",
+            )
+
+        server_thread = threading.Thread(target=_run_server, daemon=True)
+        server_thread.start()
+
+        # 等服务器就绪后打开浏览器
+        def _on_ready():
+            time.sleep(1.5)
+            lw.set_status(f"服务运行中 · 端口 {config.PORT}", ok=True)
+            _open_browser()
+
+        threading.Thread(target=_on_ready, daemon=True).start()
+
+        # 主线程跑 GUI（阻塞直到窗口关闭）
+        lw.start()
+
+    else:
+        # 开发模式：普通控制台
+        threading.Thread(target=_open_browser, daemon=True).start()
+        uvicorn.run(
+            "main:app",
+            host=config.HOST,
+            port=config.PORT,
+            reload=config.RELOAD,
+            log_level=config.LOG_LEVEL.lower(),
+        )

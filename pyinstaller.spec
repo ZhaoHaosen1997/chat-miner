@@ -14,6 +14,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('frontend/dist', 'frontend/dist'),
+        ('assets/icon.ico', 'assets/icon.ico'),
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -42,7 +43,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'tkinter',
         'matplotlib',
         'numpy',
         'pandas',
@@ -74,13 +74,13 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,           # 显示控制台窗口，用户关闭窗口即可退出
+    console=False,           # v1.4.0: GUI 日志窗口替代控制台
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='assets/icon.ico',
 )
 
 coll = COLLECT(

@@ -108,7 +108,7 @@ const groupSelectorRef = ref(null)
 const appVersion = ref('')
 
 // 浏览器标题
-	document.title = 'Chat-Miner'
+	document.title = '💬 Chat-Miner'
 
 	// 获取版本号
 onMounted(async () => {
