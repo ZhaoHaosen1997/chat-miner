@@ -430,6 +430,8 @@ def init_db():
         _migrate_v1_5_2(conn)
         # v1.5.4: 可配置提示词 + 轮询间隔
         _migrate_v1_5_4(conn)
+        # v1.16.0: 静默鱼塘 — 精力系统 + 性格系统 + Emoji 多态
+        _migrate_v1_16_0(conn)
     # 注：cleanup_old_logs() 移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -577,6 +579,26 @@ def _migrate_v1_5_4(conn):
     logger.info("DB migrate v1.5.4: prompt_profiles table ready")
 
 
+def _migrate_v1_16_0(conn):
+    """v1.16.0: 静默鱼塘 — 精力系统 + 性格系统 + Emoji 多态
+    纯增量：ALTER TABLE ADD COLUMN + DEFAULT，不影响已有数据。
+    """
+    cur = conn.execute("PRAGMA table_info(fish_pond)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "energy" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN energy INTEGER DEFAULT 100")
+        logger.info("DB migrate v1.16.0: added fish_pond.energy")
+    if "max_energy" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN max_energy INTEGER DEFAULT 100")
+        logger.info("DB migrate v1.16.0: added fish_pond.max_energy")
+    if "personality_traits" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN personality_traits TEXT DEFAULT '[]'")
+        logger.info("DB migrate v1.16.0: added fish_pond.personality_traits")
+    if "emoji_variant" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN emoji_variant TEXT DEFAULT ''")
+        logger.info("DB migrate v1.16.0: added fish_pond.emoji_variant")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -703,6 +725,11 @@ _SETTINGS_DEFS = [
          "画像页轮询间隔(毫秒)"),
         ("poll_interval_stats_s", "30", "int",
          "GUI统计轮询间隔(秒)"),
+        # v1.16.0: 鱼塘精力系统
+        ("pond_energy_regen_amount", "5", "int",
+         "鱼塘精力每轮恢复量"),
+        ("pond_touch_daily_limit", "5", "int",
+         "摸鱼每日次数上限"),
         # 日志清理
         ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
          "分析日志保留天数"),
@@ -1327,7 +1354,10 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                 growth: float = 0, happiness: float = 50, hp: int = 20,
                 stage: str = "鱼苗", consecutive_days: int = 0,
                 last_active_date: str = "", last_fed_date: str = "",
-                is_alive: int = 1) -> int:
+                is_alive: int = 1,
+                energy: int = 100, max_energy: int = 100,  # v1.16.0
+                personality_traits: str = "[]",  # v1.16.0: JSON array
+                emoji_variant: str = "") -> int:  # v1.16.0
     """创建或更新鱼（按 group_id + wxid 唯一键）"""
     with db() as conn:
         cur = conn.execute(
@@ -1335,8 +1365,10 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                (group_id, wxid, fish_name, species, rarity,
                 strength, dexterity, constitution, intelligence, wisdom, charisma,
                 experience, level, growth, happiness, hp, stage,
-                consecutive_days, last_active_date, last_fed_date, is_alive, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                consecutive_days, last_active_date, last_fed_date, is_alive,
+                energy, max_energy, personality_traits, emoji_variant,
+                updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(group_id, wxid) DO UPDATE SET
                fish_name = excluded.fish_name,
                species = excluded.species,
@@ -1357,11 +1389,16 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                last_active_date = excluded.last_active_date,
                last_fed_date = excluded.last_fed_date,
                is_alive = excluded.is_alive,
+               energy = excluded.energy,
+               max_energy = excluded.max_energy,
+               personality_traits = excluded.personality_traits,
+               emoji_variant = excluded.emoji_variant,
                updated_at = datetime('now')""",
             (group_id, wxid, fish_name, species, rarity,
              strength, dexterity, constitution, intelligence, wisdom, charisma,
              experience, level, growth, happiness, hp, stage,
-             consecutive_days, last_active_date, last_fed_date, is_alive)
+             consecutive_days, last_active_date, last_fed_date, is_alive,
+             energy, max_energy, personality_traits, emoji_variant)
         )
         fid = cur.lastrowid
     return fid
@@ -1417,6 +1454,7 @@ _FISH_FIELD_WHITELIST = {
     "experience", "level", "growth", "happiness", "hp", "stage",
     "consecutive_days", "last_active_date", "last_fed_date", "is_alive",
     "equipped_item", "active_consumable",
+    "energy", "max_energy", "personality_traits", "emoji_variant",  # v1.16.0
 }
 
 
@@ -1448,6 +1486,42 @@ def update_fish_multi(group_id: int, wxid: str, updates: dict):
             f"WHERE group_id=? AND wxid=?",
             (*values, group_id, wxid)
         )
+
+
+# v1.16.0: 精力系统 CRUD
+
+def update_fish_energy(group_id: int, wxid: str, amount: int):
+    """增减鱼的精力值（正数=消耗，负数=恢复），自动 clamp 到 [0, max_energy]"""
+    with db() as conn:
+        conn.execute(
+            """UPDATE fish_pond SET energy = MAX(0, MIN(max_energy, energy - ?)),
+               updated_at = datetime('now')
+               WHERE group_id = ? AND wxid = ?""",
+            (amount, group_id, wxid)
+        )
+
+
+def get_fish_traits(group_id: int, wxid: str) -> list:
+    """获取鱼的性格特性列表（解析 JSON）"""
+    fish = get_fish(group_id, wxid)
+    if not fish or not fish.get("personality_traits"):
+        return []
+    import json
+    traits_raw = fish["personality_traits"]
+    try:
+        return json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def get_total_coins_in_group(group_id: int) -> int:
+    """获取群内所有鳞币总和（v1.16.1 金库系统使用）"""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(balance), 0) FROM scale_coin_wallet WHERE group_id = ?",
+            (group_id,)
+        ).fetchone()
+    return row[0] if row else 0
 
 
 # ==================== 鱼塘事件 CRUD ====================
@@ -1898,6 +1972,9 @@ def load_app_settings_to_config():
         "weflow_base_url": "WEFLOW_BASE_URL",
         "weflow_access_token": "WEFLOW_ACCESS_TOKEN",
         "weflow_sync_interval_hours": "WEFLOW_SYNC_INTERVAL_HOURS",
+        # v1.16.0: 鱼塘精力系统
+        "pond_energy_regen_amount": "POND_ENERGY_REGEN_AMOUNT",
+        "pond_touch_daily_limit": "POND_TOUCH_DAILY_LIMIT",
         # 日志清理
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",

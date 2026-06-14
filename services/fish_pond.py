@@ -13,6 +13,8 @@ from services.d20 import (
     ability_check, ability_modifier, proficiency_bonus,
     opposed_check, saving_throw, roll_dice, D20Result
 )
+# v1.16.0: 导入性格修正检定
+from services.d20 import check_with_traits
 from models import database as db
 
 logger = logging.getLogger(__name__)
@@ -166,6 +168,55 @@ AQUATIC_SPECIES = {
         "asi": {"con": 2, "wis": 2, "cha": 1, "str": -2},
         "proficiencies": ["endurance", "nature"],
         "desc": "再生能力逆天，永远保持幼态可爱的神奇生物"
+    },
+    # ========== v1.16.0: 新物种（iconify emoji）==========
+    "seahorse": {
+        "name": "海马", "emoji": "mdi:seahorse", "color": "#F9A8D4",
+        "asi": {"dex": 2, "cha": 3, "str": -2, "con": -1},
+        "proficiencies": ["acrobatics", "performance"],
+        "desc": "优雅的舞者，独特的外形下藏着敏捷的身手"
+    },
+    "manta": {
+        "name": "蝠鲼", "emoji": "mdi:stingray", "color": "#1C1F33",
+        "asi": {"dex": 3, "wis": 2, "str": -1, "cha": -1},
+        "proficiencies": ["acrobatics", "stealth"],
+        "desc": "水中滑翔机，悄无声息地巡游深海"
+    },
+    "urchin": {
+        "name": "海胆", "emoji": "mdi:sea-urchin", "color": "#4B0082",
+        "asi": {"con": 4, "str": 1, "dex": -2, "cha": -2},
+        "proficiencies": ["endurance"],
+        "desc": "浑身是刺的防御大师，谁碰谁后悔"
+    },
+    "starfish": {
+        "name": "海星", "emoji": "twemoji:starfish", "color": "#FF6347",
+        "asi": {"con": 3, "wis": 2, "dex": -2, "int": -1},
+        "proficiencies": ["endurance", "nature"],
+        "desc": "断肢重生能力逆天，慢悠悠但生命力顽强"
+    },
+    "mantis_shrimp": {
+        "name": "螳螂虾", "emoji": "twemoji:shrimp", "color": "#DC143C",
+        "asi": {"str": 3, "con": 2, "dex": -1, "int": -2},
+        "proficiencies": ["athletics", "endurance"],
+        "desc": "大钳子威猛无比，出拳速度堪比子弹"
+    },
+    "conch": {
+        "name": "海螺", "emoji": "twemoji:conch-shell", "color": "#F5DEB3",
+        "asi": {"wis": 4, "cha": 2, "dex": -3, "str": -2},
+        "proficiencies": ["insight", "nature", "performance"],
+        "desc": "能听到大海声音的智者，行动虽慢但洞察一切"
+    },
+    "otter2": {
+        "name": "海獭", "emoji": "twemoji:otter", "color": "#8B4513",
+        "asi": {"dex": 2, "int": 2, "cha": 2, "str": -2},
+        "proficiencies": ["acrobatics", "investigation", "performance"],
+        "desc": "会用工具的小机灵鬼，萌到犯规的海洋精灵"
+    },
+    "walrus": {
+        "name": "海象", "emoji": "twemoji:walrus", "color": "#A0522D",
+        "asi": {"str": 3, "con": 3, "dex": -2, "int": -1},
+        "proficiencies": ["athletics", "endurance"],
+        "desc": "吨位即是正义，长牙之下众生平等"
     },
 }
 
@@ -615,8 +666,10 @@ def compute_max_hp(constitution: int, level: int, stage: str) -> int:
 
 def create_fish(group_id: int, wxid: str, display_name: str,
                 species: str = None, rarity: str = None,
-                message_count: int = 0) -> dict:
+                message_count: int = 0,
+                portrait_traits: list = None) -> dict:  # v1.16.0
     """创建一条新鱼（或重新领养）"""
+    import json as _json
     # 检查是否已有存活鱼
     existing = db.get_fish(group_id, wxid)
     if existing and existing.get("is_alive"):
@@ -633,6 +686,26 @@ def create_fish(group_id: int, wxid: str, display_name: str,
 
     fish_name = f"{display_name}的{species_info['name']}"
 
+    # v1.16.0: 分配 3 个性格标签（1 从画像映射 + 2 随机）
+    selected_traits = []
+    implemented_traits = [k for k, v in FISH_TRAITS.items() if v]  # 排除占位
+    if portrait_traits:
+        for pt in portrait_traits:
+            mapped = PORTRAIT_TO_FISH_TRAIT.get(pt)
+            if mapped and mapped in implemented_traits and mapped not in selected_traits:
+                selected_traits.append(mapped)
+                break
+    available = [t for t in implemented_traits if t not in selected_traits]
+    rng = random.Random(f"traits_{group_id}_{wxid}")
+    while len(selected_traits) < 3 and available:
+        pick = rng.choice(available)
+        selected_traits.append(pick)
+        available.remove(pick)
+
+    # v1.16.0: 随机选择 emoji 变体
+    variants = EMOJI_VARIANTS.get(species, [species_info.get("emoji", "🐟")])
+    emoji_variant = random.choice(variants) if variants else species_info.get("emoji", "🐟")
+
     fid = db.upsert_fish(
         group_id=group_id, wxid=wxid, fish_name=fish_name,
         species=species, rarity=rarity,
@@ -641,33 +714,94 @@ def create_fish(group_id: int, wxid: str, display_name: str,
         wisdom=attrs["wisdom"], charisma=attrs["charisma"],
         experience=0, level=1, growth=0, happiness=60,
         hp=compute_max_hp(attrs["constitution"], 1, "鱼苗"),
-        stage="鱼苗", is_alive=1
+        stage="鱼苗", is_alive=1,
+        energy=100, max_energy=100,  # v1.16.0
+        personality_traits=_json.dumps(selected_traits, ensure_ascii=False),  # v1.16.0
+        emoji_variant=emoji_variant,  # v1.16.0
     )
 
     db.add_fish_event(group_id, wxid, "born", {
         "species": species, "rarity": rarity, "fish_name": fish_name,
-        "attributes": attrs
+        "attributes": attrs,
+        "personality_traits": selected_traits,  # v1.16.0
+        "emoji_variant": emoji_variant,  # v1.16.0
     })
 
-    logger.info(f"鱼创建: group={group_id} wxid={wxid} {fish_name} {rarity}")
+    logger.info(f"鱼创建: group={group_id} wxid={wxid} {fish_name} {rarity} traits={selected_traits}")
 
     fish = db.get_fish(group_id, wxid)
     return {"fish": fish, "species_info": species_info, "new": True}
 
 
-# ==================== 每日次数限制 ====================
+# ==================== v1.16.0: 精力系统 + 性格系统 + Emoji多态 ====================
 
-CMD_DAILY_LIMITS = {
-    "feed": 3, "touch": 5,
-    "explore": 3, "showoff": 3,
-    "battle": 3, "train": 1,
+# 精力消耗表（正值=消耗，负值=恢复）
+ACTION_ENERGY_COST = {
+    "feed": 15, "touch": -20, "explore": 20,
+    "showoff": 10, "battle": 25, "train": 30,
 }
+
+# 性格特性池（16 个已实现，6 个占位）
+FISH_TRAITS = {
+    "勇敢": {"desc": "面对掠食者有优势", "icon": "🦁"},
+    "好奇": {"desc": "探索收益×1.5", "icon": "🔍"},
+    "活泼": {"desc": "晒鱼/斗鱼精力消耗-5", "icon": "🤸"},
+    "勤奋": {"desc": "精力消耗×0.8", "icon": "💪"},
+    "谨慎": {"desc": "面对陷阱有优势", "icon": "🛡️"},
+    "乐天": {"desc": "幸福值不低于10", "icon": "😊"},
+    "傲娇": {"desc": "晒鱼CHA+2，训练效果×0.8", "icon": "💅"},
+    "贪吃": {"desc": "喂食效果翻倍", "icon": "🍔"},
+    "社牛": {"desc": "群体事件检定+2", "icon": "🎤"},
+    "胆小": {"desc": "掠食者劣势，躲藏自动成功", "icon": "😨"},
+    "懒惰": {"desc": "精力恢复+50%，成长×0.9", "icon": "😴"},
+    "暴躁": {"desc": "战斗STR+2，社交CHA-2", "icon": "💢"},
+    "沉稳": {"desc": "面对暴风雨有优势", "icon": "🧘"},
+    "机灵": {"desc": "宝藏事件WIS+2", "icon": "🧠"},
+    "粘人": {"desc": "主人当天发言≥5条→+5幸福", "icon": "🥰"},
+    "孤僻": {"desc": "群体事件不参与", "icon": "🏚️"},
+    # 占位
+    "贪睡": {}, "迷糊": {}, "浪漫": {},
+    "倔强": {}, "戏精": {}, "冒险家": {},
+}
+
+# 画像 → 性格映射（18 条）
+PORTRAIT_TO_FISH_TRAIT = {
+    "社牛": "社牛", "话痨": "活泼", "乐子人": "好奇",
+    "潜水员": "胆小", "摸鱼大师": "懒惰", "理论家": "机灵",
+    "气氛组": "乐天", "卷王": "勤奋", "吐槽役": "傲娇",
+    "美食家": "贪吃", "和平主义者": "谨慎", "暴躁老哥": "暴躁",
+    "夜猫子": "孤僻", "养生达人": "沉稳", "梗王": "活泼",
+    "戏精": "戏精", "技术宅": "机灵", "小透明": "胆小",
+}
+
+# Emoji 多态变体（每个物种多个 emoji）
+EMOJI_VARIANTS = {
+    "goldfish": ["🐟", "🐟", "🐟", "🐠"],
+    "koi": ["🎏", "🎏", "🐟"],
+    "clownfish": ["🤡", "🐠", "🐟"],
+    "betta": ["🐠", "🐠", "🐟"],
+    "arowana": ["🐉", "🐲"],
+    "angelfish": ["👼", "😇"],
+    "shark": ["🦈", "🦈", "🐟"],
+    "octopus": ["🐙", "🐙"],
+    "squid": ["🦑", "🦑"],
+    "crab": ["🦀", "🦀"],
+    "lobster": ["🦞", "🦞"],
+    "whale": ["🐋", "🐳"],
+    "dolphin": ["🐬", "🐬"],
+    "seal": ["🦭", "🦭"],
+    "turtle": ["🐢", "🐢"],
+    "frog": ["🐸", "🐸"],
+}
+
 # /领养 不在此表，由 create_fish 内 is_alive 检查控制（有存活鱼则不可领养）
 
 
+# ==================== v1.16.0: 精力/性格辅助函数 ====================
+
 def _count_today_events(group_id: int, wxid: str, event_type: str,
                         date_str: str = None) -> int:
-    """统计某条鱼今天已执行某类指令的次数"""
+    """统计某条鱼今天已执行某类指令的次数（仅摸鱼保留每日限制）"""
     from datetime import datetime as dt
     today = date_str or dt.now().strftime("%Y-%m-%d")
     conn = db.get_conn()
@@ -681,17 +815,91 @@ def _count_today_events(group_id: int, wxid: str, event_type: str,
     return row["cnt"] if row else 0
 
 
-def check_daily_limit(group_id: int, wxid: str, cmd_type: str,
-                      date_str: str = None) -> dict | None:
-    """检查每日限制，返回 None 表示通过，返回 dict 表示超限"""
-    limit = CMD_DAILY_LIMITS.get(cmd_type)
-    if limit is None:
-        return None  # 无限制
-    count = _count_today_events(group_id, wxid, cmd_type, date_str)
+def _get_energy(group_id: int, wxid: str) -> tuple:
+    """获取鱼的 (energy, max_energy)"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish:
+        return (0, 0)
+    return (fish.get("energy", 100), fish.get("max_energy", 100))
+
+
+def check_touch_daily_limit(group_id: int, wxid: str, date_str: str = None) -> dict | None:
+    """摸鱼每日次数限制（唯一保留的每日上限）"""
+    from config import config as cfg
+    limit = getattr(cfg, "POND_TOUCH_DAILY_LIMIT", 5)
+    count = _count_today_events(group_id, wxid, "touch", date_str)
     if count >= limit:
-        return {"error": f"今日 /{cmd_type} 次数已用完 ({count}/{limit})",
+        return {"error": f"今日 /touch 次数已用完 ({count}/{limit})",
                 "limit": limit, "used": count}
     return None
+
+
+def _apply_trait_energy_mod(action: str, fish: dict) -> int:
+    """根据鱼的性格修正精力消耗/恢复量"""
+    import json
+    cost = ACTION_ENERGY_COST.get(action, 0)
+    traits_raw = fish.get("personality_traits", "[]")
+    try:
+        traits = json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+    except (json.JSONDecodeError, TypeError):
+        return cost
+
+    for trait in traits:
+        if trait == "勤奋":
+            cost = int(cost * 0.8) if cost > 0 else cost
+        elif trait == "懒惰":
+            cost = int(cost * 1.5) if cost < 0 else int(cost * 0.9) if cost > 0 else cost
+        elif trait == "活泼" and action in ("showoff", "battle"):
+            cost = max(0, cost - 5) if cost > 0 else cost
+        elif trait == "贪吃" and action == "feed":
+            cost = max(0, cost - 5) if cost > 0 else cost
+    return cost
+
+
+def check_energy(group_id: int, wxid: str, action: str) -> dict | None:
+    """检查精力是否足够。返回 None 通过，返回 dict 表示失败。"""
+    if action == "touch":
+        return None  # 摸鱼恢复精力，永远有精力
+    base_cost = ACTION_ENERGY_COST.get(action, 0)
+    if base_cost <= 0:
+        return None  # 恢复类动作
+    fish = db.get_fish(group_id, wxid)
+    if not fish:
+        return {"error": "鱼不存在"}
+    cost = _apply_trait_energy_mod(action, fish)
+    energy = fish.get("energy", 100)
+    if energy < cost:
+        return {"error": f"精力不足！需要 {cost} 点精力，当前仅剩 {energy} 点",
+                "energy_current": energy, "energy_needed": cost}
+    return None
+
+
+def spend_energy(group_id: int, wxid: str, action: str):
+    """执行动作后扣除/恢复精力（含性格修正）"""
+    fish = db.get_fish(group_id, wxid)
+    if not fish:
+        return
+    cost = _apply_trait_energy_mod(action, fish)
+    db.update_fish_energy(group_id, wxid, cost)
+
+
+def regen_energy(group_id: int, wxid: str, amount: int = None):
+    """恢复精力（含懒惰性格加成）"""
+    from config import config as cfg
+    if amount is None:
+        amount = getattr(cfg, "POND_ENERGY_REGEN_AMOUNT", 5)
+    fish = db.get_fish(group_id, wxid)
+    if fish:
+        import json
+        traits_raw = fish.get("personality_traits", "[]")
+        try:
+            traits = json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+        except (json.JSONDecodeError, TypeError):
+            pass
+        else:
+            if "懒惰" in traits:
+                amount = int(amount * 1.5)
+    db.update_fish_energy(group_id, wxid, -amount)  # negative = restore
 
 
 # ==================== 互动指令 ====================
@@ -702,13 +910,16 @@ def cmd_feed(group_id: int, wxid: str, from_wxid: str = None,
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "feed")
-    if limit_check:
-        return limit_check
+    # v1.16.0: 精力检查替代次数限制
+    energy_check = check_energy(group_id, wxid, "feed")
+    if energy_check:
+        return energy_check
 
-    result = ability_check(fish["dexterity"], dc=10,
-                          is_proficient="acrobatics" in get_proficiencies(fish["species"]),
-                          level=fish["level"], seed=seed)
+    traits = db.get_fish_traits(group_id, wxid)
+    result = check_with_traits(fish["dexterity"], dc=10,
+                               traits=traits, context="feed",
+                               is_proficient="acrobatics" in get_proficiencies(fish["species"]),
+                               level=fish["level"], seed=seed)
 
     if result.critical_hit:
         growth_bonus = 20 + (15 if premium else 0)
@@ -742,6 +953,9 @@ def cmd_feed(group_id: int, wxid: str, from_wxid: str = None,
     if from_wxid and from_wxid != wxid:
         db.add_fish_event(group_id, from_wxid, "feed_other", {"target_wxid": wxid})
 
+    # v1.16.0: 消耗精力
+    spend_energy(group_id, wxid, "feed")
+
     return {
         "check": result.to_dict(), "growth_bonus": growth_bonus,
         "happiness_bonus": happiness_bonus, "evolved": evolved,
@@ -754,13 +968,16 @@ def cmd_touch(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "touch")
+    # v1.16.0: 摸鱼保留每日5次上限，但恢复精力
+    limit_check = check_touch_daily_limit(group_id, wxid)
     if limit_check:
         return limit_check
 
-    result = ability_check(fish["charisma"], dc=12,
-                          is_proficient="performance" in get_proficiencies(fish["species"]),
-                          level=fish["level"], seed=seed)
+    traits = db.get_fish_traits(group_id, wxid)
+    result = check_with_traits(fish["charisma"], dc=12,
+                               traits=traits, context="touch",
+                               is_proficient="performance" in get_proficiencies(fish["species"]),
+                               level=fish["level"], seed=seed)
 
     if result.critical_hit:
         intimacy_bonus = 5
@@ -778,6 +995,9 @@ def cmd_touch(group_id: int, wxid: str, seed: str = None) -> dict:
         **result.to_dict(), "intimacy_bonus": intimacy_bonus
     })
 
+    # v1.16.0: 摸鱼恢复精力
+    spend_energy(group_id, wxid, "touch")
+
     return {"check": result.to_dict(), "intimacy_bonus": intimacy_bonus, "xp": xp_result}
 
 
@@ -787,9 +1007,10 @@ def cmd_battle(group_id: int, wxid_a: str, wxid_b: str, seed: str = None) -> dic
     fish_b = db.get_fish(group_id, wxid_b)
     if not fish_a or not fish_b or not fish_a["is_alive"] or not fish_b["is_alive"]:
         return {"error": "一方或双方鱼不存在/已死亡"}
-    limit_check = check_daily_limit(group_id, wxid_a, "battle")
-    if limit_check:
-        return limit_check
+    # v1.16.0: 精力检查替代次数限制
+    energy_check = check_energy(group_id, wxid_a, "battle")
+    if energy_check:
+        return energy_check
 
     result = opposed_check(
         fish_a["strength"], fish_b["strength"],
@@ -835,6 +1056,9 @@ def cmd_battle(group_id: int, wxid_a: str, wxid_b: str, seed: str = None) -> dic
         "opponent_wxid": winner_wxid, "result": "lose"
     })
 
+    # v1.16.0: 消耗精力
+    spend_energy(group_id, wxid_a, "battle")
+
     return {
         "check": result, "winner": winner_wxid, "loser": loser_wxid,
         "winner_growth": 20, "xp": xp_result
@@ -846,18 +1070,20 @@ def cmd_explore(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "explore")
-    if limit_check:
-        return limit_check
+    # v1.16.0: 精力检查替代次数限制
+    energy_check = check_energy(group_id, wxid, "explore")
+    if energy_check:
+        return energy_check
 
     # 用较高的那个属性
-    ability = fish["wisdom"] if fish["wisdom"] >= fish["intelligence"] else fish["intelligence"]
     score = max(fish["wisdom"], fish["intelligence"])
     prof = "investigation" in get_proficiencies(fish["species"]) or \
           "nature" in get_proficiencies(fish["species"])
 
-    result = ability_check(score, dc=13, is_proficient=prof,
-                          level=fish["level"], seed=seed)
+    traits = db.get_fish_traits(group_id, wxid)
+    result = check_with_traits(score, dc=13,
+                               traits=traits, context="explore",
+                               is_proficient=prof, level=fish["level"], seed=seed)
 
     if result.critical_hit:
         coin_amount, _ = roll_dice("2d10", seed)
@@ -877,6 +1103,9 @@ def cmd_explore(group_id: int, wxid: str, seed: str = None) -> dict:
         **result.to_dict(), "coin_amount": coin_amount
     })
 
+    # v1.16.0: 消耗精力
+    spend_energy(group_id, wxid, "explore")
+
     return {"check": result.to_dict(), "coin_amount": coin_amount, "xp": xp_result}
 
 
@@ -885,13 +1114,16 @@ def cmd_showoff(group_id: int, wxid: str, seed: str = None) -> dict:
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
-    limit_check = check_daily_limit(group_id, wxid, "showoff")
-    if limit_check:
-        return limit_check
+    # v1.16.0: 精力检查替代次数限制
+    energy_check = check_energy(group_id, wxid, "showoff")
+    if energy_check:
+        return energy_check
 
-    result = ability_check(fish["charisma"], dc=10,
-                          is_proficient="performance" in get_proficiencies(fish["species"]),
-                          level=fish["level"], seed=seed)
+    traits = db.get_fish_traits(group_id, wxid)
+    result = check_with_traits(fish["charisma"], dc=10,
+                               traits=traits, context="showoff",
+                               is_proficient="performance" in get_proficiencies(fish["species"]),
+                               level=fish["level"], seed=seed)
 
     if result.critical_hit:
         coin_amount = 8
@@ -907,6 +1139,9 @@ def cmd_showoff(group_id: int, wxid: str, seed: str = None) -> dict:
     db.add_fish_event(group_id, wxid, "showoff", {
         **result.to_dict(), "coin_amount": coin_amount
     })
+
+    # v1.16.0: 消耗精力
+    spend_energy(group_id, wxid, "showoff")
 
     return {"check": result.to_dict(), "coin_amount": coin_amount}
 
@@ -942,10 +1177,10 @@ def cmd_train(group_id: int, wxid: str, attr_name: str,
     if current_val >= TRAIN_ATTR_CAP:
         return {"error": f"{attr_name}已达上限({TRAIN_ATTR_CAP})"}
 
-    # 每天限1次
-    limit_check = check_daily_limit(group_id, wxid, "train")
-    if limit_check:
-        return limit_check
+    # v1.16.0: 精力检查替代次数限制
+    energy_check = check_energy(group_id, wxid, "train")
+    if energy_check:
+        return energy_check
 
     # 扣除鳞币
     wallet = db.spend_coins(group_id, wxid, TRAIN_COST, "train",
@@ -955,9 +1190,11 @@ def cmd_train(group_id: int, wxid: str, attr_name: str,
 
     # DC = 12 + 当前属性值（越高越难）
     dc = 12 + current_val
-    result = ability_check(current_val, dc=dc,
-                          is_proficient=proficiency in get_proficiencies(fish["species"]),
-                          level=fish["level"], seed=seed)
+    traits = db.get_fish_traits(group_id, wxid)
+    result = check_with_traits(current_val, dc=dc,
+                               traits=traits, context="train",
+                               is_proficient=proficiency in get_proficiencies(fish["species"]),
+                               level=fish["level"], seed=seed)
 
     if result.success:
         new_val = current_val + 1
@@ -980,6 +1217,9 @@ def cmd_train(group_id: int, wxid: str, attr_name: str,
         "old_val": current_val, "new_val": new_val,
         "dc": dc, "coin_cost": TRAIN_COST, "success": result.success,
     })
+
+    # v1.16.0: 消耗精力
+    spend_energy(group_id, wxid, "train")
 
     return {
         "check": result.to_dict(), "attr_name": attr_name, "attr_key": attr_key,
@@ -1036,7 +1276,25 @@ def cmd_adopt(group_id: int, wxid: str, display_name: str,
             # 死亡后重新领养，随机新品种
             return create_fish(group_id, wxid, display_name,
                              species=random_species(), message_count=message_count)
-    return create_fish(group_id, wxid, display_name, message_count=message_count)
+    # v1.16.0: 尝试从画像获取性格映射
+    portrait_traits = None
+    try:
+        import json as _json
+        conn = db.get_conn()
+        member = conn.execute(
+            "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, wxid)
+        ).fetchone()
+        conn.close()
+        if member:
+            portrait = db.get_portrait(group_id, member["id"])
+            if portrait and portrait.get("portrait_json"):
+                portrait_data = _json.loads(portrait["portrait_json"])
+                if isinstance(portrait_data, dict):
+                    portrait_traits = portrait_data.get("traits", [])
+    except Exception:
+        pass
+    return create_fish(group_id, wxid, display_name,
+                       message_count=message_count, portrait_traits=portrait_traits)
 
 
 # ==================== 结算 ====================
@@ -1153,6 +1411,10 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
         fish = db.get_fish(group_id, wxid)
         db.update_fish_field(group_id, wxid, "growth", fish["growth"] + 3)
         events.append({"type": "weekend_bonus", "growth_bonus": 3})
+
+    # v1.16.0: 结算时恢复精力
+    regen_energy(group_id, wxid)
+    events.append({"type": "energy_regen", "amount": _get_energy(group_id, wxid)[0]})
 
     return {"settled": True, "events": events}
 
@@ -1275,6 +1537,7 @@ _COMMAND_PATTERNS = [
     (r"^/道具\s+(.+)$", "item_action"),
     (r"^/训练\s+(.+)$", "train"),
     (r"^/改名\s+(.+)$", "rename"),
+    (r"^/休息$", "rest"),  # v1.16.0
 ]
 
 
@@ -1433,17 +1696,21 @@ def resettle_day(group_id: int, date_str: str, messages: list[dict],
         if not wxid:
             continue
 
-        # 检查当日该指令类型是否已达上限（已结算过）
-        limit = CMD_DAILY_LIMITS.get(cmd["type"])
-        if limit is not None:
-            count = _count_today_events(group_id, wxid, cmd["type"], date_str)
-            if count >= limit:
-                skipped.append({
-                    "wxid": wxid, "type": cmd["type"], "content": content,
-                    "reason": f"已达每日上限 ({count}/{limit})",
-                    "time": msg.get("formattedTime", ""),
-                })
-                continue
+        # v1.16.0: 检查精力（替代每日上限）
+        action = cmd["type"]
+        cost = ACTION_ENERGY_COST.get(action, 0)
+        if cost > 0:
+            fish = db.get_fish(group_id, wxid)
+            if fish:
+                energy = fish.get("energy", 100)
+                adj_cost = _apply_trait_energy_mod(action, fish)
+                if energy < adj_cost:
+                    skipped.append({
+                        "wxid": wxid, "type": action, "content": content,
+                        "reason": f"精力不足 ({energy}/{adj_cost})",
+                        "time": msg.get("formattedTime", ""),
+                    })
+                    continue
 
         display_name = get_name_by_wxid(wxid)
         seed = f"cmd_{group_id}_{msg.get('platformMessageId', '')}"
@@ -1508,6 +1775,20 @@ def _execute_command(cmd: dict, group_id: int, wxid: str,
         return cmd_train(group_id, wxid, cmd.get("attr_name", ""), seed=seed)
     elif cmd["type"] == "rename":
         return cmd_rename(group_id, wxid, cmd.get("new_name", ""))
+    elif cmd["type"] == "rest":  # v1.16.0
+        fish = db.get_fish(group_id, wxid)
+        if not fish or not fish["is_alive"]:
+            return {"error": "鱼不存在或已死亡"}
+        energy, max_energy = _get_energy(group_id, wxid)
+        if energy >= max_energy:
+            return {"type": "rest", "energy": energy, "max_energy": max_energy,
+                    "restored": 0, "message": "精力已满"}
+        rest_amount = max_energy - energy
+        regen_energy(group_id, wxid, rest_amount)
+        fish = db.get_fish(group_id, wxid)
+        return {"type": "rest", "energy": fish.get("energy", max_energy),
+                "max_energy": max_energy, "restored": rest_amount,
+                "message": f"恢复了 {rest_amount} 点精力"}
     elif cmd["type"] == "pond":
         db.add_fish_event(group_id, wxid, "pond_view", {})
         return {"type": "pond", "status": "viewed"}

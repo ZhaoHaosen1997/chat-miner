@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.5.12"
+    VERSION = "1.16.0"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -79,6 +79,10 @@ class Config:
     WEFLOW_SYNC_INTERVAL_HOURS = 24
 
     # ==================== 日志 ====================
+    # v1.16.0: 鱼塘精力系统
+    POND_ENERGY_REGEN_AMOUNT = 5       # 精力每轮恢复量
+    POND_TOUCH_DAILY_LIMIT = 5       # 摸鱼每日次数上限
+
     LOG_DIR = BASE_DIR / "logs"
     LOG_LEVEL = "INFO"
     LOG_RETENTION_DAYS = 90     # 分析日志保留天数

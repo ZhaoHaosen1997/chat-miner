@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { Icon } from '@iconify/vue'
 
 const props = defineProps({
   fish: { type: Array, default: () => [] },
@@ -14,6 +15,19 @@ const speciesEmoji = {
   octopus: '🐙', squid: '🦑', crab: '🦀', lobster: '🦞', jellyfish: '🪼',
   shrimp: '🦐', whale: '🐋', dolphin: '🐬', seal: '🦭', otter: '🦦',
   turtle: '🐢', frog: '🐸', axolotl: '🦎',
+  // v1.16.0: new iconify species
+  seahorse: 'mdi:seahorse', manta: 'mdi:stingray', urchin: 'mdi:sea-urchin',
+  starfish: 'twemoji:starfish', mantis_shrimp: 'twemoji:shrimp',
+  conch: 'twemoji:conch-shell', otter2: 'twemoji:otter', walrus: 'twemoji:walrus',
+}
+
+function isIconify(f) {
+  const emoji = f?.emoji_variant || speciesEmoji[f?.species] || '🐟'
+  return emoji.includes(':')
+}
+
+function fishEmoji(f) {
+  return f?.emoji_variant || speciesEmoji[f?.species] || '🐟'
 }
 
 const stageScale = { '鱼苗': 0.6, '幼鱼': 0.8, '成鱼': 1.0, '大鱼': 1.3, '传说': 1.6 }
@@ -84,9 +98,8 @@ function getAnimation(f) {
         @click="$emit('fish-click', f)"
         :title="f.fish_name"
       >
-        <span class="text-3xl select-none drop-shadow-md">
-          {{ speciesEmoji[f.species] || '🐟' }}
-        </span>
+        <Icon v-if="isIconify(f)" :icon="fishEmoji(f)" class="text-3xl drop-shadow-md" />
+        <span v-else class="text-3xl select-none drop-shadow-md">{{ fishEmoji(f) }}</span>
         <span class="block text-[10px] text-slate-700 font-medium truncate max-w-[60px] text-center"
           :class="{
             'text-slate-500': f.rarity === '普通',

@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { X, Dices, Trash2 } from 'lucide-vue-next'
+import { Icon } from '@iconify/vue'
+import EnergyBar from './EnergyBar.vue'
 
 const props = defineProps({
   fish: Object,
@@ -18,9 +20,44 @@ const speciesEmoji = {
   octopus: '🐙', squid: '🦑', crab: '🦀', lobster: '🦞', jellyfish: '🪼',
   shrimp: '🦐', whale: '🐋', dolphin: '🐬', seal: '🦭', otter: '🦦',
   turtle: '🐢', frog: '🐸', axolotl: '🦎',
+  // v1.16.0: new iconify species
+  seahorse: 'mdi:seahorse', manta: 'mdi:stingray', urchin: 'mdi:sea-urchin',
+  starfish: 'twemoji:starfish', mantis_shrimp: 'twemoji:shrimp',
+  conch: 'twemoji:conch-shell', otter2: 'twemoji:otter', walrus: 'twemoji:walrus',
 }
 
 const speciesInfo = computed(() => props.fish?.species_info || {})
+
+const isIconifyEmoji = computed(() => {
+  const emoji = props.fish?.emoji_variant || speciesEmoji[props.fish?.species] || '🐟'
+  return emoji.includes(':')
+})
+
+const displayEmoji = computed(() => {
+  return props.fish?.emoji_variant || speciesEmoji[props.fish?.species] || '🐟'
+})
+
+const personalityTraits = computed(() => {
+  const raw = props.fish?.personality_traits
+  if (!raw) return []
+  // 可能是 JSON 字符串或已解析的数组
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+  return Array.isArray(raw) ? raw : []
+})
+
+// v1.16.0: 性格图标映射（前端 JSON 字符串解析后需要查表）
+const traitIcons = {
+  '勇敢': '🦁', '好奇': '🔍', '活泼': '🤸', '勤奋': '💪', '谨慎': '🛡️',
+  '乐天': '😊', '傲娇': '💅', '贪吃': '🍔', '社牛': '🎤', '胆小': '😨',
+  '懒惰': '😴', '暴躁': '💢', '沉稳': '🧘', '机灵': '🧠', '粘人': '🥰',
+  '孤僻': '🏚️', '贪睡': '😴', '迷糊': '😵', '浪漫': '💕',
+  '倔强': '🤨', '戏精': '🎪', '冒险家': '🧭',
+}
+function traitIcon(name) {
+  return traitIcons[name] || '🎭'
+}
 
 function abilityMod(score) {
   const m = Math.floor((score - 10) / 2)
@@ -72,7 +109,10 @@ function confirmDelete() {
           <X :size="20" class="text-slate-400" />
         </button>
         <div class="flex items-center gap-4">
-          <div class="text-5xl">{{ speciesEmoji[fish.species] || '🐟' }}</div>
+          <div class="text-5xl">
+            <Icon v-if="isIconifyEmoji" :icon="displayEmoji" :width="40" />
+            <span v-else>{{ displayEmoji }}</span>
+          </div>
           <div>
             <h2 class="text-lg font-bold text-slate-800">{{ fish.fish_name }}</h2>
             <div class="flex items-center gap-2 mt-1">
@@ -87,6 +127,14 @@ function confirmDelete() {
                 {{ fish.rarity }}
               </span>
               <span class="text-xs text-slate-400">Lv{{ fish.level }}</span>
+            </div>
+            <!-- v1.16.0: 性格标签 -->
+            <div v-if="personalityTraits?.length" class="flex flex-wrap gap-1 mt-2">
+              <span v-for="trait in personalityTraits" :key="(typeof trait === 'string' ? trait : trait.key)"
+                class="px-1.5 py-0.5 rounded-full text-[10px] font-medium
+                       bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 border border-indigo-100">
+                {{ typeof trait === 'string' ? traitIcon(trait) + ' ' + trait : (trait.icon || '🎭') + ' ' + trait.key }}
+              </span>
             </div>
           </div>
         </div>
@@ -171,6 +219,13 @@ function confirmDelete() {
             </div>
           </div>
         </div>
+        <!-- v1.16.0: 精力条 -->
+        <EnergyBar
+          :current="fish.energy || 100"
+          :max="fish.max_energy || 100"
+          label="精力"
+          color="#22C55E"
+        />
         <div class="flex justify-between text-xs text-slate-400">
           <span>阶段: <b class="text-slate-600">{{ fish.stage }}</b></span>
           <span>连活: <b class="text-slate-600">{{ fish.consecutive_days || 0 }}天</b></span>

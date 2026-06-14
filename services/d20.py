@@ -23,13 +23,14 @@ class D20Result:
     success: bool                # total >= dc
     critical_hit: bool = False   # roll == 20 (自然20)
     critical_miss: bool = False  # roll == 1 (自然1)
+    trait_modifier: int = 0      # v1.16.0: 性格特性带来的额外修正
 
     def __post_init__(self):
         self.critical_hit = self.roll == 20
         self.critical_miss = self.roll == 1
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "roll": self.roll,
             "modifier": self.modifier,
             "total": self.total,
@@ -38,6 +39,9 @@ class D20Result:
             "critical_hit": self.critical_hit,
             "critical_miss": self.critical_miss,
         }
+        if self.trait_modifier:
+            d["trait_modifier"] = self.trait_modifier
+        return d
 
     def describe(self) -> str:
         """人类可读的检定描述"""
@@ -132,6 +136,77 @@ def ability_check(ability_score: int, dc: int,
         dc=dc,
         success=total >= dc,
     )
+
+
+# v1.16.0: 性格特性 → d20 效果映射
+# context 为动作类型：feed/touch/explore/showoff/battle/train
+# 返回 (advantage, disadvantage, flat_modifier)
+_TRAIT_D20_EFFECTS = {
+    "勤奋": lambda ctx: (True, False, 0) if ctx in ("feed", "train") else (False, False, 0),
+    "好奇": lambda ctx: (True, False, 0) if ctx == "explore" else (False, False, 0),
+    "活泼": lambda ctx: (False, False, 1) if ctx in ("explore", "showoff") else (False, False, 0),
+    "谨慎": lambda ctx: (True, False, 0) if ctx == "explore" else (False, False, 0),
+    "乐天": lambda ctx: (False, False, 1) if ctx == "touch" else (False, False, 0),
+    "傲娇": lambda ctx: (False, False, 1) if ctx == "showoff" else (False, True, 0) if ctx == "train" else (False, False, 0),
+    "贪吃": lambda ctx: (True, False, 0) if ctx == "feed" else (False, False, 0),
+    "社牛": lambda ctx: (True, False, 0) if ctx in ("showoff", "touch") else (False, False, 0),
+    "胆小": lambda ctx: (False, True, 0) if ctx in ("battle", "explore") else (False, False, 0),
+    "懒惰": lambda ctx: (False, True, 0) if ctx in ("feed", "train", "battle") else (False, False, 0),
+    "暴躁": lambda ctx: (True, False, 0) if ctx == "battle" else (False, False, -1) if ctx in ("touch", "showoff") else (False, False, 0),
+    "沉稳": lambda ctx: (False, False, 1) if ctx == "train" else (False, False, 0),
+    "机灵": lambda ctx: (True, False, 0) if ctx == "explore" else (False, False, 0),
+    "粘人": lambda ctx: (False, False, 1) if ctx == "touch" else (False, False, 0),
+    "孤僻": lambda ctx: (False, True, 0) if ctx in ("touch", "showoff") else (False, False, 0),
+}
+
+
+def check_with_traits(ability_score: int, dc: int,
+                      traits: list, context: str,
+                      is_proficient: bool = False, level: int = 1,
+                      seed: str = None) -> D20Result:
+    """v1.16.0: 带性格特性修正的能力检定
+
+    根据鱼的性格标签和动作上下文，计算优势/劣势和数值修正，
+    然后委托给 ability_check()。
+
+    Args:
+        traits: 鱼的性格标签列表，如 ["勤奋", "好奇", "乐天"]
+        context: 动作类型 — "feed"|"touch"|"explore"|"showoff"|"battle"|"train"
+
+    Returns:
+        D20Result（trait_modifier 字段记录性格带来的额外修正）
+    """
+    advantage = False
+    disadvantage = False
+    flat_mod = 0
+
+    for trait in traits:
+        effect_fn = _TRAIT_D20_EFFECTS.get(trait)
+        if effect_fn:
+            adv, dis, mod = effect_fn(context)
+            if adv:
+                advantage = True
+            if dis:
+                disadvantage = True
+            flat_mod += mod
+
+    # 优劣势抵消
+    if advantage and disadvantage:
+        advantage = False
+        disadvantage = False
+
+    result = ability_check(ability_score, dc,
+                           is_proficient=is_proficient, level=level,
+                           advantage=advantage, disadvantage=disadvantage,
+                           seed=seed)
+
+    # 应用性格数值修正
+    if flat_mod != 0:
+        result.total += flat_mod
+        result.success = result.total >= dc
+        result.trait_modifier = flat_mod
+
+    return result
 
 
 def opposed_check(attacker_score: int, defender_score: int,

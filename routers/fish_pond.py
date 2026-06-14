@@ -182,10 +182,23 @@ def get_fish_detail(group_id: int, wxid: str):
         ei = fp.ITEMS.get(equipped, {})
         equipped_info = {"key": equipped, "name": ei.get("name", ""), "desc": ei.get("desc", ""),
                          "bonus": ei.get("bonus", 0), "stat": ei.get("stat", "")}
+    # v1.16.0: 解析性格和精力
+    import json as _json
+    traits_raw = fish.get("personality_traits", "[]")
+    try:
+        traits = _json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+    except (_json.JSONDecodeError, TypeError):
+        traits = []
+    traits_detail = [{"key": t, **fp.FISH_TRAITS.get(t, {"desc": "", "icon": ""})} for t in traits]
+
     return {"code": 200, "message": "ok", "data": {
         "fish": fish, "species_info": species_info,
         "proficiencies": proficiencies, "coins": coins, "recent_events": events,
         "equip_bonuses": bonuses, "equipped": equipped_info,
+        "personality_traits": traits_detail,
+        "energy": fish.get("energy", 100),
+        "max_energy": fish.get("max_energy", 100),
+        "emoji_variant": fish.get("emoji_variant", ""),
     }}
 
 
@@ -205,6 +218,24 @@ def touch_fish(group_id: int, wxid: str):
     if "error" in result:
         raise HTTPException(400, result["error"])
     return {"code": 200, "message": "摸鱼完成", "data": result}
+
+
+@router.post("/fish/{wxid}/rest")
+def rest_fish(group_id: int, wxid: str):
+    """v1.16.0: /休息 — 立即恢复全部精力"""
+    import asyncio
+    fish = db.get_fish(group_id, wxid)
+    if not fish or not fish["is_alive"]:
+        raise HTTPException(400, "鱼不存在或已死亡")
+    energy = fish.get("energy", 100)
+    max_energy = fish.get("max_energy", 100)
+    if energy >= max_energy:
+        return {"code": 200, "message": "精力已满", "data": {"energy": energy, "max_energy": max_energy, "restored": 0}}
+    restore_amount = max_energy - energy
+    fp.regen_energy(group_id, wxid, restore_amount)
+    fish = db.get_fish(group_id, wxid)
+    return {"code": 200, "message": f"恢复了 {restore_amount} 点精力",
+            "data": {"energy": fish.get("energy", max_energy), "max_energy": max_energy, "restored": restore_amount}}
 
 
 @router.post("/fish/{wxid}/explore")

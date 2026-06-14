@@ -164,6 +164,8 @@ export const feedFish = (gid, wxid, fromWxid) =>
   })
 export const touchFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/touch`, { method: 'POST' })
+export const restFish = (gid, wxid) =>                          // v1.16.0
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/rest`, { method: 'POST' })
 export const exploreFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/explore`, { method: 'POST' })
 export const showoffFish = (gid, wxid) =>
