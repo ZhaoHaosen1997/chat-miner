@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import config
 from models.database import init_db
-from routers import groups, report, portrait, stats, tasks, fish_pond, settings, weflow
+from routers import groups, report, portrait, stats, tasks, fish_pond, settings, weflow, persona
 
 
 # --- PyInstaller 兼容：获取静态资源路径 ---
@@ -141,6 +141,7 @@ app.include_router(tasks.router)
 app.include_router(fish_pond.router)
 app.include_router(settings.router)
 app.include_router(weflow.router)
+app.include_router(persona.router)
 
 # 挂载前端静态文件（API 路由优先，未匹配的走静态文件）
 dist_path = _get_dist_path()

@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, inject, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations } from '../api/index.js'
-import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2, LayoutGrid } from 'lucide-vue-next'
+import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations, getPersonas, getCrossGroupWxids, autoLinkPersonas } from '../api/index.js'
+import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2, LayoutGrid, Users, Link2, ArrowRight } from 'lucide-vue-next'
 const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
@@ -11,6 +11,33 @@ const activeTaskId = inject('activeTaskId')
 const portraits = ref([])
 const members = ref([])
 const loading = ref(false)
+const activeTab = ref('members')  // v1.5.0: 'members' | 'cross'
+
+// v1.5.0: 跨群身份
+const personas = ref([])
+const crossGroupList = ref([])
+const crossLoading = ref(false)
+
+async function loadCrossGroup() {
+  if (crossLoading.value) return
+  crossLoading.value = true
+  try {
+    const [p, c] = await Promise.all([
+      getPersonas().catch(() => []),
+      getCrossGroupWxids().catch(() => []),
+    ])
+    personas.value = p
+    crossGroupList.value = c
+  } catch (e) { /* ignore */ }
+  finally { crossLoading.value = false }
+}
+
+async function doAutoLink() {
+  try {
+    await autoLinkPersonas()
+    await loadCrossGroup()
+  } catch (e) { console.error(e) }
+}
 const refreshing = ref(null)      // 单个刷新的 memberId
 const viewMode = ref('cards')     // 'cards' | 'network'
 const batchAnalyzing = ref(false)
@@ -39,6 +66,7 @@ async function load(silent = false) {
 }
 
 watch(currentGroup, load, { immediate: true })
+watch(activeTab, (tab) => { if (tab === 'cross') loadCrossGroup() })
 
 // 增量刷新（最近10天）
 async function refreshOne(memberId) {
@@ -312,38 +340,111 @@ const unanalyzedCount = computed(() =>
 
 <template>
   <div>
-    <!-- 头部 -->
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-          <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-100 to-rose-100 flex items-center justify-center">
-            <Users class="w-4 h-4 text-purple-500" />
-          </span>
-          群友画像
-        </h2>
-        <p class="text-sm text-slate-400 mt-1.5 ml-10">AI 分析生成的成员性格、风格和角色</p>
+    <!-- v1.5.0: Tab 切换栏 -->
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex bg-slate-100 rounded-lg p-0.5">
+        <button @click="activeTab='members'"
+          :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
+            activeTab==='members' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+          <Users class="w-4 h-4" />本群画像
+        </button>
+        <button @click="activeTab='cross'"
+          :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
+            activeTab==='cross' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+          <Link2 class="w-4 h-4" />跨群身份
+        </button>
       </div>
-      <div class="flex items-center gap-3">
-        <!-- 视图切换 -->
-        <div class="flex bg-slate-100 rounded-lg p-0.5">
-          <button @click="viewMode='cards'"
-            :class="['px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1.5 font-medium',
-              viewMode==='cards' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
-            <LayoutGrid class="w-3 h-3" />卡片
-          </button>
-          <button @click="viewMode='network'"
-            :class="['px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1.5 font-medium',
-              viewMode==='network' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
-            <Share2 class="w-3 h-3" />关系
+    </div>
+
+    <!-- 跨群身份内容 -->
+    <div v-if="activeTab==='cross'">
+      <div v-if="crossLoading" class="flex items-center justify-center py-16">
+        <Loader2 class="w-6 h-6 animate-spin text-indigo-400" />
+      </div>
+      <div v-else-if="!personas.length && !crossGroupList.length" class="text-center py-16">
+        <Users class="w-12 h-12 text-slate-200 mx-auto mb-3" />
+        <p class="text-sm text-slate-500 mb-2">暂无跨群身份</p>
+        <p class="text-xs text-slate-400 mb-4">同一个 wxid 出现在多个群时会自动发现</p>
+        <button @click="doAutoLink"
+                class="text-sm text-indigo-500 hover:text-indigo-600 font-medium">
+          扫描自动关联
+        </button>
+      </div>
+      <div v-else class="space-y-4">
+        <!-- 已关联 Personas -->
+        <div v-if="personas.length" class="card p-4">
+          <h3 class="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+            <Link2 class="w-4 h-4 text-amber-500" />已关联身份 ({{ personas.length }})
+          </h3>
+          <div class="space-y-2">
+            <div v-for="p in personas" :key="p.id"
+                 class="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer"
+                 @click="$router.push(`/portrait/${p.members?.[0]?.id}?group_id=${p.members?.[0]?.group_id}`)">
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-medium text-slate-700">{{ p.name || '未命名' }}</span>
+                <span class="text-xs text-slate-400">{{ p.member_count }} 个身份</span>
+              </div>
+              <ArrowRight class="w-4 h-4 text-slate-300" />
+            </div>
+          </div>
+        </div>
+        <!-- 自动发现的跨群 wxid -->
+        <div v-if="crossGroupList.length" class="card p-4">
+          <h3 class="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+            <Users class="w-4 h-4 text-indigo-500" />自动发现 ({{ crossGroupList.length }})
+          </h3>
+          <div class="space-y-2">
+            <div v-for="item in crossGroupList" :key="item.wxid"
+                 class="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-indigo-50 transition-colors">
+              <div>
+                <div class="text-sm font-medium text-slate-700">{{ item.names }}</div>
+                <div class="text-xs text-slate-400">{{ item.groups }} · {{ item.group_cnt }} 个群</div>
+              </div>
+            </div>
+          </div>
+          <button v-if="crossGroupList.length && !personas.length"
+                  @click="doAutoLink"
+                  class="mt-3 text-sm text-indigo-500 hover:text-indigo-600 font-medium">
+            一键关联所有
           </button>
         </div>
-        <div class="text-xs text-slate-400">
-          <span class="font-semibold text-slate-600">{{ portraits.length }}</span> / {{ members.length }} 人
+      </div>
+    </div>
+
+    <!-- 本群画像内容 -->
+    <div v-if="activeTab==='members'">
+      <!-- 头部 -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-100 to-rose-100 flex items-center justify-center">
+              <Users class="w-4 h-4 text-purple-500" />
+            </span>
+            群友画像
+          </h2>
+          <p class="text-sm text-slate-400 mt-1.5 ml-10">AI 分析生成的成员性格、风格和角色</p>
         </div>
-        <button
-          v-if="members.length > 0"
-          @click="analyzeAll"
-          :disabled="batchAnalyzing || !!activeTaskId"
+        <div class="flex items-center gap-3">
+          <!-- 视图切换 -->
+          <div class="flex bg-slate-100 rounded-lg p-0.5">
+            <button @click="viewMode='cards'"
+              :class="['px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1.5 font-medium',
+                viewMode==='cards' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+              <LayoutGrid class="w-3 h-3" />卡片
+            </button>
+            <button @click="viewMode='network'"
+              :class="['px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1.5 font-medium',
+                viewMode==='network' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+              <Share2 class="w-3 h-3" />关系
+            </button>
+          </div>
+          <div class="text-xs text-slate-400">
+            <span class="font-semibold text-slate-600">{{ portraits.length }}</span> / {{ members.length }} 人
+          </div>
+          <button
+            v-if="members.length > 0"
+            @click="analyzeAll"
+            :disabled="batchAnalyzing || !!activeTaskId"
           class="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200 active:scale-[0.98]"
         >
           <Zap :class="['w-3.5 h-3.5', batchAnalyzing && 'animate-spin']" />
@@ -600,4 +701,5 @@ const unanalyzedCount = computed(() =>
       <p class="text-slate-400">导入群聊并分析几天后，才能生成群友画像哦</p>
     </div>
   </div>
+  </div><!-- /members tab -->
 </template>

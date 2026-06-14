@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ⚠️ 数据保护红线
 
 - **严禁操作生产数据**：`data/` 目录下的 `chat_miner.db` 和 `merged_data.json` 是用户数据。
+- **发行版更新**：设计和开发时要考虑，发行版安装包、绿色版更新时，不得使旧版用户数据丢失、程序崩溃
 - 不得删除、修改、清空 `data/` 下的任何文件，除非用户**明确说**"可以清数据""导入流程会重建""开发阶段数据可以舍弃"。
 - 部署更新时只替换代码文件，不动 `data/` 和 `config.json`。
 - 测试新功能时用 `test-group` 或创建新群，不要动已有群的数据。
@@ -12,9 +13,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Chat-Miner is a WeChat group chat analysis tool. Users upload exported chat JSON files, and a local Ollama AI model (qwen2.5:14b) generates daily reports and member portraits. DeepSeek API can be configured for weekly/monthly deep reasoning reports. Vue3 SPA frontend served on port 8856.
+Chat-Miner is a WeChat/QQ group chat analysis tool. Users upload exported chat JSON files (WeChat or QQ format, auto-detected), and a local Ollama AI model (qwen2.5:14b) generates daily reports and member portraits. DeepSeek API can be configured for weekly/monthly deep reasoning reports. Vue3 SPA frontend served on port 8856.
 
-**Version**: 0.7.1 (deployed to WSL DebianDev)
+**Version**: 1.5.0 (deployed to WSL DebianDev)
 
 ## WSL 生产部署
 
@@ -92,7 +93,7 @@ cd frontend && npx vite --port 5173
 
 **Async tasks**: `services/task_manager.py` in-memory singleton. SSE progress streaming at `GET /api/tasks/{id}/stream`. `ProgressPanel.vue` subscribes via `EventSource`. Cancel support: `_run_sub()` checks `task._cancelled` before each retry.
 
-**Database**: SQLite at `data/chat_miner.db`. Tables: `chat_groups`, `group_members` (UNIQUE: group_id+wxid), `daily_reports`, `member_portraits`, `portrait_versions`, `member_interactions`, `analysis_log`, `task_records`. Migration in `_migrate_db()`.
+**Database**: SQLite at `data/chat_miner.db`. Tables: `chat_groups`, `group_members` (UNIQUE: group_id+wxid), `daily_reports`, `member_portraits`, `portrait_versions`, `member_interactions`, `analysis_log`, `task_records`, `periodic_reports` (周报/月报/年报), `annual_awards` (年度奖项), `app_settings` (可热更新设置), `model_configs` (AI 模型配置), `fish_pond` + `fish_events` + `scale_coin_wallet` + `scale_coin_transactions` + `fish_inventory` + `fish_black_market` (鱼塘系统). Migration in `_migrate_db()` and dedicated `_migrate_*` functions.
 
 **Portrait system**: Unified analysis (`_run_full_portrait_analysis`) does basic pipeline + Python stats + deep pipeline + fun titles. Incremental mode (`max_days=10`) preserves AI personality traits, only refreshes data stats.
 
@@ -103,7 +104,7 @@ cd frontend && npx vite --port 5173
 - **API response format**: `{"code": 200, "message": "...", "data": {...}}`
 - **Config**: `config.json` (启动参数) → `config.py` (默认值) → DB `app_settings` (可热更新)。通过设置页面管理。
 - **Frontend state**: `provide/inject` for `currentGroup`, `triggerRefresh`, `activeTaskId`.
-- **Frontend router**: Hash-based, routes: `/`, `/report/:date`, `/portraits`, `/portrait/:memberId`.
+- **Frontend router**: Hash-based, routes: `/` (Dashboard), `/report/:date` (日报), `/portraits` (画像列表), `/portrait/:memberId` (画像详情), `/weekly/:weekId` (周报), `/monthly/:monthId` (月报), `/annual/:yearId` (年报), `/fishpond` (鱼塘), `/fish-report/:date` (鱼日报), `/settings` (设置), `/tasks` (任务历史).
 - **JSON parsing safety**: All message content access uses `(m.get("content") or "").strip()` because `content` can be `None`.
 - **Git**: Commit in Chinese with version tag. Do NOT commit `docs/`.
 - **提交纪律**：用户测试确认功能无误后再 commit + push。AI 不自行提交，等用户明确说"提交"。
@@ -111,6 +112,7 @@ cd frontend && npx vite --port 5173
 
 ## Input JSON format
 
+**WeChat 格式**（微信导出工具）：
 ```json
 {
   "session": { "nickname": "群名", "wxid": "...", "messageCount": 31192 },
@@ -123,6 +125,21 @@ cd frontend && npx vite --port 5173
   }]
 }
 ```
+
+**QQ 格式**（QQChatExporter V5，parser.py `_normalize_qq()` 归一化）：
+```json
+{
+  "session": { "nickname": "群名", "groupUid": "u_xxxx" },
+  "senders": [{ "uid": "u_xxxx", "uin": "12345678", "nickname": "昵称" }],
+  "messages": [{
+    "type": "type_1", "subType": "text",
+    "senderUid": "u_xxxx", "senderNickname": "昵称",
+    "elements": [{ "elementType": 1, "textElement": { "content": "消息内容" } }],
+    "timestamp": "2025-02-23 08:38:21"
+  }]
+}
+```
+QQ 格式归一化后：`uid` → `wxid`, `uin` → 额外保留在 `sender.uin`（v1.5.0 起存入 DB）。
 
 Message types: 文本消息, 图片消息, 表情消息, 语音消息, 系统消息, 引用消息, 视频消息.
 Daily reports include 引用消息 (for context), portrait analysis excludes them (to avoid contamination).

@@ -382,6 +382,7 @@ class ParsedChat:
         self.senders: list[dict] = []
         self.messages: list[dict] = []
         self._by_date: Optional[dict[str, list[dict]]] = None
+        self.platform: str = ""  # v1.5.0: 'wechat' / 'qq' / '' (unknown)
 
     @property
     def _pickle_path(self) -> Path:
@@ -410,6 +411,7 @@ class ParsedChat:
                     self.senders = data["senders"]
                     self.messages = data["messages"]
                     self._by_date = data.get("_by_date")
+                    self.platform = data.get("platform", "")  # v1.5.0: 兼容旧 pickle 无 platform
                     # 兼容旧 pickle（可能还有多余字段）
                     _trim_message_fields(self.messages)
                     logger.debug(f"pickle 加载完成: 群={self.group_name}, "
@@ -422,6 +424,7 @@ class ParsedChat:
         # QQ chunked-jsonl 格式检测（v0.8.2，群聊 ZIP 导出）
         if self.file_path.suffix.lower() == ".zip":
             if _detect_qq_chunked(self.file_path):
+                self.platform = "qq"
                 self.session, self.senders, self.messages = _normalize_qq_chunked(self.file_path)
                 _trim_message_fields(self.messages)
                 logger.info(f"QQ chunked-jsonl 解析完成: 群={self.group_name}, "
@@ -434,6 +437,7 @@ class ParsedChat:
                             "senders": self.senders,
                             "messages": self.messages,
                             "_by_date": self._by_date,
+                            "platform": self.platform,
                         }, f, protocol=pickle.HIGHEST_PROTOCOL)
                     logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                                 f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
@@ -449,6 +453,7 @@ class ParsedChat:
 
         # QQ 格式检测与归一化（v0.8）
         if _detect_qq_format(self.raw):
+            self.platform = "qq"
             self.session, self.senders, self.messages = _normalize_qq(self.raw)
             _trim_message_fields(self.messages)
             logger.info(f"QQ JSON 解析完成: 群={self.group_name}, "
@@ -461,6 +466,7 @@ class ParsedChat:
                         "senders": self.senders,
                         "messages": self.messages,
                         "_by_date": self._by_date,
+                        "platform": self.platform,
                     }, f, protocol=pickle.HIGHEST_PROTOCOL)
                 logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                             f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")
@@ -469,6 +475,7 @@ class ParsedChat:
             return self
 
         # ---- 微信格式解析 ----
+        self.platform = "wechat"
         self.session = self.raw.get("session", {})
         self.senders = self.raw.get("senders", [])
 
@@ -504,6 +511,7 @@ class ParsedChat:
                     "senders": self.senders,
                     "messages": self.messages,
                     "_by_date": self._by_date,
+                    "platform": self.platform,
                 }, f, protocol=pickle.HIGHEST_PROTOCOL)
             logger.debug(f"pickle 缓存已保存: {self._pickle_path} "
                         f"({self._pickle_path.stat().st_size / 1024 / 1024:.1f} MB)")

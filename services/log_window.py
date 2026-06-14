@@ -1,5 +1,5 @@
 """
-v1.4.2 Chat-Miner GUI 窗口 — CustomTkinter + 系统托盘
+v1.5.0 Chat-Miner GUI 窗口 — CustomTkinter + 系统托盘
 实时统计 / 启动进度 / 托盘最小化 / 查看日志
 """
 import os
@@ -114,7 +114,7 @@ class LogWindow:
         root = self._root
         self._running = True
 
-        root.title(f"Chat-Miner v1.4.2")
+        root.title(f"Chat-Miner v1.5.0")
         root.geometry("420x340")
         root.minsize(320, 300)
         root.configure(fg_color="#f8fafc")
@@ -132,7 +132,7 @@ class LogWindow:
         if not os.path.exists(icon_path):
             icon_path = sys.executable  # fallback
 
-        # 暂不启用托盘（v1.4.2: WndProc 子类化在 64 位有兼容问题）
+        # 暂不启用托盘（v1.5.0: WndProc 子类化在 64 位有兼容问题）
         self._icon_path = icon_path
 
         # ---- 主卡片 ----
@@ -147,7 +147,7 @@ class LogWindow:
         # 标题
         ctk.CTkLabel(card, text="Chat-Miner", font=("Microsoft YaHei", 16, "bold"),
                      text_color="#1e293b").pack()
-        ctk.CTkLabel(card, text="v1.4.2 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
+        ctk.CTkLabel(card, text="v1.5.0 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
                      text_color="#94a3b8").pack(pady=(0, 10))
 
         # ---- 启动进度条 ----
@@ -241,7 +241,7 @@ class LogWindow:
             try:
                 req = urllib.request.Request(
                     f"http://localhost:{self.port}/api/stats/global",
-                    headers={"User-Agent": "chat-miner-gui/1.4.2"})
+                    headers={"User-Agent": "chat-miner-gui/1.5.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read())
                     s = data.get("data", {})
@@ -303,7 +303,7 @@ class LogWindow:
             from config import config
             current = config.VERSION
         except Exception:
-            current = "1.4.2"
+            current = "1.5.0"
 
         def _run():
             result = check_update(current)

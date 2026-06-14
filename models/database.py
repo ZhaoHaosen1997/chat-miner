@@ -390,6 +390,8 @@ def init_db():
         _migrate_weflow_group_columns(conn)
         # v1.2.11: 修正 display_name 优先级（群昵称 > 昵称 > 备注）
         _migrate_display_name_priority(conn)
+        # v1.5.0: 跨群身份 + QQ 平台支持
+        _migrate_v1_5_0(conn)
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
 
@@ -463,6 +465,43 @@ def _migrate_display_name_priority(conn):
         import logging
         logging.getLogger(__name__).info("DB migrate: 修正 %d 个成员的 display_name 优先级", updated)
 
+
+def _migrate_v1_5_0(conn):
+    """v1.5.0: persona + platform + uin migration
+    Pure additive: only ADD COLUMN + CREATE TABLE IF NOT EXISTS.
+    No existing data is modified.
+    """
+    # 1. chat_groups.platform
+    cur = conn.execute("PRAGMA table_info(chat_groups)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "platform" not in cols:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN platform TEXT DEFAULT ''")
+        logger.info("DB migrate v1.5.0: added chat_groups.platform")
+
+    # 2. group_members.uin (QQ number)
+    cur = conn.execute("PRAGMA table_info(group_members)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "uin" not in cols:
+        conn.execute("ALTER TABLE group_members ADD COLUMN uin TEXT DEFAULT ''")
+        logger.info("DB migrate v1.5.0: added group_members.uin")
+
+    # 3. personas + persona_members (pure additive)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS personas (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL DEFAULT '',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS persona_members (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona_id  INTEGER NOT NULL,
+            member_id   INTEGER NOT NULL UNIQUE,
+            FOREIGN KEY (persona_id) REFERENCES personas(id) ON DELETE CASCADE,
+            FOREIGN KEY (member_id) REFERENCES group_members(id) ON DELETE CASCADE
+        );
+    """)
+    logger.info("DB migrate v1.5.0: personas + persona_members tables ready")
 
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
@@ -668,15 +707,15 @@ def _migrate_db(conn):
 def create_group(name: str, wxid: str = "", display_name: str = "",
                  message_count: int = 0, sender_count: int = 0,
                  date_start: str = "", date_end: str = "",
-                 file_path: str = "") -> int:
-    """创建群记录，返回 group_id"""
+                 file_path: str = "", platform: str = "") -> int:
+    """创建群记录，返回 group_id。v1.5.0: 新增 platform 参数。"""
     with db() as conn:
         cur = conn.execute(
             """INSERT INTO chat_groups (name, display_name, wxid, message_count,
-               sender_count, date_range_start, date_range_end, file_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               sender_count, date_range_start, date_range_end, file_path, platform)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, display_name, wxid, message_count, sender_count,
-             date_start, date_end, file_path)
+             date_start, date_end, file_path, platform)
         )
         gid = cur.lastrowid
     return gid
@@ -732,21 +771,23 @@ def upsert_members(group_id: int, senders: list[dict]):
             remark = s.get("remark", "")
             group_nickname = s.get("groupNickname", "")
             avatar = s.get("avatar", "")
+            uin = s.get("uin", "")  # v1.5.0: QQ 号
 
             conn.execute(
                 """INSERT INTO group_members
                    (group_id, sender_id, wxid, display_name, nickname, remark,
-                    group_nickname, avatar)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    group_nickname, avatar, uin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(group_id, wxid) DO UPDATE SET
                    sender_id = excluded.sender_id,
                    display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
                    nickname = COALESCE(NULLIF(excluded.nickname, ''), nickname),
                    remark = COALESCE(NULLIF(excluded.remark, ''), remark),
                    group_nickname = COALESCE(NULLIF(excluded.group_nickname, ''), group_nickname),
-                   avatar = COALESCE(NULLIF(excluded.avatar, ''), avatar)""",
+                   avatar = COALESCE(NULLIF(excluded.avatar, ''), avatar),
+                   uin = COALESCE(NULLIF(excluded.uin, ''), uin)""",
                 (group_id, sender_id, wxid, display_name, nickname, remark,
-                 group_nickname, avatar)
+                 group_nickname, avatar, uin)
             )
 
 
@@ -1792,3 +1833,185 @@ def load_app_settings_to_config():
         except (ValueError, TypeError):
             logger.warning(f'DB 设置 {key} 值转换失败({row["value"]})，使用默认值')
             pass
+
+
+# ==================== Personas v1.5.0 ====================
+
+def auto_link_by_wxid() -> int:
+    """自动关联：为同一 wxid 出现在多个群的成员创建 persona。
+
+    纯增量操作：已有 persona 的成员跳过，只处理未关联的成员。
+    返回新创建的 persona 数量。
+    """
+    with db() as conn:
+        # 找出在多个群出现、且未加入任何 persona 的 wxid
+        rows = conn.execute("""
+            SELECT gm.wxid, COUNT(DISTINCT gm.group_id) AS group_cnt
+            FROM group_members gm
+            LEFT JOIN persona_members pm ON gm.id = pm.member_id
+            WHERE gm.wxid != ''
+              AND gm.wxid NOT LIKE 'fallback_%'
+              AND gm.wxid NOT LIKE 'unknown_%'
+              AND pm.id IS NULL
+            GROUP BY gm.wxid
+            HAVING group_cnt >= 2
+        """).fetchall()
+
+        created = 0
+        for row in rows:
+            wxid = row["wxid"]
+            # 为该 wxid 创建 persona
+            cur = conn.execute(
+                "INSERT INTO personas (name) VALUES (?)",
+                (wxid,)
+            )
+            persona_id = cur.lastrowid
+            # 关联所有匹配的 member
+            conn.execute("""
+                INSERT INTO persona_members (persona_id, member_id)
+                SELECT ?, gm.id FROM group_members gm
+                LEFT JOIN persona_members pm ON gm.id = pm.member_id
+                WHERE gm.wxid = ? AND pm.id IS NULL
+            """, (persona_id, wxid))
+            created += 1
+
+        if created:
+            logger.info(f"auto_link_by_wxid: 创建 {created} 个 persona")
+        return created
+
+
+def create_persona(name: str = "") -> int:
+    """创建空 persona，返回 persona_id"""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO personas (name) VALUES (?)", (name,)
+        )
+        return cur.lastrowid
+
+
+def link_member_to_persona(persona_id: int, member_id: int) -> bool:
+    """将 member 关联到 persona。若 member 已属于其他 persona，先自动解除旧关联。"""
+    with db() as conn:
+        # 检查 member 是否存在
+        member = conn.execute(
+            "SELECT id, display_name FROM group_members WHERE id=?", (member_id,)
+        ).fetchone()
+        if not member:
+            return False
+        # 如果已在其他 persona 中则先移除（一个 member 只能属于一个 persona）
+        conn.execute(
+            "DELETE FROM persona_members WHERE member_id=?", (member_id,)
+        )
+        # 关联
+        conn.execute(
+            "INSERT OR IGNORE INTO persona_members (persona_id, member_id) VALUES (?, ?)",
+            (persona_id, member_id)
+        )
+        # 如果 persona 还没有名字，用成员的 display_name
+        conn.execute("""
+            UPDATE personas SET name = (
+                SELECT display_name FROM group_members WHERE id=?
+            ) WHERE id=? AND (name IS NULL OR name = '')
+        """, (member_id, persona_id))
+        return True
+
+
+def unlink_member_from_persona(member_id: int) -> bool:
+    """从 persona 中移除 member"""
+    with db() as conn:
+        cur = conn.execute(
+            "DELETE FROM persona_members WHERE member_id=?", (member_id,)
+        )
+        return cur.rowcount > 0
+
+
+def get_persona(persona_id: int) -> dict | None:
+    """获取 persona 详情，包含所有关联成员及画像"""
+    with db() as conn:
+        persona = conn.execute(
+            "SELECT * FROM personas WHERE id=?", (persona_id,)
+        ).fetchone()
+        if not persona:
+            return None
+        members = conn.execute("""
+            SELECT gm.*, cg.name AS group_name, cg.platform,
+                   mp.portrait_json, mp.last_updated AS portrait_updated
+            FROM persona_members pm
+            JOIN group_members gm ON pm.member_id = gm.id
+            JOIN chat_groups cg ON gm.group_id = cg.id
+            LEFT JOIN member_portraits mp ON mp.group_id = gm.group_id AND mp.member_id = gm.id
+            WHERE pm.persona_id = ?
+            ORDER BY cg.platform, cg.name
+        """, (persona_id,)).fetchall()
+        result = dict(persona)
+        result["members"] = [dict(m) for m in members]
+        return result
+
+
+def get_persona_by_member(member_id: int) -> dict | None:
+    """通过 member_id 查找所属 persona"""
+    with db() as conn:
+        row = conn.execute("""
+            SELECT p.* FROM personas p
+            JOIN persona_members pm ON p.id = pm.persona_id
+            WHERE pm.member_id = ?
+        """, (member_id,)).fetchone()
+        if not row:
+            return None
+        return get_persona(row["id"])
+
+
+def list_personas() -> list[dict]:
+    """列出所有 persona，包含成员数量"""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT p.*, COUNT(pm.id) AS member_count
+            FROM personas p
+            LEFT JOIN persona_members pm ON p.id = pm.persona_id
+            GROUP BY p.id
+            ORDER BY member_count DESC, p.created_at DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_persona(persona_id: int) -> bool:
+    """删除 persona（CASCADE 自动清理 persona_members）"""
+    with db() as conn:
+        cur = conn.execute("DELETE FROM personas WHERE id=?", (persona_id,))
+        return cur.rowcount > 0
+
+
+def get_cross_group_members(wxid: str) -> list[dict]:
+    """获取同一 wxid 在不同群的 member 记录及其画像（用于跨群对比）"""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT gm.*, cg.name AS group_name, cg.platform,
+                   mp.portrait_json, mp.last_updated AS portrait_updated,
+                   mp.total_analyzed_messages
+            FROM group_members gm
+            JOIN chat_groups cg ON gm.group_id = cg.id
+            LEFT JOIN member_portraits mp ON mp.group_id = gm.group_id AND mp.member_id = gm.id
+            WHERE gm.wxid = ? AND cg.status = 'active'
+            ORDER BY cg.platform, cg.name
+        """, (wxid,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_cross_group_wxids() -> list[dict]:
+    """列出所有在多个群出现的 wxid（用于前端发现可跨群对比的成员）"""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT gm.wxid, COUNT(DISTINCT gm.group_id) AS group_cnt,
+                   GROUP_CONCAT(DISTINCT gm.display_name) AS names,
+                   GROUP_CONCAT(DISTINCT cg.name) AS groups
+            FROM group_members gm
+            JOIN chat_groups cg ON gm.group_id = cg.id
+            WHERE gm.wxid != ''
+              AND gm.wxid NOT LIKE 'fallback_%'
+              AND gm.wxid NOT LIKE 'unknown_%'
+              AND cg.status = 'active'
+            GROUP BY gm.wxid
+            HAVING group_cnt >= 2
+            ORDER BY group_cnt DESC
+        """).fetchall()
+    return [dict(r) for r in rows]

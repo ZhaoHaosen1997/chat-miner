@@ -89,6 +89,22 @@ async def api_get_single_portrait(group_id: int, member_id: int):
     from models.database import get_member_awards as db_get_member_awards
     awards = db_get_member_awards(group_id, member_id)
 
+    # v1.5.0: 跨群/跨平台身份信息
+    cross_group = None
+    persona = None
+    if member and member.get("wxid"):
+        from models.database import get_cross_group_members, get_persona_by_member
+        all_members = get_cross_group_members(member["wxid"])
+        # 过滤掉当前群自身
+        other_members = [m for m in all_members if m["group_id"] != group_id]
+        if other_members:
+            cross_group = {
+                "wxid": member["wxid"],
+                "total_groups": len(all_members),
+                "other_members": other_members,
+            }
+        persona = get_persona_by_member(member_id)
+
     return {
         "code": 200,
         "message": "获取成功",
@@ -96,6 +112,7 @@ async def api_get_single_portrait(group_id: int, member_id: int):
             "member_id": member_id,
             "display_name": portrait["display_name"],
             "avatar": member["avatar"] if member else "",
+            "wxid": member["wxid"] if member else "",
             "total_messages": portrait["total_analyzed_messages"],
             "portrait": pj,
             "awards": [{"name": a["award_name"], "emoji": a.get("award_emoji", "🏆"),
@@ -104,6 +121,9 @@ async def api_get_single_portrait(group_id: int, member_id: int):
             "data_start_date": portrait.get("data_start_date") or "",
             "data_end_date": portrait.get("data_end_date") or "",
             "last_updated": portrait["last_updated"],
+            # v1.5.0: 跨群对比 + persona 信息
+            "cross_group": cross_group,
+            "persona": persona,
         },
     }
 

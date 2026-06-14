@@ -210,6 +210,7 @@ async def api_upload_group(file: UploadFile = File(...)):
         date_start=date_start,
         date_end=date_end,
         file_path=str(file_path),
+        platform=chat.platform,  # v1.5.0
     )
 
     # 写入成员 + 消息计数

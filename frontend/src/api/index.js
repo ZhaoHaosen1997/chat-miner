@@ -344,3 +344,21 @@ export const toggleWeFlowAutoSync = (group_id, enabled) =>
 export const unlinkWeFlowGroup = (group_id) =>
   request(`/weflow/unlink/${group_id}`, { method: 'POST' })
 
+// ==================== Personas v1.5.0 ====================
+export const getPersonas = () => request('/personas')
+export const getPersona = (id) => request(`/personas/${id}`)
+export const createPersona = (name, member_ids) =>
+  request('/personas', { method: 'POST', body: JSON.stringify({ name, member_ids }) })
+export const deletePersona = (id) =>
+  request(`/personas/${id}`, { method: 'DELETE' })
+export const linkMembersToPersona = (persona_id, member_id) =>
+  request(`/personas/${persona_id}/members`, { method: 'POST', body: JSON.stringify({ member_id }) })
+export const unlinkMemberFromPersona = (persona_id, member_id) =>
+  request(`/personas/${persona_id}/members/${member_id}`, { method: 'DELETE' })
+export const manualLinkMembers = (member_id_a, member_id_b) =>
+  request('/personas/link', { method: 'POST', body: JSON.stringify({ member_id_a, member_id_b }) })
+export const autoLinkPersonas = () =>
+  request('/personas/auto-link', { method: 'POST' })
+export const getCrossGroupWxids = () => request('/personas/cross-group/wxids')
+export const getCrossGroupDetail = (wxid) => request(`/personas/cross-group/${wxid}`)
+
