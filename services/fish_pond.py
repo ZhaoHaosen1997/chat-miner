@@ -668,12 +668,17 @@ def create_fish(group_id: int, wxid: str, display_name: str,
                 species: str = None, rarity: str = None,
                 message_count: int = 0,
                 portrait_traits: list = None) -> dict:  # v1.16.0
-    """创建一条新鱼（或重新领养）"""
+    """创建一条新鱼（或重新领养）。旧鱼若已死，归档保留全部数据以备后续复活。"""
     import json as _json
-    # 检查是否已有存活鱼
     existing = db.get_fish(group_id, wxid)
     if existing and existing.get("is_alive"):
         return {"error": "该成员已有存活鱼，请先等鱼死亡后再领养", "fish": existing}
+
+    # 旧鱼已死 → 归档：保留原 wxid 对应的全部数据，rename 到 grave_ 前缀
+    if existing and not existing.get("is_alive"):
+        import time
+        grave_wxid = f"{wxid}_grave_{int(time.time())}"
+        db.archive_dead_fish(group_id, wxid, grave_wxid)
 
     if species is None:
         species = random_species()
@@ -1606,29 +1611,32 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
         result = cmd_feed(group_id, wxid, seed=f"settle_feed_{group_id}_{wxid}_{date_str}")
         events.append({"type": "auto_feed", "data": result})
 
-    # 2. 连续活跃计算
-    last_active = fish.get("last_active_date", "")
-    consecutive = fish.get("consecutive_days", 0)
-
-    if member_active:
-        consecutive += 1
+    # 2. 连活天数 = 从鱼诞生到今天的自然天数
+    created_raw = fish.get("created_at", "")
+    if created_raw:
+        created_date = created_raw[:10]
+        created_dt = datetime.strptime(created_date, "%Y-%m-%d")
+        today_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        consecutive = max(1, (today_dt - created_dt).days + 1)
     else:
-        # 检查潜水天数
-        if last_active:
-            last_date = datetime.strptime(last_active, "%Y-%m-%d")
-            today = datetime.strptime(date_str, "%Y-%m-%d")
-            gap = (today - last_date).days
-            if gap >= 3:
-                penalty = gap * 5
-                new_happiness = max(0, fish["happiness"] - penalty)
-                db.update_fish_field(group_id, wxid, "happiness", new_happiness)
-                events.append({"type": "inactive_penalty", "gap_days": gap,
-                              "happiness_penalty": penalty})
-        # 潜水期间不重置连续天数，只扣幸福值
+        consecutive = 1
+
+    # 潜水惩罚：如果距上次结算超过 3 天（系统停运后恢复时触发）
+    last_active = fish.get("last_active_date", "")
+    if last_active:
+        last_date = datetime.strptime(last_active, "%Y-%m-%d")
+        today = datetime.strptime(date_str, "%Y-%m-%d")
+        gap = (today - last_date).days
+        if gap >= 3:
+            penalty = gap * 5
+            new_happiness = max(0, fish["happiness"] - penalty)
+            db.update_fish_field(group_id, wxid, "happiness", new_happiness)
+            events.append({"type": "inactive_penalty", "gap_days": gap,
+                          "happiness_penalty": penalty})
 
     db.update_fish_multi(group_id, wxid, {
         "consecutive_days": consecutive,
-        "last_active_date": date_str if member_active else last_active
+        "last_active_date": date_str
     })
 
     # 3. 连续活跃加成
@@ -1697,7 +1705,9 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
             db.update_fish_field(group_id, wxid, "personality_traits",
                                fish.get("personality_traits", "[]"))
             # 状态语存入 fish_events
-            db.add_fish_event(group_id, wxid, "daily_status", {"status": status})
+            db.add_fish_event(group_id, wxid, "daily_status", {
+                "fish_name": fish["fish_name"], "status": status,
+            })
             events.append({"type": "daily_status", "text": status})
     except Exception:
         pass
@@ -1745,7 +1755,8 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
             import random as _random
             last_words = _random.choice(FISH_LAST_WORDS)
             db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
-                "victim": victim["fish_name"], "date": date_str,
+                "fish_name": victim["fish_name"], "date": date_str,
+                "cause": f"幸福值过低({victim['happiness']:.0f})被鲨鱼袭击",
                 "last_words": last_words,
             })
             results.append({"wxid": victim["wxid"], "shark_attack": True,

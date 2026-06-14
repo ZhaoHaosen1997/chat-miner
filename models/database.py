@@ -1539,6 +1539,32 @@ def mark_fish_dead(group_id: int, wxid: str) -> bool:
     return True
 
 
+def archive_dead_fish(group_id: int, old_wxid: str, grave_wxid: str) -> bool:
+    """归档死鱼：重命名 wxid，为新鱼腾出唯一键。保留全部属性/装备/道具。"""
+    with db() as conn:
+        conn.execute(
+            "UPDATE fish_pond SET wxid=? WHERE group_id=? AND wxid=?",
+            (grave_wxid, group_id, old_wxid)
+        )
+        # 同步 fish_events 中的 wxid
+        conn.execute(
+            "UPDATE fish_events SET wxid=? WHERE group_id=? AND wxid=?",
+            (grave_wxid, group_id, old_wxid)
+        )
+        # 同步 scale_coin_wallet
+        conn.execute(
+            "UPDATE scale_coin_wallet SET wxid=? WHERE group_id=? AND wxid=?",
+            (grave_wxid, group_id, old_wxid)
+        )
+        # 同步 fish_inventory
+        conn.execute(
+            "UPDATE fish_inventory SET wxid=? WHERE group_id=? AND wxid=?",
+            (grave_wxid, group_id, old_wxid)
+        )
+        # 同步 member_portraits 不受影响（按 member_id 关联，不按 wxid）
+    return True
+
+
 # v0.13.0: 白名单校验，防止 SQL 注入
 _FISH_FIELD_WHITELIST = {
     "fish_name", "species", "rarity",

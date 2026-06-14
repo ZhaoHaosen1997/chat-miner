@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { X, Dices, Trash2, TrendingUp, Shield } from 'lucide-vue-next'
-import { Icon } from '@iconify/vue'
 import FishStatusBubble from './FishStatusBubble.vue'
 
 const props = defineProps({
@@ -25,11 +24,6 @@ const speciesEmoji = {
 }
 
 const speciesInfo = computed(() => props.fish?.species_info || {})
-
-const isIconifyEmoji = computed(() => {
-  const emoji = props.fish?.emoji_variant || speciesEmoji[props.fish?.species] || '🐟'
-  return emoji.includes(':')
-})
 
 const displayEmoji = computed(() => {
   return props.fish?.emoji_variant || speciesEmoji[props.fish?.species] || '🐟'
@@ -126,8 +120,7 @@ function confirmDelete() {
 
         <!-- Emoji with rarity glow -->
         <div class="fishcard-emoji" :style="{ boxShadow: rarityConfig.glow }">
-          <Icon v-if="isIconifyEmoji" :icon="displayEmoji" :width="48" />
-          <span v-else class="text-5xl">{{ displayEmoji }}</span>
+          <span class="text-5xl">{{ displayEmoji }}</span>
         </div>
 
         <!-- Name & meta -->

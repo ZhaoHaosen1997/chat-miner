@@ -1,6 +1,4 @@
 <script setup>
-import { Icon } from '@iconify/vue'
-
 const props = defineProps({
   fish: { type: Array, default: () => [] },
   deadFish: { type: Array, default: () => [] },
@@ -26,10 +24,6 @@ const rarityGlow = {
   '传说': 'drop-shadow-[0_0_10px_rgba(251,191,36,0.6)]',
 }
 
-function isIconify(f) {
-  const emoji = f?.emoji_variant || speciesEmoji[f?.species] || '🐟'
-  return emoji.includes(':')
-}
 function fishEmoji(f) {
   return f?.emoji_variant || speciesEmoji[f?.species] || '🐟'
 }
@@ -164,10 +158,7 @@ function getAnimName(f) {
                 animationDelay: getStyle(f, i).animationDelay,
                 animationDuration: getStyle(f, i).animationDuration,
               }">
-              <span class="fish-icon-wrap">
-                <Icon v-if="isIconify(f)" :icon="fishEmoji(f)" class="text-3xl fish-icon-svg" />
-                <span v-else class="text-3xl select-none block">{{ fishEmoji(f) }}</span>
-              </span>
+              <span class="text-3xl select-none block">{{ fishEmoji(f) }}</span>
             </div>
           </div>
           <!-- Name label -->
@@ -208,7 +199,7 @@ function getAnimName(f) {
       <span class="memorial-label">纪念</span>
       <span v-for="(f, i) in deadFish" :key="i"
         class="memorial-fish group relative">
-        {{ f.fish_name?.replace(/的.*/, '') || f.fish_name }}
+        {{ f.fish_name }}
         <span v-if="f.death_info"
           class="memorial-tooltip">
           {{ f.death_info }}
@@ -473,24 +464,6 @@ function getAnimName(f) {
   white-space: nowrap;
   text-shadow: 0 1px 2px rgba(0,0,0,0.4);
   line-height: 1.2;
-}
-
-/* ===== Icon fallback ===== */
-.fish-icon-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.fish-icon-wrap::before {
-  content: '🐟';
-  position: absolute;
-  font-size: 1.5rem;
-  z-index: 0;
-}
-.fish-icon-svg {
-  position: relative;
-  z-index: 1;
 }
 
 /* ===== Fish mini bars (HP + Energy) — hidden by default, show on hover ===== */

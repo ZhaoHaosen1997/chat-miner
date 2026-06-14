@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Crown, Heart, Star, Swords, TrendingUp } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -9,12 +9,20 @@ const props = defineProps({
 
 const emit = defineEmits(['update:sort', 'fish-click'])
 
+const PAGE_SIZE = 10
+const showCount = ref(PAGE_SIZE)
+
+// Reset pagination when sort changes
+watch(() => props.sort, () => { showCount.value = PAGE_SIZE })
+
 const speciesEmoji = {
   goldfish: '🐟', koi: '🎏', clownfish: '🤡', betta: '🐠', arowana: '🐉',
   angelfish: '👼', pufferfish: '🐡', shark: '🦈', crocodile: '🐊', orca: '🐳',
   octopus: '🐙', squid: '🦑', crab: '🦀', lobster: '🦞', jellyfish: '🪼',
   shrimp: '🦐', whale: '🐋', dolphin: '🐬', seal: '🦭', otter: '🦦',
   turtle: '🐢', frog: '🐸', axolotl: '🦎',
+  seahorse: '🐟', manta: '🐟', urchin: '🐟', starfish: '⭐',
+  mantis_shrimp: '🦐', conch: '🐚', otter2: '🦦', walrus: '🦭',
 }
 
 const sortOptions = [
@@ -24,10 +32,13 @@ const sortOptions = [
   { key: 'strength', label: '最强力量', icon: Swords },
 ]
 
-const ranked = computed(() => {
+const allRanked = computed(() => {
   const sorted = [...props.fish].sort((a, b) => (b[props.sort] || 0) - (a[props.sort] || 0))
-  return sorted.slice(0, 8)
+  return sorted
 })
+const visibleRanked = computed(() => allRanked.value.slice(0, showCount.value))
+const hasMore = computed(() => showCount.value < allRanked.value.length)
+function showMore() { showCount.value += PAGE_SIZE }
 </script>
 
 <template>
@@ -50,8 +61,8 @@ const ranked = computed(() => {
     </div>
 
     <!-- Rank list -->
-    <div v-if="ranked.length" class="space-y-1">
-      <div v-for="(f, i) in ranked" :key="f.wxid || i"
+    <div v-if="visibleRanked.length" class="space-y-1">
+      <div v-for="(f, i) in visibleRanked" :key="f.wxid || i"
         @click="$emit('fish-click', f)"
         class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition text-xs">
         <!-- Rank -->
@@ -78,6 +89,13 @@ const ranked = computed(() => {
     </div>
     <div v-else class="text-center py-4 text-xs text-slate-400">
       暂无数据
+    </div>
+    <!-- Show more -->
+    <div v-if="hasMore" class="text-center pt-2">
+      <button @click="showMore"
+        class="text-xs font-medium text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 px-4 py-1.5 rounded-lg transition">
+        展开更多（{{ allRanked.length - showCount }} 条剩余）
+      </button>
     </div>
   </div>
 </template>
