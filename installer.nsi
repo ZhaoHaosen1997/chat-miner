@@ -25,6 +25,7 @@ SetCompressor /SOLID lzma
 
 ; --- Pages ---
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -34,8 +35,9 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
-; --- Install Section ---
-Section "Install"
+; --- Install Section (hidden, always runs) ---
+Section "ChatMiner" SecCore
+    SectionIn RO
     ; Kill running ChatMiner to release file locks before overwrite
     nsExec::Exec 'taskkill /f /im ChatMiner.exe'
     Sleep 1500
@@ -53,13 +55,8 @@ Section "Install"
     CreateDirectory "$INSTDIR\data"
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
-    ; Start Menu
-    CreateDirectory "$SMPROGRAMS\ChatMiner"
-    CreateShortcut "$SMPROGRAMS\ChatMiner\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe"
-    CreateShortcut "$SMPROGRAMS\ChatMiner\Uninstall.lnk" "$INSTDIR\uninstall.exe"
-
-    ; Desktop
-    CreateShortcut "$DESKTOP\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe"
+    ; Refresh icon cache
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 
     ; Registry (uninstall info)
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
@@ -80,6 +77,30 @@ Section "Install"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" \
         "EstimatedSize" "$0"
 SectionEnd
+
+; --- Desktop Shortcut ---
+Section "Create Desktop Shortcut" SecDesktop
+    Delete "$DESKTOP\ChatMiner.lnk"
+    CreateShortcut "$DESKTOP\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe" \
+        "" "$INSTDIR\ChatMiner.exe" 0
+SectionEnd
+
+; --- Start Menu Shortcuts ---
+Section "Create Start Menu Shortcuts" SecStartMenu
+    Delete "$SMPROGRAMS\ChatMiner\ChatMiner.lnk"
+    Delete "$SMPROGRAMS\ChatMiner\Uninstall.lnk"
+    CreateDirectory "$SMPROGRAMS\ChatMiner"
+    CreateShortcut "$SMPROGRAMS\ChatMiner\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe" \
+        "" "$INSTDIR\ChatMiner.exe" 0
+    CreateShortcut "$SMPROGRAMS\ChatMiner\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+SectionEnd
+
+; --- Component descriptions ---
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "ChatMiner core application files."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "Create a shortcut on the desktop."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} "Create shortcuts in the Start Menu."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; --- Uninstall Section ---
 Section "Uninstall"

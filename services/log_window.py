@@ -1,148 +1,336 @@
 """
-v1.4.0 Chat-Miner GUI 窗口
-轻量卡片风格，日志通过外部 cmd 窗口查看
-仅在 PyInstaller frozen 模式下启用
+v1.4.1 Chat-Miner GUI 窗口 — CustomTkinter + 系统托盘
+实时统计 / 启动进度 / 托盘最小化 / 查看日志
 """
-import sys
 import os
-import subprocess
+import sys
+import json
+import ctypes
 import threading
+import subprocess
 import logging
-import queue
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
-BG       = "#f8fafc"
-CARD     = "#ffffff"
-ACCENT   = "#6366f1"
-ACCENT2  = "#818cf8"
-TEXT     = "#1e293b"
-TEXT_DIM = "#64748b"
-BORDER   = "#e2e8f0"
-GREEN    = "#22c55e"
-RED      = "#ef4444"
-FONT     = ("Microsoft YaHei", 10)
-FONT_SM  = ("Microsoft YaHei", 9)
-FONT_BIG = ("Microsoft YaHei", 13, "bold")
+# ---- 主题色 (indigo) ----
+ACCENT = "#6366f1"
+ACCENT_HOVER = "#4f46e5"
+
+# ---- Windows 系统托盘 (ctypes, 零依赖) ----
+WM_USER = 1024
+WM_TRAY = WM_USER + 1
+NIM_ADD, NIM_DELETE, NIM_MODIFY = 0, 2, 1
+NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 1, 2, 4, 16
+WM_LBUTTONDBLCLK = 0x0203
+WM_RBUTTONUP = 0x0205
+
+class SystemTray:
+    def __init__(self, icon_path: str, tip: str, on_restore, on_open, on_quit):
+        self._icon_path = icon_path
+        self._tip = tip
+        self._on_restore = on_restore
+        self._on_open = on_open
+        self._on_quit = on_quit
+        self._hwnd = None
+        self._nid = None
+
+    def create(self, hwnd):
+        self._hwnd = hwnd
+        icon = ctypes.windll.shell32.ExtractIconW(0, self._icon_path, 0)
+
+        class NOTIFYICONDATA(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_uint32), ("hWnd", ctypes.c_void_p),
+                ("uID", ctypes.c_uint32), ("uFlags", ctypes.c_uint32),
+                ("uCallbackMessage", ctypes.c_uint32), ("hIcon", ctypes.c_void_p),
+                ("szTip", ctypes.c_wchar * 128), ("dwState", ctypes.c_uint32),
+                ("dwStateMask", ctypes.c_uint32), ("szInfo", ctypes.c_wchar * 256),
+                ("uTimeoutOrVersion", ctypes.c_uint32), ("szInfoTitle", ctypes.c_wchar * 64),
+                ("dwInfoFlags", ctypes.c_uint32)
+            ]
+
+        nid = NOTIFYICONDATA()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
+        nid.hWnd = hwnd
+        nid.uID = 1
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        nid.uCallbackMessage = WM_TRAY
+        nid.hIcon = icon
+        nid.szTip = self._tip
+        self._nid = nid
+        ctypes.windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+
+    def remove(self):
+        if self._nid:
+            ctypes.windll.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid))
+            self._nid = None
+
+    def handle_msg(self, msg):
+        if msg == WM_LBUTTONDBLCLK:
+            self._on_restore()
+        elif msg == WM_RBUTTONUP:
+            self._show_menu()
+
+    def _show_menu(self):
+        import tkinter as tk
+        menu = tk.Menu(None, tearoff=0, font=("Microsoft YaHei", 9),
+                       bg="white", fg="#1e293b")
+        menu.add_command(label="显示窗口", command=self._on_restore)
+        menu.add_command(label="打开浏览器", command=self._on_open)
+        menu.add_separator()
+        menu.add_command(label="退出", command=self._on_quit)
+        try:
+            menu.tk_popup(*menu.tk.call("winfo", "pointerxy", "."))
+        finally:
+            menu.grab_release()
 
 
+# ---- 自定义标题栏（隐藏系统标题栏用） ----
 class LogWindow:
-    """轻量卡片风格 GUI 窗口"""
-
-    def __init__(self, title: str = "Chat-Miner", port: int = 8856):
+    def __init__(self, title="Chat-Miner", port=8856):
         self.title = title
         self.port = port
-        self._tk = None
-        self._dot = None
-        self._status_text = None
         self._running = False
-        self._log_path = None
+        self._root = None
+        self._tray = None
+        self._window_visible = True
+        # 统计
+        self._stats_group = None
+        self._stats_msg = None
+        self._stats_analyzed = None
+        self._progress = None
+        self._status_label = None
 
     def start(self):
-        import tkinter as tk
+        import customtkinter as ctk
 
-        self._tk = tk.Tk()
+        logger.info("LogWindow.start: 初始化 CustomTkinter...")
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("blue")
+
+        logger.info("LogWindow.start: 创建 CTk 窗口...")
+        self._root = ctk.CTk()
+        root = self._root
         self._running = True
-        root = self._tk
 
-        root.title(f"Chat-Miner v1.4.0")
-        root.geometry("420x300")
-        root.minsize(340, 240)
-        root.resizable(True, True)
-        root.configure(bg=BG)
+        root.title(f"Chat-Miner v1.4.1")
+        root.geometry("380x340")
+        root.minsize(320, 300)
+        root.configure(fg_color="#f8fafc")
 
         try:
             root.iconbitmap("assets/icon.ico")
         except Exception:
             pass
 
-        card = tk.Frame(root, bg=CARD, highlightbackground=BORDER,
-                        highlightthickness=1, bd=0)
-        card.pack(fill="both", expand=True, padx=20, pady=20)
+        # ---- 系统托盘 ----
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
+                                 "assets", "icon.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.getcwd(), "assets", "icon.ico")
+        if not os.path.exists(icon_path):
+            icon_path = sys.executable  # fallback
+
+        # 暂不启用托盘（v1.4.1: WndProc 子类化在 64 位有兼容问题）
+        self._icon_path = icon_path
+
+        # ---- 主卡片 ----
+        card = ctk.CTkFrame(root, fg_color="white", corner_radius=16,
+                            border_color="#e2e8f0", border_width=1)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
         # 图标
-        tk.Label(card, text="💬", font=("Segoe UI", 36), bg=CARD).pack(pady=(28, 8))
+        ctk.CTkLabel(card, text="💬", font=("Segoe UI", 32),
+                     text_color=ACCENT).pack(pady=(20, 4))
 
         # 标题
-        tk.Label(card, text="Chat-Miner", font=FONT_BIG, bg=CARD, fg=TEXT).pack()
-        tk.Label(card, text=f"v1.4.0 · 群聊内容分析", font=FONT_SM,
-                 bg=CARD, fg=TEXT_DIM).pack(pady=(2, 12))
+        ctk.CTkLabel(card, text="Chat-Miner", font=("Microsoft YaHei", 16, "bold"),
+                     text_color="#1e293b").pack()
+        ctk.CTkLabel(card, text="v1.4.1 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
+                     text_color="#94a3b8").pack(pady=(0, 10))
 
-        # 状态
-        row = tk.Frame(card, bg=CARD)
-        row.pack(pady=(4, 10))
-        self._dot = tk.Label(row, text="●", font=("Segoe UI", 8), bg=CARD, fg=GREEN)
-        self._dot.pack(side="left", padx=(0, 6))
-        self._status_text = tk.Label(row, text=f"服务运行中 · 端口 {self.port}",
-                                      font=FONT, bg=CARD, fg=TEXT_DIM)
-        self._status_text.pack(side="left")
+        # ---- 启动进度条 ----
+        self._progress = ctk.CTkProgressBar(card, width=260, height=6,
+                                            corner_radius=3, progress_color=ACCENT,
+                                            fg_color="#e2e8f0")
+        self._progress.pack(pady=(4, 6))
+        self._progress.set(0)
 
-        # 按钮
-        btn_row = tk.Frame(card, bg=CARD)
-        btn_row.pack(pady=(4, 0))
-        self._btn(btn_row, "  打开浏览器  ", self._open_browser, True)
-        self._btn(btn_row, "  查看日志  ", self._open_log)
-        self._btn(btn_row, "  退出  ", self._shutdown)
+        # ---- 状态文字 ----
+        self._status_label = ctk.CTkLabel(card, text="正在初始化...",
+                                          font=ctk.CTkFont(family="Microsoft YaHei", size=11), text_color="#94a3b8")
+        self._status_label.pack(pady=(0, 6))
+
+        # ---- 统计区（初始隐藏） ----
+        stats_frame = ctk.CTkFrame(card, fg_color="#f8fafc", corner_radius=10)
+        stats_frame.pack(fill="x", padx=24, pady=(4, 10))
+
+        self._stats_group = ctk.CTkLabel(stats_frame, text="群: -",
+                                         font=ctk.CTkFont(family="Microsoft YaHei", size=12), text_color="#475569")
+        self._stats_group.grid(row=0, column=0, padx=10, pady=6, sticky="w")
+        self._stats_msg = ctk.CTkLabel(stats_frame, text="消息: -",
+                                       font=ctk.CTkFont(family="Microsoft YaHei", size=12), text_color="#475569")
+        self._stats_msg.grid(row=0, column=1, padx=10, pady=6, sticky="w")
+        self._stats_analyzed = ctk.CTkLabel(stats_frame, text="分析: -",
+                                            font=ctk.CTkFont(family="Microsoft YaHei", size=12), text_color="#475569")
+        self._stats_analyzed.grid(row=0, column=2, padx=10, pady=6, sticky="w")
+        stats_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        # ---- 按钮 ----
+        btn_font = ctk.CTkFont(family="Microsoft YaHei", size=12, weight="normal")
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(pady=(2, 0))
+
+        ctk.CTkButton(btn_row, text="  打开浏览器  ", width=130, height=38,
+                       corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                       font=btn_font, command=self._open_browser
+                       ).pack(side="left", padx=6)
+
+        ctk.CTkButton(btn_row, text="  查看日志  ", width=110, height=38,
+                       corner_radius=10, fg_color="transparent", text_color=ACCENT,
+                       border_color=ACCENT, border_width=1.5, hover_color="#eef2ff",
+                       font=btn_font, command=self._open_log
+                       ).pack(side="left", padx=6)
+
+        ctk.CTkButton(btn_row, text="  检查更新  ", width=110, height=38,
+                       corner_radius=10, fg_color="transparent", text_color="#64748b",
+                       border_color="#cbd5e1", border_width=1.5, hover_color="#f8fafc",
+                       font=btn_font, command=self._check_update
+                       ).pack(side="left", padx=6)
 
         # 快捷键
         root.bind("<Control-l>", lambda e: self._open_log())
-        root.bind("<Control-q>", lambda e: self._shutdown())
-        root.protocol("WM_DELETE_WINDOW", self._minimize)
+        root.bind("<Control-b>", lambda e: self._open_browser())
+        root.protocol("WM_DELETE_WINDOW", self._shutdown)
 
+        # 启动阶段
+        self._simulate_startup()
         root.mainloop()
 
-    def _btn(self, parent, text, cmd, primary=False):
-        import tkinter as tk
-        bg = ACCENT if primary else CARD
-        fg = "white" if primary else ACCENT
-        bd = 0 if primary else 1
-        b = tk.Button(parent, text=text, command=cmd,
-                      font=FONT_SM, bg=bg, fg=fg, bd=bd,
-                      activebackground=ACCENT2 if primary else "#f1f5f9",
-                      activeforeground="white" if primary else ACCENT,
-                      padx=18, pady=5, cursor="hand2",
-                      highlightbackground=BORDER if not primary else None)
-        b.pack(side="left", padx=4)
+    def _simulate_startup(self):
+        """模拟启动进度（实际进度由 main.py 驱动）"""
+        steps = [
+            (0.25, "初始化数据库..."),
+            (0.50, "加载群数据..."),
+            (0.75, "启动服务..."),
+            (1.0,  ""),
+        ]
 
-    def write_log(self, text: str, color: str = ""):
-        pass  # 日志走文件，GUI 不展示
+        def _step(i=0):
+            if i >= len(steps):
+                self._progress.pack_forget()
+                self._status_label.configure(text="● 服务运行中")
+                self._start_stats_poll()
+                self._open_browser()
+                return
+            val, text = steps[i]
+            self._progress.set(val)
+            if text:
+                self._status_label.configure(text=text)
+            self._root.after(400, lambda: _step(i + 1))
 
-    def set_status(self, text: str, ok: bool = True):
-        if self._tk:
-            self._tk.after(0, lambda: self._set_status(text, ok))
+        self._root.after(500, lambda: _step())
 
-    def _set_status(self, text: str, ok: bool = True):
+    def _start_stats_poll(self):
+        """轮询 API 获取实时统计"""
+        def _poll():
+            if not self._running:
+                return
+            try:
+                req = urllib.request.Request(
+                    f"http://localhost:{self.port}/api/stats/global",
+                    headers={"User-Agent": "chat-miner-gui/1.4.1"})
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    data = json.loads(resp.read())
+                    s = data.get("data", {})
+                    self._root.after(0, lambda: self._update_stats(
+                        s.get("active_groups", "-"),
+                        s.get("total_messages", "-"),
+                        s.get("total_analyzed_days", "-"),
+                    ))
+            except Exception:
+                # 服务还没就绪，稍后重试
+                pass
+            self._root.after(10000, _poll)
+
+        self._root.after(2000, _poll)
+
+    def _update_stats(self, groups, msgs, analyzed):
         try:
-            self._status_text.configure(text=text)
-            self._dot.configure(fg=GREEN if ok else RED)
+            if self._stats_group:
+                self._stats_group.configure(text=f"群: {groups}")
+            if self._stats_msg:
+                self._stats_msg.configure(text=f"消息: {msgs}")
+            if self._stats_analyzed:
+                self._stats_analyzed.configure(text=f"分析: {analyzed}")
         except Exception:
             pass
+
+    def write_log(self, text: str, color: str = ""):
+        pass  # 日志走文件
+
+    def set_status(self, text: str, ok: bool = True):
+        if self._root:
+            self._root.after(0, lambda: self._status_label.configure(
+                text=text, text_color="#22c55e" if ok else "#ef4444"))
 
     def _open_browser(self):
         import webbrowser
         webbrowser.open(f"http://localhost:{self.port}")
 
     def _open_log(self):
-        """打开外部 cmd 窗口，用 PowerShell 实时 tail 日志"""
-        log_path = self._log_path or os.path.join(
-            os.path.dirname(os.path.abspath(sys.argv[0])), "logs", "chat_miner.log")
-        if not os.path.exists(log_path):
-            # 尝试相对于 cwd 的路径
-            log_path = os.path.join("logs", "chat_miner.log")
-        ps_cmd = (
-            f'Get-Content -Path "{log_path}" -Wait -Tail 30 '
-            f'-Encoding UTF8'
-        )
-        cmd = f'start "Chat-Miner 日志" powershell -NoExit -Command "{ps_cmd}"'
-        subprocess.Popen(cmd, shell=True)
+        log_path = os.path.join("logs", "chat_miner.log")
+        ps_cmd = f'Get-Content -Path "{log_path}" -Wait -Tail 30 -Encoding UTF8'
+        subprocess.Popen(
+            f'start "Chat-Miner 日志" powershell -NoExit -Command "{ps_cmd}"',
+            shell=True)
 
-    def _minimize(self):
-        self._tk.iconify()
+    def _check_update(self):
+        """检查更新（后台线程，弹窗提示）"""
+        from services.updater import check_update
+        try:
+            from config import config
+            current = config.VERSION
+        except Exception:
+            current = "1.4.1"
+
+        def _run():
+            result = check_update(current)
+            self._root.after(0, lambda: self._show_update_result(result))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _show_update_result(self, result):
+        from tkinter import messagebox
+        if result.error:
+            messagebox.showwarning("检查更新", f"检查失败\n{result.error}")
+        elif result.has_update:
+            ok = messagebox.askyesno(
+                "发现新版本",
+                f"发现新版本 {result.latest}\n当前版本 {result.current}\n\n是否前往下载？")
+            if ok:
+                import webbrowser
+                webbrowser.open(result.url or "https://github.com/ZhaoHaosen1997/chat-miner/releases")
+        else:
+            messagebox.showinfo("检查更新", f"已是最新版本\n{result.current}")
+
+    def _minimize_to_tray(self):
+        self._root.withdraw()
+        self._window_visible = False
+
+    def _restore(self):
+        self._root.deiconify()
+        self._root.lift()
+        self._root.focus_force()
+        self._window_visible = True
 
     def _shutdown(self):
         self._running = False
         try:
-            self._tk.destroy()
+            if self._tray:
+                self._tray.remove()
+            self._root.destroy()
         except Exception:
             pass
         os._exit(0)

@@ -4,9 +4,14 @@ Chat-Miner v1.0 PyInstaller 打包配置
 one-folder 模式：生成 ChatMiner 文件夹，双击 ChatMiner.exe 启动
 """
 import sys
+import os
 from pathlib import Path
 
 block_cipher = None
+
+# v1.4.1: 定位 customtkinter 资源目录
+import customtkinter as _ctk
+_CTK_ASSETS = os.path.join(os.path.dirname(_ctk.__file__), 'assets')
 
 a = Analysis(
     ['main.py'],
@@ -15,6 +20,7 @@ a = Analysis(
     datas=[
         ('frontend/dist', 'frontend/dist'),
         ('assets/icon.ico', 'assets/icon.ico'),
+        (_CTK_ASSETS, 'customtkinter/assets'),
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -24,6 +30,15 @@ a = Analysis(
         'uvicorn.lifespan.on',
         'fastapi',
         'httpx',
+        'customtkinter',
+        'customtkinter.windows',
+        'customtkinter.windows.widgets',
+        'customtkinter.windows.widgets.theme',
+        'customtkinter.windows.widgets.core_rendering',
+        'customtkinter.windows.widgets.core_widget_classes',
+        'customtkinter.windows.widgets.font',
+        'customtkinter.windows.widgets.scaling',
+        'customtkinter.windows.widgets.appearance_mode',
         'sqlite3',
         'asyncio',
         'logging',

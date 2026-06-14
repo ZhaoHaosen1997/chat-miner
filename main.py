@@ -165,11 +165,8 @@ if __name__ == "__main__":
             logger.debug("浏览器打开失败: %s", e)
 
     if frozen:
-        # v1.4.0: GUI 模式 — uvicorn 在后台线程，LogWindow 在主线程
-        from services.log_window import LogWindow
-
-        lw = LogWindow(title="Chat-Miner", port=config.PORT)
-        lw._log_path = str(config.LOG_DIR / "chat_miner.log")
+        # v1.4.1: GUI 模式 — uvicorn 后台线程，LogWindow 主线程
+        import traceback
 
         def _run_server():
             uvicorn.run(
@@ -183,16 +180,22 @@ if __name__ == "__main__":
         server_thread = threading.Thread(target=_run_server, daemon=True)
         server_thread.start()
 
-        # 等服务器就绪后打开浏览器
-        def _on_ready():
-            time.sleep(1.5)
-            lw.set_status(f"服务运行中 · 端口 {config.PORT}", ok=True)
-            _open_browser()
-
-        threading.Thread(target=_on_ready, daemon=True).start()
-
-        # 主线程跑 GUI（阻塞直到窗口关闭）
-        lw.start()
+        try:
+            logger.info("正在启动 GUI 窗口...")
+            from services.log_window import LogWindow
+            lw = LogWindow(title="Chat-Miner", port=config.PORT)
+            lw._log_path = str(config.LOG_DIR / "chat_miner.log")
+            logger.info("GUI 窗口已创建，进入事件循环...")
+            lw.start()  # 阻塞，窗口关闭才返回；启动完成后自动打开浏览器
+            logger.info("GUI 窗口已关闭")
+        except Exception as e:
+            logger.error(f"GUI 启动失败: {e}\n{traceback.format_exc()}")
+            # fallback: 阻塞主线程不退出
+            try:
+                while True:
+                    time.sleep(60)
+            except KeyboardInterrupt:
+                pass
 
     else:
         # 开发模式：普通控制台
