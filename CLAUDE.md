@@ -147,9 +147,13 @@ Portrait analysis also excludes ultra-short messages (<2 Chinese chars) and pure
 
 ## 踩坑记录
 
-### bat / nsi 文件禁止中文
+### bat 文件禁止中文
 
-`build.bat`、`installer.nsi` 等 Windows 脚本文件只用 **ASCII/英文**。NSIS makensis 只认 ANSI 编码，中文注释和 Unicode 字符（如 `—` 长破折号）会直接报 `Bad text encoding` 导致构建失败。bat 脚本同理，中文在 cmd 控制台可能乱码。
+`build.bat` 等 bat 脚本只用 **ASCII/英文**，中文在 cmd 控制台可能乱码。
+
+### nsi 文件中文需 GBK 编码
+
+`installer.nsi` 可以使用中文（如 Section 名称、描述），但**文件编码必须为 GBK (ANSI)**，不能是 UTF-8。NSIS makensis 用系统的 ACP 读取脚本，UTF-8 编码的中文会报 `Bad text encoding` 错误。如果在 VS Code 中编辑，点击右下角编码 → "Save with Encoding" → "Chinese Simplified (GB2312)"。
 
 ### app_settings 类型陷阱
 

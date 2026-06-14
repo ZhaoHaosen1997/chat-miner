@@ -396,10 +396,11 @@ class ParsedChat:
         只在 JSON 文件更新时重新解析（比对 mtime）。
         """
         import pickle
-        json_mtime = self.file_path.stat().st_mtime
+        json_exists = self.file_path.exists()
+        json_mtime = self.file_path.stat().st_mtime if json_exists else 0
 
-        # 尝试从 pickle 缓存加载
-        if self._pickle_path.exists():
+        # 尝试从 pickle 缓存加载（JSON 不存在时也允许 pickle 兜底）
+        if self._pickle_path.exists() and (not json_exists or self._pickle_path.stat().st_mtime >= json_mtime):
             try:
                 pickle_mtime = self._pickle_path.stat().st_mtime
                 if pickle_mtime >= json_mtime:

@@ -252,16 +252,14 @@ class LogWindow:
                 with _opener.open(req, timeout=3) as resp:
                     data = json.loads(resp.read())
                     s = data.get("data", {})
-                    self._root.after(0, lambda: self._update_stats(
-                        s.get("active_groups", "-"),
-                        s.get("total_messages", "-"),
-                        s.get("total_analyzed_days", "-"),
-                    ))
+                # 直接同步更新（_poll 已在 tkinter 主线程）
+                self._update_stats(
+                    s.get("active_groups", "-"),
+                    s.get("total_messages", "-"),
+                    s.get("total_analyzed_days", "-"),
+                )
             except Exception as e:
                 logger.warning("GUI 统计轮询失败: %s", e)
-            else:
-                logger.info("GUI 统计已更新: %s个群 %s条消息 %s天已分析",
-                            s.get("active_groups", "?"), s.get("total_messages", "?"), s.get("total_analyzed_days", "?"))
             # v1.5.4: 从 DB 读取轮询间隔，fallback 30s
             try:
                 from models.database import get_app_setting
@@ -281,8 +279,8 @@ class LogWindow:
                 self._stats_msg.configure(text=f"消息: {msgs}")
             if self._stats_analyzed:
                 self._stats_analyzed.configure(text=f"分析: {analyzed}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("GUI 统计标签更新失败: %s", e)
 
     def write_log(self, text: str, color: str = ""):
         pass  # 日志走文件

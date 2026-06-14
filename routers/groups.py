@@ -43,7 +43,8 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
         fp = Path(group["file_path"])
         if not fp.is_absolute():
             fp = config.BASE_DIR / fp  # v1.5.7: 相对路径基于 EXE 目录解析
-        if fp.exists():
+        # JSON 不存在但有 pickle 缓存时也允许加载（parser.load() 会回退到 pickle）
+        if fp.exists() or Path(str(fp) + ".pickle").exists():
             file_path = fp
     if not file_path:
         merged = _find_merged_data(group)
@@ -51,6 +52,9 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
             file_path = merged
 
     if not file_path:
+        logger.warning("群 %s 数据加载失败: file_path=%s 不存在, merged_data也未找到",
+                       group.get("display_name") or group.get("name"),
+                       group.get("file_path", "(无)"))
         return None
 
     chat = load_and_parse(file_path)

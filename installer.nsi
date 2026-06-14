@@ -36,7 +36,7 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
 ; --- Install Section (hidden, always runs) ---
-Section "ChatMiner" SecCore
+Section "主程序" SecCore
     SectionIn RO
     ; Kill running ChatMiner to release file locks before overwrite
     nsExec::Exec 'taskkill /f /im ChatMiner.exe'
@@ -79,14 +79,14 @@ Section "ChatMiner" SecCore
 SectionEnd
 
 ; --- Desktop Shortcut ---
-Section "Create Desktop Shortcut" SecDesktop
+Section "建立桌面快捷方式" SecDesktop
     Delete "$DESKTOP\ChatMiner.lnk"
     CreateShortcut "$DESKTOP\ChatMiner.lnk" "$INSTDIR\ChatMiner.exe" \
         "" "$INSTDIR\ChatMiner.exe" 0
 SectionEnd
 
 ; --- Start Menu Shortcuts ---
-Section "Create Start Menu Shortcuts" SecStartMenu
+Section "建立开始菜单快捷方式" SecStartMenu
     Delete "$SMPROGRAMS\ChatMiner\ChatMiner.lnk"
     Delete "$SMPROGRAMS\ChatMiner\Uninstall.lnk"
     CreateDirectory "$SMPROGRAMS\ChatMiner"
@@ -97,9 +97,9 @@ SectionEnd
 
 ; --- Component descriptions ---
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "ChatMiner core application files."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "Create a shortcut on the desktop."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} "Create shortcuts in the Start Menu."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "ChatMiner 核心应用程序文件。"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "在桌面上创建一个快捷方式。"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} "在开始菜单中创建快捷方式。"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; --- Uninstall Section ---
