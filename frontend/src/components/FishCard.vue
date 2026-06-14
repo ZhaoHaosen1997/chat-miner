@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { X, Dices, Trash2 } from 'lucide-vue-next'
 import { Icon } from '@iconify/vue'
 import EnergyBar from './EnergyBar.vue'
+import FishStatusBubble from './FishStatusBubble.vue'
 
 const props = defineProps({
   fish: Object,
@@ -114,7 +115,10 @@ function confirmDelete() {
             <span v-else>{{ displayEmoji }}</span>
           </div>
           <div>
-            <h2 class="text-lg font-bold text-slate-800">{{ fish.fish_name }}</h2>
+            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-1">
+              {{ fish.fish_name }}
+              <FishStatusBubble :status="fish.daily_status || ''" />
+            </h2>
             <div class="flex items-center gap-2 mt-1">
               <span class="text-sm text-slate-500">{{ speciesInfo.name || fish.species }}</span>
               <span class="px-1.5 py-0.5 rounded text-xs font-medium text-white"

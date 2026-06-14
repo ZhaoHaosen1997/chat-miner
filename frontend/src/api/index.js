@@ -166,6 +166,12 @@ export const touchFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/touch`, { method: 'POST' })
 export const restFish = (gid, wxid) =>                          // v1.16.0
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/rest`, { method: 'POST' })
+export const getPondLog = (gid, limit = 30) =>                  // v1.16.1
+  request(`/groups/${gid}/fishpond/pond-log?limit=${limit}`)
+export const triggerPondEvent = (gid) =>                        // v1.16.1
+  request(`/groups/${gid}/fishpond/trigger-event`, { method: 'POST' })
+export const getPondTreasury = (gid) =>                         // v1.16.1
+  request(`/groups/${gid}/fishpond/treasury`)
 export const exploreFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/explore`, { method: 'POST' })
 export const showoffFish = (gid, wxid) =>

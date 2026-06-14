@@ -432,7 +432,9 @@ def init_db():
         _migrate_v1_5_4(conn)
         # v1.16.0: 静默鱼塘 — 精力系统 + 性格系统 + Emoji 多态
         _migrate_v1_16_0(conn)
-    # 注：cleanup_old_logs() 移至 main.py lifespan，在 load_from_db() 之后执行
+        # v1.16.1: 鱼塘金库
+        _migrate_v1_16_1(conn)
+    # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
 
@@ -599,6 +601,30 @@ def _migrate_v1_16_0(conn):
         logger.info("DB migrate v1.16.0: added fish_pond.emoji_variant")
 
 
+def _migrate_v1_16_1(conn):
+    """v1.16.1: 鱼塘金库 + 被动事件冷却追踪"""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pond_treasury (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL UNIQUE,
+            balance INTEGER DEFAULT 0,
+            total_earned INTEGER DEFAULT 0,
+            total_spent INTEGER DEFAULT 0,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS pond_treasury_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+    """)
+    logger.info("DB migrate v1.16.1: pond_treasury tables ready")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -730,6 +756,13 @@ _SETTINGS_DEFS = [
          "鱼塘精力每轮恢复量"),
         ("pond_touch_daily_limit", "5", "int",
          "摸鱼每日次数上限"),
+        # v1.16.1: 静默鱼塘被动事件 + 金库
+        ("pond_auto_events_enabled", "false", "bool",
+         "静默鱼塘全局开关"),
+        ("pond_event_interval_minutes", "30", "int",
+         "被动事件间隔(分钟)"),
+        ("pond_treasury_tax_rate", "5", "int",
+         "金库税率(%，全群鳞币总和百分比)"),
         # 日志清理
         ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
          "分析日志保留天数"),
@@ -1515,13 +1548,57 @@ def get_fish_traits(group_id: int, wxid: str) -> list:
 
 
 def get_total_coins_in_group(group_id: int) -> int:
-    """获取群内所有鳞币总和（v1.16.1 金库系统使用）"""
+    """获取群内所有鳞币总和"""
     with db() as conn:
         row = conn.execute(
             "SELECT COALESCE(SUM(balance), 0) FROM scale_coin_wallet WHERE group_id = ?",
             (group_id,)
         ).fetchone()
     return row[0] if row else 0
+
+
+# ==================== v1.16.1: 鱼塘金库 CRUD ====================
+
+def get_treasury(group_id: int) -> dict:
+    """获取金库余额，不存在则返回默认值"""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM pond_treasury WHERE group_id = ?", (group_id,)
+        ).fetchone()
+    if row:
+        return dict(row)
+    return {"group_id": group_id, "balance": 0, "total_earned": 0, "total_spent": 0}
+
+
+def add_treasury(group_id: int, amount: int, reason: str, desc: str = ""):
+    """金库收支（正=收入，负=支出），自动写流水"""
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO pond_treasury (group_id, balance, total_earned, total_spent)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(group_id) DO UPDATE SET
+               balance = CASE WHEN ? >= 0 THEN balance + ? ELSE balance + ? END,
+               total_earned = CASE WHEN ? >= 0 THEN total_earned + ? ELSE total_earned END,
+               total_spent = CASE WHEN ? < 0 THEN total_spent + ? ELSE total_spent END""",
+            (group_id, max(0, amount), max(0, amount), max(0, -amount),
+             amount, amount, amount, amount, amount, amount, amount)
+        )
+        conn.execute(
+            """INSERT INTO pond_treasury_log (group_id, amount, reason, description)
+               VALUES (?, ?, ?, ?)""",
+            (group_id, amount, reason, desc)
+        )
+
+
+def get_treasury_log(group_id: int, limit: int = 20) -> list[dict]:
+    """获取金库流水"""
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM pond_treasury_log WHERE group_id = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (group_id, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ==================== 鱼塘事件 CRUD ====================
@@ -1975,6 +2052,10 @@ def load_app_settings_to_config():
         # v1.16.0: 鱼塘精力系统
         "pond_energy_regen_amount": "POND_ENERGY_REGEN_AMOUNT",
         "pond_touch_daily_limit": "POND_TOUCH_DAILY_LIMIT",
+        # v1.16.1: 静默鱼塘
+        "pond_auto_events_enabled": "POND_AUTO_EVENTS_ENABLED",
+        "pond_event_interval_minutes": "POND_EVENT_INTERVAL_MINUTES",
+        "pond_treasury_tax_rate": "POND_TREASURY_TAX_RATE",
         # 日志清理
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",

@@ -11,6 +11,7 @@ import {
   Plus, Pencil, Trash2, Check, X, Loader2,
   Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles,
   ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio, FileText, Settings2, ClipboardList,
+  Fish,
 } from 'lucide-vue-next'
 import TaskHistory from './TaskHistory.vue'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt, getDefaultPrompt } from '../api/index.js'
@@ -97,7 +98,28 @@ async function savePollSetting(key, seconds) {
   // 同步到 localStorage 供 Dashboard/Portraits 直接读取
   localStorage.setItem(key, String(ms))
 }
-onMounted(loadPollSettings)
+
+// v1.16.1: 静默鱼塘设置
+const pondExpanded = ref(false); const pondEnabled = ref(false)
+const pondInterval = ref(30); const pondTaxRate = ref(5)
+async function loadPondSettings() {
+  try {
+    const settings = await getAppSettings()
+    const map = {}
+    for (const s of settings) map[s.key] = { value:s.value, value_type:s.value_type }
+    if (map.pond_auto_events_enabled) pondEnabled.value = map.pond_auto_events_enabled.value === 'true'
+    if (map.pond_event_interval_minutes) pondInterval.value = parseInt(map.pond_event_interval_minutes.value) || 30
+    if (map.pond_treasury_tax_rate) pondTaxRate.value = parseInt(map.pond_treasury_tax_rate.value) || 5
+  } catch (e) { console.error('加载鱼塘设置失败:', e) }
+}
+async function togglePondEnabled() {
+  pondEnabled.value = !pondEnabled.value
+  await updateAppSetting('pond_auto_events_enabled', String(pondEnabled.value))
+}
+async function savePondSetting(key, val) {
+  await updateAppSetting(key, String(val))
+}
+onMounted(() => { loadPollSettings(); loadPondSettings() })
 
 // ---- State ----
 const configs = ref([])
@@ -757,6 +779,39 @@ onMounted(async () => {
           <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS = Math.max(5, Number($event.target.value)); savePollSetting('poll_interval_dashboard_ms', pollDashboardS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS = Math.max(5, Number($event.target.value)); savePollSetting('poll_interval_portraits_ms', pollPortraitsS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS = Math.max(10, Number($event.target.value)); savePollSetting('poll_interval_stats_s', pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div></div></div>
+    </div>
+
+    <!-- v1.16.1: 静默鱼塘 -->
+    <div class="card mb-4 overflow-hidden">
+      <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100 cursor-pointer"
+        @click="pondExpanded = !pondExpanded">
+        <div class="w-1 h-5 rounded-full bg-cyan-400"></div>
+        <Fish :size="16" class="text-cyan-500" />
+        <span class="text-sm font-semibold text-slate-700">静默鱼塘</span>
+        <span class="text-xs text-slate-400 ml-auto">{{ pondExpanded ? '收起' : '展开' }}</span>
+      </div>
+      <div v-if="pondExpanded" class="p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-slate-700">全局开关</label>
+            <p class="text-xs text-slate-400">开启后鱼塘自动运转，不再依赖指令</p>
+          </div>
+          <button @click="togglePondEnabled"
+            :class="['w-11 h-6 rounded-full relative transition', pondEnabled ? 'bg-cyan-500' : 'bg-slate-200']">
+            <div :class="['w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition', pondEnabled ? 'right-0.5' : 'left-0.5']"></div>
+          </button>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">事件间隔 (分钟)</label>
+          <input type="number" :value="pondInterval" @change="pondInterval = Math.max(5, Math.min(180, Number($event.target.value))); savePondSetting('pond_event_interval_minutes', pondInterval)" min="5" max="180" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
+          <p class="text-[10px] text-slate-400 mt-1">建议 15-60 分钟。间隔越短事件越密集</p>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">金库税率 (%)</label>
+          <input type="number" :value="pondTaxRate" @change="pondTaxRate = Math.max(1, Math.min(20, Number($event.target.value))); savePondSetting('pond_treasury_tax_rate', pondTaxRate)" min="1" max="20" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
+          <p class="text-[10px] text-slate-400 mt-1">每次事件触发时，全群鳞币总和的百分比进入金库</p>
+        </div>
+      </div>
     </div>
 
     <!-- ====== 弹窗 ====== -->

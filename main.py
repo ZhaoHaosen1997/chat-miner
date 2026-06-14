@@ -95,18 +95,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"预加载失败（不影响正常使用）: {e}")
 
-    # 启动 WeFlow 定时调度
+        # 启动 WeFlow 定时调度
     try:
         from services.scheduler import init_scheduler
         init_scheduler()
     except Exception as e:
         logger.warning(f"WeFlow 调度器初始化失败: {e}")
+    # v1.16.1: 启动静默鱼塘调度器
+    try:
+        from services.scheduler import init_pond_scheduler
+        init_pond_scheduler()
+    except Exception as e:
+        logger.warning(f"鱼塘调度器初始化失败: {e}")
 
     logger.info("=" * 50)
     yield
     # 关闭调度器
     try:
-        from services.scheduler import shutdown_scheduler
+        from services.scheduler import shutdown_scheduler, shutdown_pond_scheduler
+        shutdown_pond_scheduler()
         shutdown_scheduler()
     except Exception as e:
         logger.debug("关闭调度器失败: %s", e)

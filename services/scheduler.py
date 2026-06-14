@@ -156,3 +156,76 @@ async def run_scheduled_sync():
     logger.info(f"[WeFlow Scheduler] 完成: {synced} 群有新消息, "
                 f"{failed} 失败, {skipped} 未开启, "
                 f"{len(groups) - synced - failed - skipped} 无变化")
+
+
+# ==================== v1.16.1: 静默鱼塘调度器 ====================
+
+async def run_pond_events():
+    """被动事件 job：遍历所有群触发随机事件"""
+    from models.database import list_groups
+    groups = list_groups()
+    if not groups:
+        return
+
+    triggered = 0
+    for g in groups:
+        try:
+            from services.passive_events import trigger_passive_events
+            results = trigger_passive_events(g["id"])
+            if results:
+                triggered += 1
+        except Exception as e:
+            logger.warning(f"鱼塘事件触发失败 group={g['id']}: {e}")
+
+    if triggered:
+        logger.info(f"[Pond Scheduler] {triggered}/{len(groups)} 个群触发被动事件")
+
+
+def init_pond_scheduler():
+    """启动鱼塘被动事件调度器"""
+    if not getattr(config, "POND_AUTO_EVENTS_ENABLED", False):
+        logger.info("静默鱼塘未开启，跳过调度器")
+        return
+
+    interval_minutes = max(1, getattr(config, "POND_EVENT_INTERVAL_MINUTES", 30))
+
+    scheduler.add_job(
+        run_pond_events,
+        trigger="interval",
+        minutes=interval_minutes,
+        id="pond_events",
+        name="鱼塘被动事件",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+
+    if not scheduler.running:
+        scheduler.start()
+
+    logger.info(f"鱼塘调度器已启动: 每 {interval_minutes} 分钟触发一次被动事件")
+
+
+def shutdown_pond_scheduler():
+    """停止鱼塘调度器"""
+    job = scheduler.get_job("pond_events")
+    if job:
+        job.remove()
+        logger.info("鱼塘调度器已停止")
+
+
+def reload_pond_scheduler():
+    """配置变更后重载鱼塘调度器"""
+    if not getattr(config, "POND_AUTO_EVENTS_ENABLED", False):
+        if scheduler.get_job("pond_events"):
+            shutdown_pond_scheduler()
+        return
+
+    job = scheduler.get_job("pond_events")
+    new_interval = max(1, getattr(config, "POND_EVENT_INTERVAL_MINUTES", 30))
+
+    if job:
+        if job.trigger.interval.total_seconds() != new_interval * 60:
+            job.reschedule(trigger="interval", minutes=new_interval)
+            logger.info(f"鱼塘事件间隔已更新: {new_interval}min")
+    else:
+        init_pond_scheduler()

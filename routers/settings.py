@@ -262,12 +262,22 @@ def _reload_weflow_scheduler():
         logger.debug("WeFlow 调度器重载跳过: %s", e)
 
 
+def _reload_pond_scheduler():
+    """鱼塘设置变更后重载调度器"""
+    try:
+        from services.scheduler import reload_pond_scheduler
+        reload_pond_scheduler()
+    except Exception as e:
+        logger.debug("鱼塘调度器重载跳过: %s", e)
+
+
 @router.put("/app-settings")
 async def api_update_app_setting(body: AppSettingUpdate):
     """更新单个应用设置，即时生效"""
     upsert_app_setting(body.key, body.value)
     config.load_from_db()
     _reload_weflow_scheduler()
+    _reload_pond_scheduler()
     return {
         "code": 200,
         "message": f"设置 '{body.key}' 已更新，即时生效",
@@ -281,6 +291,7 @@ async def api_update_app_settings_batch(body: AppSettingsBatchUpdate):
     upsert_app_settings_batch(body.updates)
     config.load_from_db()
     _reload_weflow_scheduler()
+    _reload_pond_scheduler()
     return {
         "code": 200,
         "message": f"已更新 {len(body.updates)} 项设置",

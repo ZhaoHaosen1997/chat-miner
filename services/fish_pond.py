@@ -1416,6 +1416,20 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
     regen_energy(group_id, wxid)
     events.append({"type": "energy_regen", "amount": _get_energy(group_id, wxid)[0]})
 
+    # v1.16.1: 生成今日状态语
+    try:
+        from services.passive_events import generate_daily_status
+        today_evts = db.get_fish_events(group_id, wxid, 20)
+        status = generate_daily_status(wxid, today_evts)
+        if status:
+            db.update_fish_field(group_id, wxid, "personality_traits",
+                               fish.get("personality_traits", "[]"))
+            # 状态语存入 fish_events
+            db.add_fish_event(group_id, wxid, "daily_status", {"status": status})
+            events.append({"type": "daily_status", "text": status})
+    except Exception:
+        pass
+
     return {"settled": True, "events": events}
 
 
@@ -1454,11 +1468,17 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
         if len(low_happy) >= 1 and len(alive_fish) >= 3:
             victim = rng.choice(low_happy)
             db.mark_fish_dead(group_id, victim["wxid"])
+            # v1.16.1: 附加遗言
+            from services.passive_events import FISH_LAST_WORDS
+            import random as _random
+            last_words = _random.choice(FISH_LAST_WORDS)
             db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
-                "victim": victim["fish_name"], "date": date_str
+                "victim": victim["fish_name"], "date": date_str,
+                "last_words": last_words,
             })
             results.append({"wxid": victim["wxid"], "shark_attack": True,
-                           "victim": victim["fish_name"]})
+                           "victim": victim["fish_name"],
+                           "last_words": last_words})
 
     # 生成黑市
     black_market = generate_black_market(group_id, date_str)
@@ -1510,6 +1530,13 @@ def get_pond_state(group_id: int, reference_date: str = None) -> dict:
     # 最近事件
     recent_events = db.get_fish_events(group_id, limit=10)
 
+    # v1.16.1: 金库 + 自动事件状态
+    from config import config as _cfg
+    try:
+        treasury = db.get_treasury(group_id)
+    except Exception:
+        treasury = {"balance": 0, "total_earned": 0, "total_spent": 0}
+
     return {
         "weather": weather,
         "fish": enriched,
@@ -1518,6 +1545,8 @@ def get_pond_state(group_id: int, reference_date: str = None) -> dict:
         "leaderboards": leaderboards,
         "coin_leaders": coin_leaders,
         "recent_events": recent_events,
+        "auto_events_enabled": getattr(_cfg, "POND_AUTO_EVENTS_ENABLED", False),
+        "treasury": treasury,
     }
 
 

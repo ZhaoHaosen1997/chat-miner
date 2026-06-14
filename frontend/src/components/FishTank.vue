@@ -117,11 +117,19 @@ function getAnimation(f) {
       </div>
     </div>
 
-    <!-- Dead fish memorial -->
+    <!-- Dead fish memorial v1.16.1 -->
     <div v-if="deadFish.length" class="bg-slate-800/90 p-3 border-t border-slate-700">
-      <p class="text-xs text-slate-400">
-        🪦 纪念: <span v-for="(f, i) in deadFish" :key="i" class="text-slate-500">
-          {{ f.fish_name }}{{ i < deadFish.length - 1 ? ' · ' : '' }}
+      <p class="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
+        🪦 纪念:
+        <span v-for="(f, i) in deadFish" :key="i"
+          class="text-slate-500 cursor-help group relative">
+          {{ f.fish_name?.replace(/的.*/, '') || f.fish_name }}
+          <span v-if="f.death_info"
+            class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block
+                   bg-slate-700 text-slate-200 text-xs rounded px-2 py-1 shadow whitespace-nowrap max-w-56 text-center z-50">
+            {{ f.death_info }}
+          </span>
+          {{ i < deadFish.length - 1 ? '·' : '' }}
         </span>
       </p>
     </div>

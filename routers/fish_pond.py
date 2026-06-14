@@ -56,6 +56,36 @@ async def settle_pond(group_id: int, body: SettleBody = SettleBody()):
     return {"code": 200, "message": "结算完成", "data": result}
 
 
+# ---- v1.16.1: 被动事件 + 金库 ----
+
+
+@router.get("/pond-log")
+def get_pond_log(group_id: int, limit: int = 30):
+    """获取鱼塘事件日志（含被动事件和风味文本）"""
+    events = db.get_fish_events(group_id, limit=limit)
+    # 按时间正序（最近在最后）
+    events.reverse()
+    return {"code": 200, "message": "ok", "data": events}
+
+
+@router.post("/trigger-event")
+async def trigger_pond_event(group_id: int):
+    """手动触发一次被动事件（测试用/塘主特权）"""
+    from services.passive_events import trigger_passive_events
+    results = await asyncio.to_thread(trigger_passive_events, group_id)
+    return {"code": 200, "message": f"触发 {len(results)} 个事件", "data": results}
+
+
+@router.get("/treasury")
+def get_treasury_endpoint(group_id: int):
+    """查看金库余额 + 近期流水"""
+    treasury = db.get_treasury(group_id)
+    log_entries = db.get_treasury_log(group_id, 20)
+    return {"code": 200, "message": "ok", "data": {
+        "treasury": treasury, "log": log_entries,
+    }}
+
+
 # ---- 鱼塘日报 ----
 
 @router.post("/generate-report")
