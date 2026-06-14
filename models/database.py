@@ -375,8 +375,8 @@ def init_db():
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_portrait_versions_unique "
                     "ON portrait_versions(group_id, member_id, version)"
                 )
-            except Exception:
-                pass  # 已存在则跳过
+            except Exception as e:
+                logger.debug("创建索引失败(可能已存在): %s", e)
         # v0.9.3: 装备栏
         cur = conn.execute("PRAGMA table_info(fish_pond)")
         cols = {row[1] for row in cur.fetchall()}

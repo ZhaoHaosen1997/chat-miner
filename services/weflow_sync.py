@@ -162,8 +162,8 @@ def _get_last_message_timestamp(group_id: int) -> int:
         chat = get_chat_cache(group_id)
         if chat and chat.messages:
             return max(m.get("createTime", 0) for m in chat.messages)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("从内存缓存读取最后消息时间失败: %s", e)
 
     # 回退：读磁盘文件
     merged_path = _get_merged_data_path(group_id)
@@ -174,8 +174,8 @@ def _get_last_message_timestamp(group_id: int) -> int:
             messages = data.get("messages", [])
             if messages:
                 return max(m.get("createTime", 0) for m in messages)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("从磁盘读取最后消息时间失败: %s", e)
 
     return 0
 
@@ -307,8 +307,8 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
         try:
             with open(merged_path, "r", encoding="utf-8") as f:
                 existing_messages = json.load(f).get("messages", [])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("读取已有合并数据失败: %s", e)
 
     merge_result = merge_chat_data(existing_messages, new_messages)
     added = merge_result["added"]
@@ -405,8 +405,8 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
     try:
         from routers.groups import _chat_cache
         _chat_cache.pop(group_id, None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("清除内存缓存失败: %s", e)
 
     if task:
         task.finish(success=True,
@@ -425,7 +425,8 @@ def _load_existing_senders(merged_path: Path) -> list[dict]:
     try:
         with open(merged_path, "r", encoding="utf-8") as f:
             return json.load(f).get("senders", [])
-    except Exception:
+    except Exception as e:
+        logger.debug("读取已有发送者列表失败: %s", e)
         return []
 
 

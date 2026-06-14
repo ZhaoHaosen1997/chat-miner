@@ -258,7 +258,10 @@ class LogWindow:
                         s.get("total_analyzed_days", "-"),
                     ))
             except Exception as e:
-                logger.debug("GUI 统计轮询失败: %s", e)
+                logger.warning("GUI 统计轮询失败: %s", e)
+            else:
+                logger.info("GUI 统计已更新: %s个群 %s条消息 %s天已分析",
+                            s.get("active_groups", "?"), s.get("total_messages", "?"), s.get("total_analyzed_days", "?"))
             # v1.5.4: 从 DB 读取轮询间隔，fallback 30s
             try:
                 from models.database import get_app_setting

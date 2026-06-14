@@ -41,7 +41,7 @@ function connect() {
         emit('done', data)
         eventSource?.close()
       }
-    } catch (e) { /* ignore parse errors */ }
+    } catch (e) { console.error('SSE数据解析失败:', e) }
   }
 
   eventSource.onerror = () => {
@@ -78,7 +78,7 @@ async function confirmCancel() {
   showCancelConfirm.value = false
   try {
     await fetch(`/api/tasks/${props.taskId}`, { method: 'DELETE' })
-  } catch { /* ignore network errors */ }
+  } catch (e) { console.error('取消任务请求失败:', e) }
   // 不主动关闭 EventSource，等待后端推送 cancelled 事件
   // 兜底：3s 后若未收到 cancelled，强制清理
   setTimeout(() => {

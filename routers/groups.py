@@ -68,7 +68,6 @@ def _find_merged_data(group: dict) -> Path | None:
         if candidate.exists():
             return candidate
     # 2. data 目录下按 import_{群名} 查找
-    from config import config
     for subdir in config.DATA_DIR.iterdir():
         if subdir.is_dir() and subdir.name.startswith("import_"):
             candidate = subdir / "merged_data.json"

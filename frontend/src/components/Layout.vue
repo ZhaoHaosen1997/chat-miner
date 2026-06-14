@@ -115,7 +115,7 @@ onMounted(async () => {
   try {
     const health = await apiGet('/health')
     appVersion.value = health?.version || ''
-  } catch (e) { /* ignore */ }
+  } catch (e) { console.error('获取版本号失败:', e) }
 })
 
 const navItems = [

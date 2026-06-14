@@ -260,7 +260,7 @@ async function sendCommand() {
       fish_info: msgEntry.result?.fish || null,
       battle_winner: msgEntry.battleWinner || '',
       error: msgEntry.error || '',
-    }).catch(() => {})
+    }).catch(e => console.error('鱼塘指令记录失败:', e))
   }
 }
 

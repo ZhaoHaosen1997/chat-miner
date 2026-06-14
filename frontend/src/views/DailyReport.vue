@@ -36,7 +36,7 @@ async function reanalyze() {
   reanalyzing.value = true
   try {
     // 删除旧报告
-    try { await deleteReport(currentGroup.value.id, props.date) } catch(e) {}
+    try { await deleteReport(currentGroup.value.id, props.date) } catch(e) { console.error('删除报告失败:', e) }
     // 触发重分析
     const result = await analyzeDateAsync(currentGroup.value.id, props.date)
     if (result.task_id) {

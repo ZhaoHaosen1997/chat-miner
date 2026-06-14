@@ -8,6 +8,8 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import config
+
+logger = logging.getLogger(__name__)
 from models.database import save_task_record
 
 logger = logging.getLogger(__name__)
@@ -74,8 +76,8 @@ def _update_sync_status(group_id: int, result: str):
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), result, group_id)
         )
         conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("更新同步时间戳失败: %s", e)
     finally:
         if conn:
             conn.close()

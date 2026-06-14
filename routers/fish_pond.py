@@ -3,7 +3,10 @@
 """
 import json
 import asyncio
+import logging
 from fastapi import APIRouter, HTTPException, Path
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 
 from services import fish_pond as fp
@@ -444,7 +447,8 @@ def parse_commands(group_id: int):
         evt = dict(evt)
         try:
             ed = json.loads(evt["event_data"]) if isinstance(evt["event_data"], str) else evt["event_data"]
-        except Exception:
+        except Exception as e:
+            logger.debug("事件数据 JSON 解析失败: %s", e)
             ed = {}
         # 从 event_data 还原指令信息
         cmd_text = ed.get("command", "")

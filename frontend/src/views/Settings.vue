@@ -52,7 +52,7 @@ async function loadPrompts() {
 async function openPromptCreate() {
   editingPromptId.value = null
   let defaultText = ''
-  try { const r = await getDefaultPrompt(promptType.value); defaultText = r.system_prompt || '' } catch {}
+  try { const r = await getDefaultPrompt(promptType.value); defaultText = r.system_prompt || '' } catch (e) { console.error('获取默认提示词失败:', e) }
   promptForm.value = { name:'', system_prompt: defaultText, is_default:false }
   showPromptForm.value = true
 }
@@ -87,7 +87,7 @@ async function loadPollSettings() {
     if (map.poll_interval_dashboard_ms) pollDashboardS.value = Math.round(parseInt(map.poll_interval_dashboard_ms.value)/1000) || 10
     if (map.poll_interval_portraits_ms) pollPortraitsS.value = Math.round(parseInt(map.poll_interval_portraits_ms.value)/1000) || 10
     if (map.poll_interval_stats_s) pollStatsS.value = parseInt(map.poll_interval_stats_s.value) || 30
-  } catch {}
+  } catch (e) { console.error('加载轮询设置失败:', e) }
 }
 async function savePollSetting(key, seconds) {
   // v1.5.5: 负值兜底 + 最小值限制

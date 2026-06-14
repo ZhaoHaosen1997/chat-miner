@@ -105,8 +105,8 @@ async def lifespan(app: FastAPI):
     try:
         from services.scheduler import shutdown_scheduler
         shutdown_scheduler()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("关闭调度器失败: %s", e)
     logger.info("Chat-Miner 已关闭")
 
 

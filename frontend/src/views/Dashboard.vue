@@ -117,7 +117,7 @@ async function loadTaskProgress() {
     if (datesArr) dates.value = Array.isArray(datesArr) ? datesArr : []
     const histArr = h.status === 'fulfilled' ? h.value : null
     if (histArr) taskHistory.value = Array.isArray(histArr) ? histArr : []
-  } catch (e) { /* silent */ }
+  } catch (e) { console.error('Dashboard轮询失败:', e) }
 }
 
 async function loadAll(silent = false) {

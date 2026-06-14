@@ -68,7 +68,8 @@ class WeFlowClient:
         try:
             data = self._get("/health")
             return data.get("status") == "ok"
-        except Exception:
+        except Exception as e:
+            logger.warning("WeFlow 健康检查失败: %s", e)
             return False
 
     # ---- 会话列表 ----

@@ -56,5 +56,6 @@ def _compare_versions(latest: str, current: str) -> bool:
         l = tuple(int(x) for x in latest.split("."))
         c = tuple(int(x) for x in current.split("."))
         return l > c
-    except Exception:
+    except Exception as e:
+        logger.debug("版本号解析失败 (%s vs %s): %s", latest, current, e)
         return latest != current

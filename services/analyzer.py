@@ -145,8 +145,10 @@ def _extract_json(text: str) -> Optional[dict]:
     try:
         repaired = _repair_json_text(text)
         return json.loads(repaired)
-    except (json.JSONDecodeError, Exception):
+    except json.JSONDecodeError:
         pass
+    except Exception as e:
+        logger.debug("JSON 修复解析异常: %s", e)
 
     # 尝试 3：提取 Markdown 代码块 ```json ... ```
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
@@ -157,8 +159,10 @@ def _extract_json(text: str) -> Optional[dict]:
         except json.JSONDecodeError:
             try:
                 return json.loads(_repair_json_text(block))
-            except (json.JSONDecodeError, Exception):
+            except json.JSONDecodeError:
                 pass
+            except Exception as e:
+                logger.debug("JSON 代码块修复解析异常: %s", e)
 
     # 尝试 4：找到第一个 {，然后从后往前找 }，逐步缩短直到解析成功
     start = text.find("{")
@@ -170,8 +174,10 @@ def _extract_json(text: str) -> Optional[dict]:
             except json.JSONDecodeError:
                 try:
                     return json.loads(_repair_json_text(text[start:end + 1]))
-                except (json.JSONDecodeError, Exception):
+                except json.JSONDecodeError:
                     pass
+                except Exception as e:
+                    logger.debug("JSON 截取修复解析异常: %s", e)
                 end = text.rfind("}", start, end)  # 往前找上一个 }
 
     return None
