@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, inject, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations, getPersonas, getCrossGroupWxids, autoLinkPersonas } from '../api/index.js'
-import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2, LayoutGrid, Users, Link2, ArrowRight } from 'lucide-vue-next'
+import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations, getPersonas, getCrossGroupWxids, autoLinkPersonas, manualLinkMembers, listGroups } from '../api/index.js'
+import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2, LayoutGrid, Users, Link2, ArrowRight, Plus, Search, X } from 'lucide-vue-next'
 const router = useRouter()
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
@@ -32,12 +32,79 @@ async function loadCrossGroup() {
   finally { crossLoading.value = false }
 }
 
+function platformLabel(platform, wxid) {
+  if (platform === 'wechat') return '微信'
+  if (platform === 'qq') return 'QQ'
+  if (wxid?.startsWith('wxid_')) return '微信'
+  if (wxid?.startsWith('u_') && !wxid?.includes('@chatroom')) return 'QQ'
+  return '未知'
+}
+
 async function doAutoLink() {
   try {
     await autoLinkPersonas()
     await loadCrossGroup()
   } catch (e) { console.error(e) }
 }
+
+// v1.5.0: 手动关联弹窗
+const showManualLink = ref(false)
+const linkGroups = ref([])
+const linkGroupA = ref(null)
+const linkGroupB = ref(null)
+const linkMembersA = ref([])
+const linkMembersB = ref([])
+const linkMemberA = ref(null)
+const linkMemberB = ref(null)
+const linkLoading = ref(false)
+const linkError = ref('')
+
+async function openManualLink() {
+  linkError.value = ''
+  linkMemberA.value = null
+  linkMemberB.value = null
+  linkMembersA.value = []
+  linkMembersB.value = []
+  try {
+    linkGroups.value = await listGroups()
+  } catch (e) { linkGroups.value = [] }
+  showManualLink.value = true
+}
+
+async function onLinkGroupChange(side) {
+  const gid = side === 'A' ? linkGroupA.value : linkGroupB.value
+  try {
+    const members = gid ? await getMembers(Number(gid)) : []
+    if (side === 'A') linkMembersA.value = members
+    else linkMembersB.value = members
+  } catch (e) {
+    if (side === 'A') linkMembersA.value = []
+    else linkMembersB.value = []
+  }
+}
+
+async function doManualLink() {
+  if (!linkMemberA.value || !linkMemberB.value) {
+    linkError.value = '请选择两个成员'
+    return
+  }
+  if (linkMemberA.value === linkMemberB.value) {
+    linkError.value = '不能关联同一个成员'
+    return
+  }
+  linkLoading.value = true
+  linkError.value = ''
+  try {
+    await manualLinkMembers(Number(linkMemberA.value), Number(linkMemberB.value))
+    showManualLink.value = false
+    await loadCrossGroup()
+  } catch (e) {
+    linkError.value = e.message || '关联失败'
+  } finally {
+    linkLoading.value = false
+  }
+}
+
 const refreshing = ref(null)      // 单个刷新的 memberId
 const viewMode = ref('cards')     // 'cards' | 'network'
 const batchAnalyzing = ref(false)
@@ -365,26 +432,47 @@ const unanalyzedCount = computed(() =>
         <Users class="w-12 h-12 text-slate-200 mx-auto mb-3" />
         <p class="text-sm text-slate-500 mb-2">暂无跨群身份</p>
         <p class="text-xs text-slate-400 mb-4">同一个 wxid 出现在多个群时会自动发现</p>
-        <button @click="doAutoLink"
-                class="text-sm text-indigo-500 hover:text-indigo-600 font-medium">
-          扫描自动关联
-        </button>
+        <div class="flex items-center justify-center gap-3">
+          <button @click="doAutoLink"
+                  class="text-sm text-indigo-500 hover:text-indigo-600 font-medium">
+            扫描自动关联
+          </button>
+          <span class="text-slate-300">|</span>
+          <button @click="openManualLink"
+                  class="text-sm text-indigo-500 hover:text-indigo-600 font-medium flex items-center gap-1">
+            <Plus class="w-3.5 h-3.5" />手动关联
+          </button>
+        </div>
       </div>
       <div v-else class="space-y-4">
         <!-- 已关联 Personas -->
         <div v-if="personas.length" class="card p-4">
-          <h3 class="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
-            <Link2 class="w-4 h-4 text-amber-500" />已关联身份 ({{ personas.length }})
-          </h3>
-          <div class="space-y-2">
-            <div v-for="p in personas" :key="p.id"
-                 class="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer"
-                 @click="$router.push(`/portrait/${p.members?.[0]?.id}?group_id=${p.members?.[0]?.group_id}`)">
-              <div class="flex items-center gap-3">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <Link2 class="w-4 h-4 text-amber-500" />已关联身份 ({{ personas.length }})
+            </h3>
+            <button @click="openManualLink"
+                    class="text-xs text-indigo-500 hover:text-indigo-600 font-medium flex items-center gap-1">
+              <Plus class="w-3 h-3" />手动关联
+            </button>
+          </div>
+          <div class="space-y-3">
+            <div v-for="p in personas" :key="p.id" class="bg-slate-50 rounded-lg p-3">
+              <div class="flex items-center gap-2 mb-2">
                 <span class="text-sm font-medium text-slate-700">{{ p.name || '未命名' }}</span>
                 <span class="text-xs text-slate-400">{{ p.member_count }} 个身份</span>
               </div>
-              <ArrowRight class="w-4 h-4 text-slate-300" />
+              <div class="space-y-1.5">
+                <div v-for="m in p.members" :key="m.id"
+                     class="flex items-center justify-between bg-white rounded-md px-3 py-2 hover:bg-indigo-50 transition-colors cursor-pointer"
+                     @click="$router.push(`/portrait/${m.id}?group_id=${m.group_id}`)">
+                  <span class="text-sm text-slate-700">{{ m.display_name }} <span class="text-xs text-slate-400">({{ m.id }})</span></span>
+                  <span class="text-[11px] px-1.5 py-0.5 rounded-full"
+                    :class="platformLabel(m.platform, m.wxid) === '微信' ? 'bg-green-50 text-green-600' : platformLabel(m.platform, m.wxid) === 'QQ' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'">
+                    {{ platformLabel(m.platform, m.wxid) }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -400,6 +488,10 @@ const unanalyzedCount = computed(() =>
                 <div class="text-sm font-medium text-slate-700">{{ item.names }}</div>
                 <div class="text-xs text-slate-400">{{ item.groups }} · {{ item.group_cnt }} 个群</div>
               </div>
+              <span class="text-[11px] px-1.5 py-0.5 rounded-full"
+                :class="platformLabel('', item.wxid) === '微信' ? 'bg-green-50 text-green-600' : platformLabel('', item.wxid) === 'QQ' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'">
+                {{ platformLabel('', item.wxid) }}
+              </span>
             </div>
           </div>
           <button v-if="crossGroupList.length && !personas.length"
@@ -702,4 +794,67 @@ const unanalyzedCount = computed(() =>
     </div>
   </div>
   </div><!-- /members tab -->
+
+  <!-- v1.5.0: 手动关联弹窗 -->
+  <Teleport to="body">
+    <div v-if="showManualLink" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+         @click.self="showManualLink = false">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <Link2 class="w-5 h-5 text-indigo-500" />手动关联身份
+          </h3>
+          <button @click="showManualLink = false" class="text-slate-400 hover:text-slate-600">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">将不同平台（微信/QQ）或不同群的同一人关联起来</p>
+
+        <!-- 选择 A -->
+        <div class="space-y-2">
+          <label class="text-xs font-medium text-slate-600">身份 A</label>
+          <select v-model="linkGroupA" @change="onLinkGroupChange('A'); linkMemberA = null"
+                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+            <option :value="null">选择群...</option>
+            <option v-for="g in linkGroups" :key="g.id" :value="g.id">{{ g.name || g.display_name }}</option>
+          </select>
+          <select v-model="linkMemberA" v-if="linkMembersA.length"
+                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+            <option :value="null">选择成员...</option>
+            <option v-for="m in linkMembersA" :key="m.id" :value="m.id">{{ m.display_name || m.wxid }} ({{ m.id }})</option>
+          </select>
+        </div>
+
+        <!-- 选择 B -->
+        <div class="space-y-2">
+          <label class="text-xs font-medium text-slate-600">身份 B</label>
+          <select v-model="linkGroupB" @change="onLinkGroupChange('B'); linkMemberB = null"
+                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+            <option :value="null">选择群...</option>
+            <option v-for="g in linkGroups" :key="g.id" :value="g.id">{{ g.name || g.display_name }}</option>
+          </select>
+          <select v-model="linkMemberB" v-if="linkMembersB.length"
+                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+            <option :value="null">选择成员...</option>
+            <option v-for="m in linkMembersB" :key="m.id" :value="m.id">{{ m.display_name || m.wxid }} ({{ m.id }})</option>
+          </select>
+        </div>
+
+        <div v-if="linkError" class="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{{ linkError }}</div>
+
+        <div class="flex gap-2 pt-2">
+          <button @click="showManualLink = false"
+                  class="flex-1 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+            取消
+          </button>
+          <button @click="doManualLink" :disabled="linkLoading || !linkMemberA || !linkMemberB"
+                  class="flex-1 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+            <Loader2 v-if="linkLoading" class="w-3.5 h-3.5 animate-spin" />
+            <Link2 v-else class="w-3.5 h-3.5" />
+            确认关联
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

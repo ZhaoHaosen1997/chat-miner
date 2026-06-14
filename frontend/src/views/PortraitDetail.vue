@@ -1,6 +1,6 @@
 <script setup>
 import { ref, inject, watch, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   getPortrait, getPortraitStats, getPortraitHistory,
   analyzePortrait, getArchaeology,
@@ -9,11 +9,12 @@ import {
   ArrowLeft, Loader2, Sparkles, RefreshCw, User,
   MessageSquare, Clock, Tag, TrendingUp,
   ChevronRight, Hash, Smile, BarChart3, Users2,
-  Search, MessageCircle, Activity, Zap, Quote, Trophy,
+  Search, MessageCircle, Activity, Zap, Quote, Trophy, Link2,
 } from 'lucide-vue-next'
 
 const props = defineProps({ memberId: String })
 const router = useRouter()
+const route = useRoute()  // v1.5.0: 读取 query 参数支持跨群跳转
 const currentGroup = inject('currentGroup')
 const activeTaskId = inject('activeTaskId')
 const triggerRefresh = inject('triggerRefresh')
@@ -44,10 +45,13 @@ const tabs = [
   { key: 'social', label: '社交关系', icon: Users2 },
   { key: 'history', label: '版本历史', icon: Clock },
   { key: 'archaeology', label: '考古', icon: Search },
+  { key: 'cross-group', label: '跨群身份', icon: Link2 },
 ]
 
 async function load() {
-  if (!currentGroup.value || !props.memberId) return
+  // v1.5.0: 支持跨群跳转 — query.group_id 优先于 currentGroup
+  const groupId = route.query.group_id ? Number(route.query.group_id) : (currentGroup.value?.id)
+  if (!groupId || !props.memberId) return
   const myVersion = ++_loadVersion
   loading.value = true
   statsLoading.value = true
@@ -55,9 +59,9 @@ async function load() {
   try {
     // 第一阶段：快速加载核心数据（portrait + history + archaeology）
     const [p, h, a] = await Promise.all([
-      getPortrait(currentGroup.value.id, props.memberId),
-      getPortraitHistory(currentGroup.value.id, props.memberId).catch(() => null),
-      getArchaeology(currentGroup.value.id, props.memberId).catch(() => null),
+      getPortrait(groupId, props.memberId),
+      getPortraitHistory(groupId, props.memberId).catch(() => null),
+      getArchaeology(groupId, props.memberId).catch(() => null),
     ])
     if (myVersion !== _loadVersion) return  // 竞态：已切换到其他成员
     portrait.value = p
@@ -66,7 +70,7 @@ async function load() {
     loading.value = false  // 页面已可用
 
     // 第二阶段：后台加载统计数据（计算密集，可能较慢）
-    stats.value = await getPortraitStats(currentGroup.value.id, props.memberId).catch(() => null)
+    stats.value = await getPortraitStats(groupId, props.memberId).catch(() => null)
     if (myVersion !== _loadVersion) return  // 竞态检查
   } catch (e) {
     if (myVersion !== _loadVersion) return
@@ -100,21 +104,25 @@ const hasPersona = computed(() => !!portrait.value?.persona?.members?.length)
 const crossGroupData = computed(() => portrait.value?.cross_group || {})
 const personaData = computed(() => portrait.value?.persona || {})
 
+function platformLabel(platform, wxid) {
+  if (platform === 'wechat') return '微信'
+  if (platform === 'qq') return 'QQ'
+  if (wxid?.startsWith('wxid_')) return '微信'
+  if (wxid?.startsWith('u_') && !wxid?.includes('@chatroom')) return 'QQ'
+  return '未知'
+}
+
 function parsePortraitJson(json) {
   if (!json) return {}
   try { return typeof json === 'string' ? JSON.parse(json) : json } catch { return {} }
 }
 
 function goToOtherPortrait(member) {
-  // 需要切换到 member 所在的群 → 跳转到该群的 portrait 页面
-  // 简化处理：打开新标签页
-  const url = `/#/portrait/${member.id}?group_id=${member.group_id}`
-  window.open(url, '_blank')
+  router.push(`/portrait/${member.id}?group_id=${member.group_id}`)
 }
 
 function goToPersonaMember(member) {
-  const url = `/#/portrait/${member.id}?group_id=${member.group_id}`
-  window.open(url, '_blank')
+  router.push(`/portrait/${member.id}?group_id=${member.group_id}`)
 }
 
 watch([currentGroup, () => props.memberId], load, { immediate: true })
@@ -750,19 +758,12 @@ const currentVersion = computed(() => {
           </div>
         </template>
       </div>
-    </template>
 
-    <!-- v1.5.0: 跨群/跨平台对比 -->
-    <div v-if="hasCrossGroup || hasPersona" class="mt-4 space-y-4">
-      <div class="border-t border-slate-200 pt-4">
-        <div class="flex items-center gap-2 mb-3">
-          <Users2 class="w-4 h-4 text-indigo-500" />
-          <span class="text-sm font-semibold text-slate-700">跨群身份</span>
-        </div>
-
-        <!-- 同 wxid 自动检测：在其他群也有画像 -->
+      <!-- v1.5.0 Tab: 跨群身份 -->
+      <div v-if="activeTab === 'cross-group'" class="space-y-4">
+        <!-- 同 wxid 自动检测 -->
         <div v-if="hasCrossGroup" class="card p-4 bg-indigo-50/50 border border-indigo-100">
-          <div class="flex items-center gap-2 mb-2">
+          <div class="flex items-center gap-2 mb-3">
             <span class="text-xs font-medium text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">自动发现</span>
             <span class="text-xs text-slate-500">同一 wxid 在 {{ crossGroupData.total_groups }} 个群出现</span>
           </div>
@@ -771,14 +772,16 @@ const currentVersion = computed(() => {
                  class="bg-white rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors cursor-pointer"
                  @click="goToOtherPortrait(m)">
               <div class="flex items-center justify-between mb-1">
-                <span class="text-sm font-medium text-slate-800">{{ m.display_name }}</span>
-                <span class="text-[11px] text-slate-400">{{ m.platform || '未知平台' }}</span>
+                <span class="text-sm font-medium text-slate-800">{{ m.display_name }} <span class="text-xs text-slate-400 font-normal">({{ m.id }})</span></span>
+                <span class="text-[11px] px-1.5 py-0.5 rounded-full"
+                  :class="platformLabel(m.platform, m.wxid) === '微信' ? 'bg-green-50 text-green-600' : platformLabel(m.platform, m.wxid) === 'QQ' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'">
+                  {{ platformLabel(m.platform, m.wxid) }}
+                </span>
               </div>
               <div class="text-xs text-slate-500">
                 {{ m.group_name }}
                 <span v-if="m.total_analyzed_messages" class="ml-2">· {{ m.total_analyzed_messages }}条分析</span>
               </div>
-              <!-- 简要性格对比 -->
               <div v-if="parsePortraitJson(m.portrait_json)?.personality" class="mt-2 text-xs text-slate-600">
                 <span class="text-slate-400">性格：</span>
                 {{ parsePortraitJson(m.portrait_json).personality?.slice(0, 60) }}{{ (parsePortraitJson(m.portrait_json).personality || '').length > 60 ? '...' : '' }}
@@ -787,9 +790,9 @@ const currentVersion = computed(() => {
           </div>
         </div>
 
-        <!-- Persona: 手动关联的身份 -->
-        <div v-if="hasPersona" class="card p-4 bg-amber-50/50 border border-amber-100 mt-3">
-          <div class="flex items-center justify-between mb-2">
+        <!-- Persona: 已关联身份 -->
+        <div v-if="hasPersona" class="card p-4 bg-amber-50/50 border border-amber-100">
+          <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <span class="text-xs font-medium text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">已关联</span>
               <span class="text-xs text-slate-500">{{ personaData.members?.length || 0 }} 个身份</span>
@@ -800,22 +803,24 @@ const currentVersion = computed(() => {
                  class="bg-white rounded-lg p-3 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer"
                  @click="goToPersonaMember(m)">
               <div class="flex items-center justify-between mb-1">
-                <span class="text-sm font-medium text-slate-800">{{ m.display_name }}</span>
-                <span class="text-[11px] text-slate-400">{{ m.platform || '未知平台' }}</span>
+                <span class="text-sm font-medium text-slate-800">{{ m.display_name }} <span class="text-xs text-slate-400 font-normal">({{ m.id }})</span></span>
+                <span class="text-[11px] px-1.5 py-0.5 rounded-full"
+                  :class="platformLabel(m.platform, m.wxid) === '微信' ? 'bg-green-50 text-green-600' : platformLabel(m.platform, m.wxid) === 'QQ' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'">
+                  {{ platformLabel(m.platform, m.wxid) }}
+                </span>
               </div>
               <div class="text-xs text-slate-500">{{ m.group_name }}</div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- v1.5.0: 关联身份按钮（只在没有 persona 但有 wxid 时显示） -->
-    <div v-if="!hasPersona && portrait?.wxid" class="mt-4 border-t border-slate-200 pt-4">
-      <button @click="showLinkDialog = true"
-              class="text-xs text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
-        <Users2 class="w-3 h-3" /> 关联其他平台的同一人...
-      </button>
-    </div>
+        <!-- 无跨群数据 -->
+        <div v-if="!hasCrossGroup && !hasPersona" class="card p-8 text-center">
+          <Users2 class="w-10 h-10 text-slate-200 mx-auto mb-2" />
+          <p class="text-sm text-slate-400">该成员暂未在其他群出现</p>
+          <p class="text-xs text-slate-400 mt-1">同一 wxid 出现在多个群时会自动发现</p>
+        </div>
+      </div>
+    </template>
   </div>
 </template>

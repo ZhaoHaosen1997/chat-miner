@@ -1962,7 +1962,7 @@ def get_persona_by_member(member_id: int) -> dict | None:
 
 
 def list_personas() -> list[dict]:
-    """列出所有 persona，包含成员数量"""
+    """列出所有 persona，包含成员数量和成员列表"""
     with db() as conn:
         rows = conn.execute("""
             SELECT p.*, COUNT(pm.id) AS member_count
@@ -1971,7 +1971,21 @@ def list_personas() -> list[dict]:
             GROUP BY p.id
             ORDER BY member_count DESC, p.created_at DESC
         """).fetchall()
-    return [dict(r) for r in rows]
+        personas = []
+        for r in rows:
+            p = dict(r)
+            # 加载每个 persona 的成员列表
+            members = conn.execute("""
+                SELECT gm.*, cg.name AS group_name, cg.platform
+                FROM persona_members pm
+                JOIN group_members gm ON pm.member_id = gm.id
+                JOIN chat_groups cg ON gm.group_id = cg.id
+                WHERE pm.persona_id = ?
+                ORDER BY cg.platform, cg.name
+            """, (p["id"],)).fetchall()
+            p["members"] = [dict(m) for m in members]
+            personas.append(p)
+    return personas
 
 
 def delete_persona(persona_id: int) -> bool:
