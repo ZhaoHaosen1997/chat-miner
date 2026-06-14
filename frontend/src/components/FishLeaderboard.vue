@@ -19,10 +19,11 @@ const speciesEmoji = {
   goldfish: '🐟', koi: '🎏', clownfish: '🤡', betta: '🐠', arowana: '🐉',
   angelfish: '👼', pufferfish: '🐡', shark: '🦈', crocodile: '🐊', orca: '🐳',
   octopus: '🐙', squid: '🦑', crab: '🦀', lobster: '🦞', jellyfish: '🪼',
-  shrimp: '🦐', whale: '🐋', dolphin: '🐬', seal: '🦭', otter: '🦦',
-  turtle: '🐢', frog: '🐸', axolotl: '🦎',
-  seahorse: '🐟', manta: '🐟', urchin: '🐟', starfish: '⭐',
-  mantis_shrimp: '🦐', conch: '🐚', otter2: '🦦', walrus: '🦭',
+  shrimp: '🦐', mantis_shrimp: '🦐', conch: '🐚', nautilus: '🌀',
+  oyster: '🦪', whale: '🐋', dolphin: '🐬', seal: '🦭', otter: '🦦',
+  otter2: '🦦', walrus: '🦭', turtle: '🐢', frog: '🐸', axolotl: '🦎',
+  mermaid: '🧜‍♀️', plesiosaur: '🦕', sea_snake: '🐍', sea_slug: '🐌',
+  sturgeon: '🐟', eel: '⚡',
 }
 
 const sortOptions = [

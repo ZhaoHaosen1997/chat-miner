@@ -22,201 +22,226 @@ logger = logging.getLogger(__name__)
 # ==================== 品种定义 ====================
 
 AQUATIC_SPECIES = {
-    # ========== 鱼类：传统观赏鱼 ==========
+    # ========== 鱼类：传统观赏鱼（轻型+0 属性调优）==========
     "goldfish": {
         "name": "金鱼", "emoji": "🐟", "color": "#F59E0B",
-        "asi": {"cha": 3, "con": 1, "str": -1},
+        "asi": {"cha": 4, "con": 1, "str": -1}, "hp_bonus": 0,
         "proficiencies": ["performance"],
         "desc": "温顺可爱，人见人爱，但弱不禁风"
     },
     "koi": {
         "name": "锦鲤", "emoji": "🎏", "color": "#EF4444",
-        "asi": {"cha": 3, "wis": 2, "str": -1, "dex": -1},
+        "asi": {"cha": 3, "wis": 2, "str": -1, "dex": -1}, "hp_bonus": 5,
         "proficiencies": ["performance", "nature"],
         "desc": "幸运化身，魅力感知俱佳，需要精心照料"
     },
     "clownfish": {
         "name": "小丑鱼", "emoji": "🤡", "color": "#F97316",
-        "asi": {"dex": 3, "cha": 1},
+        "asi": {"dex": 4, "cha": 1}, "hp_bonus": 0,
         "proficiencies": ["acrobatics", "performance"],
         "desc": "灵活矫健，天生的表演者"
     },
     "betta": {
         "name": "斗鱼", "emoji": "🐠", "color": "#3B82F6",
-        "asi": {"str": 3, "dex": 2, "con": -2, "cha": -1},
+        "asi": {"str": 3, "dex": 2, "con": -2, "cha": -1}, "hp_bonus": 5,
         "proficiencies": ["athletics", "intimidation"],
         "desc": "天生的角斗士，凶猛好战但体质脆弱脾气差"
     },
     "arowana": {
         "name": "龙鱼", "emoji": "🐉", "color": "#FFD700",
-        "asi": {"str": 3, "cha": 2, "dex": -2, "wis": -1},
+        "asi": {"str": 3, "cha": 2, "dex": -2, "wis": -1}, "hp_bonus": 5,
         "proficiencies": ["athletics", "intimidation"],
         "desc": "水中霸主，威严霸气但笨拙固执"
     },
     "angelfish": {
         "name": "神仙鱼", "emoji": "👼", "color": "#A78BFA",
-        "asi": {"wis": 3, "cha": 2, "con": -2},
+        "asi": {"wis": 4, "cha": 2, "con": -2}, "hp_bonus": 0,
         "proficiencies": ["insight", "nature"],
         "desc": "飘逸出尘，洞察万物，但身子骨弱"
     },
     "pufferfish": {
         "name": "河豚", "emoji": "🐡", "color": "#EC4899",
-        "asi": {"con": 4, "wis": 1, "dex": -3},
+        "asi": {"con": 4, "wis": 1, "dex": -3}, "hp_bonus": 5,
         "proficiencies": ["endurance"],
         "desc": "防御大师！膨胀起来无敌，但平时慢吞吞"
     },
 
-    # ========== 掠食类：战斗向 ==========
+    # ========== 掠食类：战斗向（重型+10）==========
     "shark": {
         "name": "鲨鱼", "emoji": "🦈", "color": "#6B7280",
-        "asi": {"str": 4, "dex": 1, "wis": -2, "cha": -2},
+        "asi": {"str": 4, "dex": 1, "wis": -2, "cha": -2}, "hp_bonus": 10,
         "proficiencies": ["athletics", "stealth", "intimidation"],
         "desc": "顶级掠食者，力量恐怖但不通人情世故"
     },
     "crocodile": {
         "name": "鳄鱼", "emoji": "🐊", "color": "#4D7C0F",
-        "asi": {"str": 3, "con": 3, "dex": -2, "cha": -3},
+        "asi": {"str": 3, "con": 3, "dex": -2, "cha": -3}, "hp_bonus": 10,
         "proficiencies": ["athletics", "stealth", "endurance"],
         "desc": "远古猎手，血厚攻高，但社交为零"
     },
     "orca": {
         "name": "虎鲸", "emoji": "🐳", "color": "#1E3A5F",
-        "asi": {"str": 3, "int": 2, "cha": 1, "dex": -3},
+        "asi": {"str": 3, "int": 2, "cha": 1, "dex": -3}, "hp_bonus": 10,
         "proficiencies": ["athletics", "investigation", "intimidation"],
         "desc": "海洋顶级智商+武力，唯一的弱点是体型太大不灵活"
+    },
+    "plesiosaur": {
+        "name": "蛇颈龙", "emoji": "🦕", "color": "#2D5A4B",
+        "asi": {"str": 3, "con": 3, "dex": -2, "int": -1}, "hp_bonus": 10,
+        "proficiencies": ["endurance", "athletics"],
+        "desc": "远古海爬遗种，尼斯湖同款，慢悠悠但皮实耐揍"
     },
 
     # ========== 软体/甲壳类：特殊向 ==========
     "octopus": {
         "name": "章鱼", "emoji": "🐙", "color": "#D946EF",
-        "asi": {"int": 4, "dex": 2, "str": -3},
+        "asi": {"int": 4, "dex": 2, "str": -3}, "hp_bonus": 5,
         "proficiencies": ["investigation", "stealth", "acrobatics"],
         "desc": "天才级智力+触手灵活，但力量孱弱"
     },
     "squid": {
         "name": "鱿鱼", "emoji": "🦑", "color": "#F472B6",
-        "asi": {"dex": 4, "int": 1, "con": -2, "str": -2},
+        "asi": {"dex": 4, "int": 1, "con": -2, "str": -2}, "hp_bonus": 5,
         "proficiencies": ["acrobatics", "stealth"],
         "desc": "速度之王，来去如电，但一碰就碎"
     },
     "crab": {
         "name": "螃蟹", "emoji": "🦀", "color": "#DC2626",
-        "asi": {"con": 3, "str": 2, "cha": -2, "dex": -1},
+        "asi": {"con": 3, "str": 2, "cha": -2, "dex": -1}, "hp_bonus": 5,
         "proficiencies": ["endurance", "athletics"],
         "desc": "横着走的铁甲坦克，防御拉满但社交笨拙"
     },
     "lobster": {
         "name": "龙虾", "emoji": "🦞", "color": "#B91C1C",
-        "asi": {"str": 3, "con": 2, "int": -2, "dex": -2},
+        "asi": {"str": 3, "con": 2, "int": -2, "dex": -2}, "hp_bonus": 5,
         "proficiencies": ["athletics", "endurance"],
         "desc": "巨钳无双，可惜脑子不太够用"
     },
     "jellyfish": {
         "name": "水母", "emoji": "🪼", "color": "#C084FC",
-        "asi": {"wis": 4, "cha": 2, "con": -3, "str": -2},
+        "asi": {"wis": 4, "cha": 3, "con": -3, "str": -2}, "hp_bonus": 0,
         "proficiencies": ["insight", "nature", "performance"],
         "desc": "空灵飘逸的深海先知，但吹弹可破"
     },
     "shrimp": {
         "name": "虾", "emoji": "🦐", "color": "#FB923C",
-        "asi": {"dex": 3, "con": 1, "str": -1, "int": -1},
+        "asi": {"dex": 4, "con": 1, "str": -1, "int": -1}, "hp_bonus": 0,
         "proficiencies": ["acrobatics", "stealth"],
         "desc": "弹跳力惊人，擅长躲避，但没啥存在感"
     },
-
-    # ========== 哺乳类：社交/耐久向 ==========
-    "whale": {
-        "name": "鲸鱼", "emoji": "🐋", "color": "#1E40AF",
-        "asi": {"con": 3, "str": 3, "dex": -3, "int": -1},
-        "proficiencies": ["endurance", "nature"],
-        "desc": "庞然巨物，生命力顽强，但转身都要半天"
-    },
-    "dolphin": {
-        "name": "海豚", "emoji": "🐬", "color": "#06B6D4",
-        "asi": {"cha": 3, "int": 2, "str": -2, "con": -1},
-        "proficiencies": ["performance", "acrobatics", "insight"],
-        "desc": "智慧+魅力双高，大海的宠儿，就是打人不疼"
-    },
-    "seal": {
-        "name": "海豹", "emoji": "🦭", "color": "#94A3B8",
-        "asi": {"cha": 3, "con": 2, "wis": -2, "int": -2},
-        "proficiencies": ["performance", "endurance"],
-        "desc": "萌即正义！憨憨的外表下皮糙肉厚"
-    },
-    "otter": {
-        "name": "水獭", "emoji": "🦦", "color": "#92400E",
-        "asi": {"dex": 2, "cha": 2, "int": 1, "str": -2},
-        "proficiencies": ["acrobatics", "investigation"],
-        "desc": "灵巧又聪明的小机灵鬼，会用工具！力气不大"
-    },
-
-    # ========== 两栖/爬行类 ==========
-    "turtle": {
-        "name": "海龟", "emoji": "🐢", "color": "#15803D",
-        "asi": {"con": 4, "wis": 2, "dex": -3, "cha": -2},
-        "proficiencies": ["endurance", "nature"],
-        "desc": "万年龟甲！防御和智慧拉满，但速度...呃"
-    },
-    "frog": {
-        "name": "青蛙", "emoji": "🐸", "color": "#65A30D",
-        "asi": {"dex": 3, "wis": 2, "str": -2, "cha": -1},
-        "proficiencies": ["acrobatics", "nature", "stealth"],
-        "desc": "跳跃大师，水陆两栖的全能选手"
-    },
-    "axolotl": {
-        "name": "美西螈", "emoji": "🦎", "color": "#FB7185",
-        "asi": {"con": 2, "wis": 2, "cha": 1, "str": -2},
-        "proficiencies": ["endurance", "nature"],
-        "desc": "再生能力逆天，永远保持幼态可爱的神奇生物"
-    },
-    # ========== v1.16.0: 新物种（iconify emoji）==========
-    "seahorse": {
-        "name": "海马", "emoji": "🐟", "color": "#F9A8D4",
-        "asi": {"dex": 2, "cha": 3, "str": -2, "con": -1},
-        "proficiencies": ["acrobatics", "performance"],
-        "desc": "优雅的舞者，独特的外形下藏着敏捷的身手"
-    },
-    "manta": {
-        "name": "蝠鲼", "emoji": "🐟", "color": "#1C1F33",
-        "asi": {"dex": 3, "wis": 2, "str": -1, "cha": -1},
-        "proficiencies": ["acrobatics", "stealth"],
-        "desc": "水中滑翔机，悄无声息地巡游深海"
-    },
-    "urchin": {
-        "name": "海胆", "emoji": "🐟", "color": "#4B0082",
-        "asi": {"con": 4, "str": 1, "dex": -2, "cha": -2},
-        "proficiencies": ["endurance"],
-        "desc": "浑身是刺的防御大师，谁碰谁后悔"
-    },
-    "starfish": {
-        "name": "海星", "emoji": "⭐", "color": "#FF6347",
-        "asi": {"con": 3, "wis": 2, "dex": -2, "int": -1},
-        "proficiencies": ["endurance", "nature"],
-        "desc": "断肢重生能力逆天，慢悠悠但生命力顽强"
-    },
     "mantis_shrimp": {
         "name": "螳螂虾", "emoji": "🦐", "color": "#DC143C",
-        "asi": {"str": 3, "con": 2, "dex": -1, "int": -2},
+        "asi": {"str": 3, "con": 2, "dex": -1, "int": -2}, "hp_bonus": 5,
         "proficiencies": ["athletics", "endurance"],
         "desc": "大钳子威猛无比，出拳速度堪比子弹"
     },
     "conch": {
         "name": "海螺", "emoji": "🐚", "color": "#F5DEB3",
-        "asi": {"wis": 4, "cha": 2, "dex": -3, "str": -2},
+        "asi": {"wis": 4, "cha": 2, "dex": -3, "str": -2}, "hp_bonus": 5,
         "proficiencies": ["insight", "nature", "performance"],
         "desc": "能听到大海声音的智者，行动虽慢但洞察一切"
     },
+    "nautilus": {
+        "name": "鹦鹉螺", "emoji": "🌀", "color": "#EEDDCC",
+        "asi": {"int": 3, "wis": 3, "dex": -2, "cha": -1}, "hp_bonus": 5,
+        "proficiencies": ["investigation", "insight"],
+        "desc": "深海活化石，壳里的螺旋藏着亿万年智慧"
+    },
+    "oyster": {
+        "name": "牡蛎", "emoji": "🦪", "color": "#DDD6C8",
+        "asi": {"con": 4, "wis": 2, "dex": -3, "cha": -2}, "hp_bonus": 5,
+        "proficiencies": ["endurance", "nature"],
+        "desc": "低调产出珍珠，一动不动但身价不菲"
+    },
+
+    # ========== 哺乳类：社交/耐久向 ==========
+    "whale": {
+        "name": "鲸鱼", "emoji": "🐋", "color": "#1E40AF",
+        "asi": {"con": 3, "str": 3, "dex": -3, "int": -1}, "hp_bonus": 10,
+        "proficiencies": ["endurance", "nature"],
+        "desc": "庞然巨物，生命力顽强，但转身都要半天"
+    },
+    "dolphin": {
+        "name": "海豚", "emoji": "🐬", "color": "#06B6D4",
+        "asi": {"cha": 3, "int": 2, "str": -2, "con": -1}, "hp_bonus": 5,
+        "proficiencies": ["performance", "acrobatics", "insight"],
+        "desc": "智慧+魅力双高，大海的宠儿，就是打人不疼"
+    },
+    "seal": {
+        "name": "海豹", "emoji": "🦭", "color": "#94A3B8",
+        "asi": {"cha": 3, "con": 2, "wis": -2, "int": -2}, "hp_bonus": 5,
+        "proficiencies": ["performance", "endurance"],
+        "desc": "萌即正义！憨憨的外表下皮糙肉厚"
+    },
+    "otter": {
+        "name": "水獭", "emoji": "🦦", "color": "#92400E",
+        "asi": {"dex": 2, "cha": 3, "int": 2, "str": -2}, "hp_bonus": 0,
+        "proficiencies": ["acrobatics", "investigation"],
+        "desc": "灵巧又聪明的小机灵鬼，会用工具！力气不大"
+    },
     "otter2": {
         "name": "海獭", "emoji": "🦦", "color": "#8B4513",
-        "asi": {"dex": 2, "int": 2, "cha": 2, "str": -2},
+        "asi": {"dex": 2, "int": 3, "cha": 3, "str": -2}, "hp_bonus": 0,
         "proficiencies": ["acrobatics", "investigation", "performance"],
         "desc": "会用工具的小机灵鬼，萌到犯规的海洋精灵"
     },
     "walrus": {
         "name": "海象", "emoji": "🦭", "color": "#A0522D",
-        "asi": {"str": 3, "con": 3, "dex": -2, "int": -1},
+        "asi": {"str": 3, "con": 3, "dex": -2, "int": -1}, "hp_bonus": 10,
         "proficiencies": ["athletics", "endurance"],
         "desc": "吨位即是正义，长牙之下众生平等"
+    },
+
+    # ========== 两栖/爬行类 ==========
+    "turtle": {
+        "name": "海龟", "emoji": "🐢", "color": "#15803D",
+        "asi": {"con": 4, "wis": 2, "dex": -3, "cha": -2}, "hp_bonus": 15,
+        "proficiencies": ["endurance", "nature"],
+        "desc": "万年龟甲！防御和智慧拉满，但速度...呃"
+    },
+    "frog": {
+        "name": "青蛙", "emoji": "🐸", "color": "#65A30D",
+        "asi": {"dex": 4, "wis": 2, "str": -2, "cha": -1}, "hp_bonus": 0,
+        "proficiencies": ["acrobatics", "nature", "stealth"],
+        "desc": "跳跃大师，水陆两栖的全能选手"
+    },
+    "axolotl": {
+        "name": "美西螈", "emoji": "🦎", "color": "#FB7185",
+        "asi": {"con": 2, "wis": 2, "cha": 2, "str": -2}, "hp_bonus": 0,
+        "proficiencies": ["endurance", "nature"],
+        "desc": "再生能力逆天，永远保持幼态可爱的神奇生物"
+    },
+    "sea_snake": {
+        "name": "海蛇", "emoji": "🐍", "color": "#22C55E",
+        "asi": {"dex": 3, "int": 2, "str": -1, "con": -2}, "hp_bonus": 0,
+        "proficiencies": ["acrobatics", "stealth"],
+        "desc": "剧毒猎手，优雅致命，来去无声"
+    },
+    "sea_slug": {
+        "name": "海蛞蝓", "emoji": "🐌", "color": "#F97316",
+        "asi": {"cha": 3, "wis": 2, "str": -3, "dex": -1}, "hp_bonus": 0,
+        "proficiencies": ["performance", "nature"],
+        "desc": "裸鳃类颜值担当，五彩斑斓的海底精灵"
+    },
+
+    # ========== v1.16.3: 新物种 ==========
+    "mermaid": {
+        "name": "美人鱼", "emoji": "🧜‍♀️", "color": "#EC4899",
+        "asi": {"cha": 4, "wis": 2, "str": -2, "con": -2}, "hp_bonus": 0,
+        "proficiencies": ["performance", "insight", "nature"],
+        "desc": "歌声魅惑众生，海洋中的传说生物"
+    },
+    "sturgeon": {
+        "name": "鲟鱼", "emoji": "🐟", "color": "#4B5563",
+        "asi": {"str": 3, "con": 3, "dex": -2, "cha": -1}, "hp_bonus": 10,
+        "proficiencies": ["endurance", "athletics"],
+        "desc": "淡水巨兽，从恐龙时代活到现在的活化石"
+    },
+    "eel": {
+        "name": "电鳗", "emoji": "⚡", "color": "#EAB308",
+        "asi": {"dex": 3, "int": 2, "str": -1, "con": -1}, "hp_bonus": 5,
+        "proficiencies": ["stealth", "acrobatics"],
+        "desc": "自带高压电，冷静又致命"
     },
 }
 
@@ -646,13 +671,19 @@ def determine_stage(growth: float) -> str:
     return stage
 
 
-def compute_max_hp(constitution: int, level: int, stage: str) -> int:
-    """计算最大 HP"""
+def compute_max_hp(constitution: int, level: int, stage: str,
+                   hp_bonus: int = 0) -> int:
+    """计算最大 HP，包含物种加成"""
     con_mod = ability_modifier(constitution)
     base = 10 + con_mod * 2 + level * 2
     if stage == "鱼苗":
         base = int(base * 0.5)
-    return max(1, base)
+    return max(1, base + hp_bonus)
+
+
+def _get_hp_bonus(species_key: str) -> int:
+    """获取物种 HP 加成"""
+    return AQUATIC_SPECIES.get(species_key, {}).get("hp_bonus", 0)
 
 
 # ==================== 鱼创建 ====================
@@ -704,7 +735,8 @@ def create_fish(group_id: int, wxid: str, display_name: str,
     variants = EMOJI_VARIANTS.get(species, [species_info.get("emoji", "🐟")])
     emoji_variant = random.choice(variants) if variants else species_info.get("emoji", "🐟")
 
-    max_hp_val = compute_max_hp(attrs["constitution"], 1, "鱼苗")
+    max_hp_val = compute_max_hp(attrs["constitution"], 1, "鱼苗",
+                                species_info.get("hp_bonus", 0))
     fid = db.upsert_fish(
         group_id=group_id, wxid=wxid, fish_name=fish_name,
         species=species, rarity=rarity,
@@ -759,9 +791,19 @@ FISH_TRAITS = {
     "机灵": {"desc": "宝藏事件WIS+2", "icon": "🧠"},
     "粘人": {"desc": "主人当天发言≥5条→+5幸福", "icon": "🥰"},
     "孤僻": {"desc": "群体事件不参与", "icon": "🏚️"},
-    # 占位
-    "贪睡": {}, "迷糊": {}, "浪漫": {},
-    "倔强": {}, "戏精": {}, "冒险家": {},
+    # v1.16.3: 全部实装
+    "贪睡": {"desc": "30%概率睡过白天事件；夜间精力恢复翻倍", "icon": "😴",
+              "day_skip_chance": 0.3, "night_regen_boost": 2.0},
+    "迷糊": {"desc": "20%概率检定劣势", "icon": "😵",
+              "disadvantage_chance": 0.2},
+    "浪漫": {"desc": "选美/人鱼事件CHA优势", "icon": "💕",
+              "vs_romance": "advantage"},
+    "倔强": {"desc": "失败后10%概率重试一次", "icon": "🤨",
+              "retry_chance": 0.1},
+    "戏精": {"desc": "表演类检定优势", "icon": "🎪",
+              "vs_performance": "advantage"},
+    "冒险家": {"desc": "探索收益×1.3，宝藏WIS+2", "icon": "🧭",
+              "explore_bonus": 1.3, "treasure_wis": 2},
 }
 
 # 画像 → 性格映射（18 条）
@@ -772,6 +814,8 @@ PORTRAIT_TO_FISH_TRAIT = {
     "美食家": "贪吃", "和平主义者": "谨慎", "暴躁老哥": "暴躁",
     "夜猫子": "孤僻", "养生达人": "沉稳", "梗王": "活泼",
     "戏精": "戏精", "技术宅": "机灵", "小透明": "胆小",
+    "冒险家": "冒险家", "浪漫主义者": "浪漫", "瞌睡虫": "贪睡",
+    "马大哈": "迷糊", "死脑筋": "倔强",
 }
 
 # Emoji 多态变体（每个物种多个 emoji）
@@ -1201,7 +1245,8 @@ def cmd_train(group_id: int, wxid: str, attr_name: str,
         db.update_fish_field(group_id, wxid, attr_key, new_val)
         # 更新 HP（体质影响 HP）
         if attr_key == "constitution":
-            new_hp = compute_max_hp(new_val, fish["level"], fish["stage"])
+            new_hp = compute_max_hp(new_val, fish["level"], fish["stage"],
+                                    _get_hp_bonus(fish.get("species", "")))
             db.update_fish_field(group_id, wxid, "hp", new_hp)
             db.update_fish_field(group_id, wxid, "max_hp", new_hp)
         xp_amount = 15
@@ -1402,7 +1447,9 @@ def execute_decree(group_id: int, decree_key: str,
     elif decree_key == "heal":
         fish = db.get_fish(group_id, target_wxid)
         if fish:
-            max_hp = compute_max_hp(fish.get("constitution", 10), fish.get("level", 1), fish.get("stage", "成鱼"))
+            max_hp = compute_max_hp(fish.get("constitution", 10), fish.get("level", 1),
+                                    fish.get("stage", "成鱼"),
+                                    _get_hp_bonus(fish.get("species", "")))
             db.update_fish_field(group_id, target_wxid, "hp", max_hp)
             db.update_fish_field(group_id, target_wxid, "max_hp", max_hp)
             effect = {"wxid": target_wxid, "hp": max_hp}
@@ -1653,7 +1700,8 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
     new_stage = determine_stage(fish["growth"])
     if new_stage != fish["stage"]:
         db.update_fish_field(group_id, wxid, "stage", new_stage)
-        new_max_hp = compute_max_hp(fish["constitution"], fish["level"], new_stage)
+        new_max_hp = compute_max_hp(fish["constitution"], fish["level"], new_stage,
+                                    _get_hp_bonus(fish.get("species", "")))
         db.update_fish_field(group_id, wxid, "hp", new_max_hp)
         db.update_fish_field(group_id, wxid, "max_hp", new_max_hp)
         db.add_fish_event(group_id, wxid, "evolve", {
@@ -1738,25 +1786,64 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
             h = max(0, min(100, fish["happiness"] + weather["happiness_bonus"]))
             db.update_fish_field(group_id, fish["wxid"], "happiness", h)
 
-    # 鲨鱼来袭 (1% 概率)
+    # 鲨鱼来袭 (1% 概率, DC12 STR 检定, v1.16.3 改为不直接杀)
     rng = random.Random(f"shark_{group_id}_{date_str}")
     if rng.randint(1, 100) == 1:
         low_happy = [f for f in alive_fish if f["happiness"] < 20]
         if len(low_happy) >= 1 and len(alive_fish) >= 3:
             victim = rng.choice(low_happy)
-            db.mark_fish_dead(group_id, victim["wxid"])
-            # v1.16.1: 附加遗言
-            from services.passive_events import FISH_LAST_WORDS
+            # DC12 STR 检定，带熟练加值
+            from services.d20 import ability_check
+            from services.passive_events import _has_proficiency, FISH_LAST_WORDS
             import random as _random
-            last_words = _random.choice(FISH_LAST_WORDS)
-            db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
-                "fish_name": victim["fish_name"], "date": date_str,
-                "cause": f"幸福值过低({victim['happiness']:.0f})被鲨鱼袭击",
-                "last_words": last_words,
-            })
-            results.append({"wxid": victim["wxid"], "shark_attack": True,
-                           "victim": victim["fish_name"],
-                           "last_words": last_words})
+
+            is_prof = _has_proficiency(victim, "strength")
+            check = ability_check(victim.get("strength", 10), dc=12,
+                                  is_proficient=is_prof,
+                                  level=victim.get("level", 1))
+            if check.success:
+                # 击退鲨鱼：奖励
+                db.earn_coins(group_id, victim["wxid"], 15, "shark_defeat",
+                             "击退鲨鱼")
+                from services.fish_pond import add_xp
+                add_xp(group_id, victim["wxid"], 10, "shark_defeat")
+                db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
+                    "fish_name": victim["fish_name"], "date": date_str,
+                    "success": True,
+                    "check": check.to_dict(),
+                })
+                results.append({"wxid": victim["wxid"], "shark_attack": True,
+                               "survived": True,
+                               "fish_name": victim["fish_name"]})
+            else:
+                # 失败：扣血，可能致死
+                hp_loss = d20lib.coin_roll("2d4")
+                new_hp = max(0, victim.get("hp", 20) - hp_loss)
+                db.update_fish_field(group_id, victim["wxid"], "hp", new_hp)
+                if new_hp <= 0:
+                    db.mark_fish_dead(group_id, victim["wxid"])
+                    last_words = _random.choice(FISH_LAST_WORDS)
+                    db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
+                        "fish_name": victim["fish_name"], "date": date_str,
+                        "success": False, "cause": "被鲨鱼咬死",
+                        "last_words": last_words,
+                        "check": check.to_dict(),
+                    })
+                    results.append({"wxid": victim["wxid"],
+                                   "shark_attack": True, "survived": False,
+                                   "fish_name": victim["fish_name"],
+                                   "last_words": last_words})
+                else:
+                    db.add_fish_event(group_id, victim["wxid"], "shark_attack", {
+                        "fish_name": victim["fish_name"], "date": date_str,
+                        "success": False,
+                        "hp_loss": hp_loss,
+                        "check": check.to_dict(),
+                    })
+                    results.append({"wxid": victim["wxid"],
+                                   "shark_attack": True, "survived": True,
+                                   "fish_name": victim["fish_name"],
+                                   "hp_loss": hp_loss})
 
     # 生成黑市
     black_market = generate_black_market(group_id, date_str)
