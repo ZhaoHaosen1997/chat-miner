@@ -300,7 +300,7 @@ export const updateModelConfig = (id, data) =>
 export const deleteModelConfig = (id) =>
   request(`/settings/models/${id}`, { method: 'DELETE' })
 export const setDefaultModel = (id) =>
-  request(`/settings/models/${id}/set-default`, { method: 'POST' })
+  request(`/settings/models/${id}/set-default`, { method: 'POST', body: '{}' })
 export const checkModelHealth = (id) =>
   request(`/settings/models/${id}/health`)
 export const getModelDefaults = () => request('/settings/defaults')
@@ -385,6 +385,6 @@ export const updatePrompt = (id, updates) =>
 export const deletePrompt = (id) =>
   request(`/settings/prompts/${id}`, { method: 'DELETE' })
 export const setDefaultPrompt = (id) =>
-  request(`/settings/prompts/${id}/default`, { method: 'PUT' })
+  request(`/settings/prompts/${id}/default`, { method: 'PUT', body: '{}' })
 export const getDefaultPrompt = (analysisType) =>
   request(`/settings/prompts/default?analysis_type=${encodeURIComponent(analysisType)}`)

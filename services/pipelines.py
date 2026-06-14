@@ -8,7 +8,7 @@ import time
 import logging
 from typing import Optional
 
-from models.database import save_task_record
+from models.database import save_task_record, get_default_prompt
 from services.analyzer import call_ollama_chat
 from services.task_manager import task_manager
 from config import config

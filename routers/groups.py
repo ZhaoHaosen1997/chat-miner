@@ -41,6 +41,8 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
     file_path = None
     if group.get("file_path"):
         fp = Path(group["file_path"])
+        if not fp.is_absolute():
+            fp = config.BASE_DIR / fp  # v1.5.7: 相对路径基于 EXE 目录解析
         if fp.exists():
             file_path = fp
     if not file_path:
@@ -61,6 +63,8 @@ def _find_merged_data(group: dict) -> Path | None:
     # 1. 与原始文件同目录
     if group.get("file_path"):
         candidate = Path(group["file_path"]).parent / "merged_data.json"
+        if not candidate.is_absolute():
+            candidate = config.BASE_DIR / candidate  # v1.5.7
         if candidate.exists():
             return candidate
     # 2. data 目录下按 import_{群名} 查找

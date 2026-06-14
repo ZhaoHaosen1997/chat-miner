@@ -21,8 +21,11 @@ BASE_DIR = _get_base_dir()
 
 
 class Config:
+    # ==================== 基础路径 ====================
+    BASE_DIR = _get_base_dir()
+
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.5.7"
+    VERSION = "1.5.8"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -190,6 +193,8 @@ class Config:
                     val = data[json_key]
                     if json_key in ("data_dir", "log_dir"):
                         val = Path(str(val))
+                        if not val.is_absolute():
+                            val = BASE_DIR / val  # v1.5.7: 相对路径基于 EXE 目录解析
                     if json_key == "port":
                         val = int(val)
                     if json_key == "log_level":

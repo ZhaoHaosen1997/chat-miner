@@ -53,6 +53,7 @@ def _row_to_config(row: dict) -> dict:
         "endpoint": row["endpoint"],
         "api_key": row["api_key"],
         "model_name": row["model_name"],
+        "is_default": row.get("is_default", 0),
         "is_db_config": True,
         "extra_params": extra,
         "is_enabled": row.get("is_enabled", 1),

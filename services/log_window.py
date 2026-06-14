@@ -239,14 +239,17 @@ class LogWindow:
         """轮询 API 获取实时统计"""
         from config import config
 
+        # 不走系统代理，否则 localhost 请求可能被路由到代理服务器导致连接失败
+        _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
         def _poll():
             if not self._running:
                 return
             try:
                 req = urllib.request.Request(
-                    f"http://localhost:{self.port}/api/stats/global",
+                    f"http://127.0.0.1:{self.port}/api/stats/global",
                     headers={"User-Agent": f"chat-miner-gui/{config.VERSION}"})
-                with urllib.request.urlopen(req, timeout=3) as resp:
+                with _opener.open(req, timeout=3) as resp:
                     data = json.loads(resp.read())
                     s = data.get("data", {})
                     self._root.after(0, lambda: self._update_stats(
@@ -254,9 +257,8 @@ class LogWindow:
                         s.get("total_messages", "-"),
                         s.get("total_analyzed_days", "-"),
                     ))
-            except Exception:
-                # 服务还没就绪，稍后重试
-                pass
+            except Exception as e:
+                logger.debug("GUI 统计轮询失败: %s", e)
             # v1.5.4: 从 DB 读取轮询间隔，fallback 30s
             try:
                 from models.database import get_app_setting

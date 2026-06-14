@@ -71,7 +71,7 @@ async function savePrompt() {
   await loadPrompts()
 }
 async function doDeletePrompt(id) { await deletePrompt(id); await loadPrompts() }
-async function doSetDefaultPrompt(id) { await setDefaultPrompt(id); await loadPrompts() }
+async function doSetDefaultPrompt(id) { try { await setDefaultPrompt(id); await loadPrompts() } catch (e) { alert('设置默认失败: ' + e.message) } }
 watch(promptType, loadPrompts)
 onMounted(() => { loadPrompts() })
 
@@ -256,8 +256,12 @@ async function doDelete(id) {
 }
 
 async function doSetDefault(id) {
-  await setDefaultModel(id)
-  await loadConfigs()
+  try {
+    await setDefaultModel(id)
+    await loadConfigs()
+  } catch (e) {
+    alert('设置默认失败: ' + e.message)
+  }
 }
 
 async function doHealthCheck(id) {
