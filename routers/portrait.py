@@ -41,6 +41,7 @@ async def api_get_portraits(group_id: int):
         try:
             pj = json.loads(p["portrait_json"])
         except (json.JSONDecodeError, TypeError):
+            logger.warning(f"画像列表: portrait_json 损坏 member_id={p.get('member_id', '?')}")
             pj = {}
 
         # 合并成员信息
@@ -81,6 +82,7 @@ async def api_get_single_portrait(group_id: int, member_id: int):
     try:
         pj = json.loads(portrait["portrait_json"])
     except (json.JSONDecodeError, TypeError):
+        logger.warning(f"画像详情: portrait_json 损坏 member_id={member_id}")
         pj = {}
 
     member = get_member(group_id, member_id)

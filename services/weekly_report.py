@@ -468,6 +468,7 @@ def _aggregate_daily_reports(group_id: int, dates: list[str]) -> dict:
         try:
             rj = json.loads(report["report_json"])
         except (json.JSONDecodeError, TypeError):
+            logger.warning(f"日报聚合: JSON 损坏，已跳过 date={report_date}")
             continue
 
         total_msgs += report.get("message_count", 0)
@@ -1477,7 +1478,7 @@ async def generate_monthly_report(
                 overview = wrj.get('week_headline', '') or wrj.get('overview', '')
                 weekly_parts.append(f"第{wk.split('-W')[1]}周: {overview[:80]}")
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.warning(f"月报周上下文: 周报 JSON 损坏 wk={wk}")
     if weekly_parts:
         weekly_context = "\n".join(weekly_parts)
 
@@ -1497,7 +1498,7 @@ async def generate_monthly_report(
                 f"综述: {prev_json.get('overview', '')[:150]}"
             )
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.warning(f"月报上月对比: JSON 损坏 prev_key={prev_key}")
 
     # ---- v0.7.2 新管道：Python统计 + 匿名化采样 ----
     use_new_pipeline = False

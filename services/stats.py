@@ -58,7 +58,7 @@ def compute_group_stats(group_id: int) -> dict:
                     "message_count": report.get("message_count", 0),
                 })
             except json.JSONDecodeError:
-                pass
+                logger.warning(f"群统计: 日报 JSON 损坏，已跳过 date={date}")
 
     # 成员排行（按消息数）
     member_ranking = [

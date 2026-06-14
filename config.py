@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.5.10"
+    VERSION = "1.5.11"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -81,6 +81,8 @@ class Config:
     # ==================== 日志 ====================
     LOG_DIR = BASE_DIR / "logs"
     LOG_LEVEL = "INFO"
+    LOG_RETENTION_DAYS = 90     # 分析日志保留天数
+    LOG_MAX_RECORDS = 500       # 任务记录最多保留条数
 
     # ==================== 默认停用词（v1.0.2：从此常量初始化 DB，不再读取 stopwords.txt） ====================
     DEFAULT_STOPWORDS = """# 用户自定义过滤词

@@ -66,7 +66,9 @@ async def _run_analyze_and_save(group_id: int, group_name: str, date: str, task,
     except Exception as e:
         logger.error(f"日报分析异常 [{group_name} {date}]: {e}", exc_info=True)
         try:
-            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+            # 不覆盖 _do_run 中已设置的更具体错误（如 data_missing/too_few）
+            if not task.error:
+                task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
         except Exception as e2:
             logger.warning("标记任务完成失败: %s", e2)
 
@@ -260,7 +262,9 @@ async def _run_analyze_all(group_id: int, group_name: str, task, model_id: int =
     except Exception as e:
         logger.error(f"批量分析异常 [{group_name}]: {e}", exc_info=True)
         try:
-            task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
+            # 不覆盖 _do_run 中已设置的更具体错误（如 data_missing/too_few）
+            if not task.error:
+                task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
         except Exception as e2:
             logger.warning("标记任务完成失败: %s", e2)
 
@@ -435,6 +439,7 @@ async def api_trending_topics(group_id: int, days: int = 7):
         try:
             rj = json.loads(r["report_json"])
         except (json.JSONDecodeError, TypeError):
+            logger.warning(f"热搜榜: 报告 JSON 损坏，已跳过 date={r.get('date', '?')}")
             continue
 
         date = r["date"]
@@ -525,6 +530,7 @@ async def api_get_recent_reports(group_id: int, limit: int = 7):
                 "active_members": r["active_members"],
             })
         except json.JSONDecodeError:
+            logger.warning(f"最近报告: JSON 损坏，仅显示基本字段 date={r.get('date', '?')}")
             result.append({
                 "date": r["date"],
                 "message_count": r["message_count"],

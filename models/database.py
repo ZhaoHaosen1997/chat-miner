@@ -42,38 +42,72 @@ def db():
         conn.close()
 
 
-def cleanup_old_logs(retention_days: int = 90, max_records: int = 500):
+def cleanup_old_logs(retention_days: int = None, max_records: int = None):
     """清理过期的分析日志和任务记录
 
     Args:
-        retention_days: 保留最近 N 天的记录
-        max_records: 每个表最多保留的记录数
+        retention_days: 保留最近 N 天的记录（None=从 config 读取）
+        max_records: 每个表最多保留的记录数（None=从 config 读取）
     """
+    if retention_days is None:
+        retention_days = getattr(config, "LOG_RETENTION_DAYS", 90)
+    if max_records is None:
+        max_records = getattr(config, "LOG_MAX_RECORDS", 500)
+
     try:
         with db() as conn:
             # 清理分析日志
-            conn.execute(
+            deleted_logs = conn.execute(
                 "DELETE FROM analysis_log WHERE created_at < datetime('now', ?)",
                 (f'-{retention_days} days',)
-            )
+            ).rowcount
             # 保留最近 max_records 条任务记录
-            conn.execute("""
+            deleted_tasks = conn.execute("""
                 DELETE FROM task_records WHERE id NOT IN (
                     SELECT id FROM task_records ORDER BY created_at DESC LIMIT ?
                 )
-            """, (max_records,))
+            """, (max_records,)).rowcount
+            if deleted_logs or deleted_tasks:
+                logger.info(
+                    "日志清理: 删除 %d 条旧分析日志 (保留%d天), %d 条旧任务记录 (保留%d条)",
+                    deleted_logs, retention_days, deleted_tasks, max_records
+                )
     except Exception as e:
         logger.warning("清理过期日志失败: %s", e)  # 清理失败不影响主流程
 
 
 def _backup_db_if_exists():
-    """启动前自动备份数据库（仅首次，防止迁移损坏旧数据）"""
+    """启动前自动备份数据库（版本变化时备份，防止迁移损坏旧数据）
+
+    在 .db.bak 旁边写一个 .db.bak.version 文件记录备份时的版本号。
+    当前运行版本与备份版本不同时 → 创建新备份（覆盖旧备份）。
+    """
     import shutil
+    from config import config
     db_path = get_db_path()
     backup_path = db_path.with_suffix(".db.bak")
-    if db_path.exists() and db_path.stat().st_size > 0 and not backup_path.exists():
+    version_path = db_path.with_suffix(".db.bak.version")
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        return
+
+    need_backup = False
+    if not backup_path.exists():
+        need_backup = True
+    else:
+        # 版本变化时重新备份
+        try:
+            old_version = version_path.read_text().strip() if version_path.exists() else ""
+            if old_version != config.VERSION:
+                logger.info(f"版本变化 {old_version} → {config.VERSION}，创建新备份")
+                need_backup = True
+        except Exception:
+            need_backup = True
+
+    if need_backup:
         try:
             shutil.copy2(db_path, backup_path)
+            version_path.write_text(config.VERSION)
+            logger.info(f"数据库已备份: {backup_path} (v{config.VERSION})")
         except Exception as e:
             logger.warning("数据库备份失败: %s", e)  # 备份失败不影响启动
 
@@ -396,8 +430,8 @@ def init_db():
         _migrate_v1_5_2(conn)
         # v1.5.4: 可配置提示词 + 轮询间隔
         _migrate_v1_5_4(conn)
-    # 清理过期日志（不阻塞启动）
-    cleanup_old_logs()
+    # 注：cleanup_old_logs() 移至 main.py lifespan，在 load_from_db() 之后执行
+    # 确保用户通过设置页面配置的保留策略生效
 
 
 def _migrate_weflow_settings(conn):
@@ -669,6 +703,11 @@ _SETTINGS_DEFS = [
          "画像页轮询间隔(毫秒)"),
         ("poll_interval_stats_s", "30", "int",
          "GUI统计轮询间隔(秒)"),
+        # 日志清理
+        ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
+         "分析日志保留天数"),
+        ("log_max_records", str(config.LOG_MAX_RECORDS), "int",
+         "任务记录最多保留条数"),
     ]
     # _seed_app_settings 使用 _SETTINGS_DEFS + _get_settings_registry() 统一处理
 
@@ -720,16 +759,22 @@ def _migrate_db(conn):
             DELETE FROM member_portraits
             WHERE member_id NOT IN (SELECT id FROM group_members)
         """).rowcount
+        if deleted:
+            logger.warning("数据库迁移: 删除 %d 行孤儿画像（member_id 不在 group_members 中），"
+                          "备份文件: %s", deleted, get_db_path().with_suffix(".db.bak"))
         if fixed_rows or deleted:
             logger.info("数据库迁移: 修复 %d 行, 删除 %d 行", fixed_rows, deleted)
         # 3. 清理重复：按 wxid 去重，保留 id 最大的
-        conn.execute("""
+        dup_cursor = conn.execute("""
             DELETE FROM group_members WHERE id NOT IN (
                 SELECT MAX(id) FROM group_members
                 WHERE wxid IS NOT NULL AND wxid != ''
                 GROUP BY group_id, wxid
             )
         """)
+        if dup_cursor.rowcount:
+            logger.warning("数据库迁移: 删除 %d 个重复成员记录（按 wxid 去重），备份文件: %s",
+                         dup_cursor.rowcount, get_db_path().with_suffix(".db.bak"))
         # 4. 删旧索引 + 建 wxid 新索引
         if has_sender_index:
             for idx_name in indexes:
@@ -1084,16 +1129,6 @@ def log_analysis(group_id: int, date: str, analysis_type: str,
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (group_id, date, analysis_type, status, model_used, duration_ms, error_msg)
         )
-
-
-def get_group_dates(group_id: int) -> list[str]:
-    """获取某个群有消息的日期列表"""
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT date_range_start, date_range_end FROM chat_groups WHERE id=?",
-            (group_id,)
-        ).fetchone()
-    return dict(rows) if rows else None
 
 
 # ==================== 任务记录 CRUD ====================
@@ -1576,7 +1611,6 @@ def remove_item(group_id: int, wxid: str, item_key: str, qty: int = 1) -> bool:
             (group_id, wxid, item_key)
         ).fetchone()
         if not row or row["quantity"] < qty:
-            conn.close()
             return False
         new_qty = row["quantity"] - qty
         if new_qty <= 0:
@@ -1627,7 +1661,6 @@ def buy_from_market(group_id: int, wxid: str, date: str,
             (group_id, date, item_key)
         ).fetchone()
         if not row:
-            conn.close()
             return None
         conn.execute(
             """UPDATE fish_black_market SET stock_remaining = stock_remaining - 1
@@ -1688,7 +1721,6 @@ def update_model_config(config_id: int, **kwargs) -> bool:
             "SELECT * FROM model_configs WHERE id=?", (config_id,)
         ).fetchone()
         if not existing:
-            conn.close()
             return False
 
         # 如果设置 is_default=1，先清除同类型其他默认
@@ -1716,7 +1748,6 @@ def delete_model_config(config_id: int) -> bool:
             "SELECT * FROM model_configs WHERE id=?", (config_id,)
         ).fetchone()
         if not existing:
-            conn.close()
             return False
 
         conn.execute("DELETE FROM model_configs WHERE id=?", (config_id,))
@@ -1867,6 +1898,9 @@ def load_app_settings_to_config():
         "weflow_base_url": "WEFLOW_BASE_URL",
         "weflow_access_token": "WEFLOW_ACCESS_TOKEN",
         "weflow_sync_interval_hours": "WEFLOW_SYNC_INTERVAL_HOURS",
+        # 日志清理
+        "log_retention_days": "LOG_RETENTION_DAYS",
+        "log_max_records": "LOG_MAX_RECORDS",
     }
 
     for row in rows:

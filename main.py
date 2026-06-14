@@ -72,6 +72,9 @@ async def lifespan(app: FastAPI):
     config.ensure_dirs()
     init_db()
     config.load_from_db()  # v1.0.2: 从 DB 加载可热更新配置
+    # 日志清理在 load_from_db() 之后，确保用户配置的保留策略生效
+    from models.database import cleanup_old_logs
+    cleanup_old_logs()
     logger.info(f"数据库: {config.DATABASE_PATH}")
     if config.GPU_LOCK_ENABLED:
         logger.info(f"Ollama: {config.OLLAMA_HOST} | 模型: {config.OLLAMA_MODEL}")

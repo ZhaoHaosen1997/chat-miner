@@ -279,6 +279,7 @@ def _collect_monthly_summaries(group_id: int, year: int) -> list[dict]:
             try:
                 rj = json.loads(report["report_json"])
             except (json.JSONDecodeError, TypeError):
+                logger.warning(f"年报月报聚合: JSON 损坏 period_key={period_key}")
                 rj = {}
             summaries.append({
                 "month": month,

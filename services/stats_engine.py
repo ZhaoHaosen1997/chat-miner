@@ -451,6 +451,7 @@ def compute_emotion_timeline(group_id: int) -> list[dict]:
             if mood:
                 timeline.append({"date": date, "mood": mood, "mood_emoji": emoji})
         except (json.JSONDecodeError, TypeError):
+            logger.warning(f"情绪时间线: 日报 JSON 损坏 date={date}")
             continue
     return timeline
 
@@ -919,10 +920,10 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
                         if len(quotes) >= 3:
                             return quotes
             except (json.JSONDecodeError, TypeError):
+                logger.warning(f"成员精彩发言: 日报 JSON 损坏 date={date}")
                 continue
     except Exception as e:
         logger.warning("查询成员精彩发言失败: %s", e)
-        pass
 
     # 如果没有找到，从该成员的消息中挑最长的一条作为亮点
     if not quotes and messages:
