@@ -204,7 +204,8 @@ watch(activeTaskId, (newVal, oldVal) => {
     triggerRefresh?.()
   }
   if (newVal && !oldVal) {
-    _refreshTimer = setInterval(() => load(true), 10000)  // v1.5.2: 10s间隔，降低IO
+    const interval = parseInt(localStorage.getItem('poll_interval_portraits_ms')) || 10000
+    _refreshTimer = setInterval(() => load(true), interval)
   }
 })
 onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })

@@ -13,11 +13,91 @@ import {
   ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio, FileText, Settings2, ClipboardList,
 } from 'lucide-vue-next'
 import TaskHistory from './TaskHistory.vue'
+import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt, getDefaultPrompt } from '../api/index.js'
 
 const router = useRouter()
 
-// ---- v1.5.2: Tab 切换 ----
+// ---- v1.5.4: Tab 切换 ----
 const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks'
+
+// v1.5.4: 折叠面板 (key → true=展开)
+const collapsedSections = ref(loadCollapsed())
+function loadCollapsed() {
+  try { return JSON.parse(localStorage.getItem('settingsCollapsed') || '{}') } catch { return {} }
+}
+function saveCollapsed() {
+  localStorage.setItem('settingsCollapsed', JSON.stringify(collapsedSections.value))
+}
+function toggleSection(key) {
+  collapsedSections.value[key] = !collapsedSections.value[key]
+  saveCollapsed()
+}
+function isExpanded(key) {
+  return collapsedSections.value[key] !== false  // 默认展开
+}
+
+// v1.5.4: 提示词管理
+const promptType = ref('daily')
+const promptTypeLabel = { daily:'日报', portrait:'画像', weekly:'周报', monthly:'月报', annual:'年报', comprehensive:'全面画像' }
+const prompts = ref([])
+const promptsLoading = ref(false)
+const showPromptForm = ref(false)
+const editingPromptId = ref(null)
+const promptForm = ref({ name:'', system_prompt:'', is_default:false })
+async function loadPrompts() {
+  promptsLoading.value = true
+  try { prompts.value = await getPrompts(promptType.value) } catch { prompts.value = [] }
+  finally { promptsLoading.value = false }
+}
+async function openPromptCreate() {
+  editingPromptId.value = null
+  let defaultText = ''
+  try { const r = await getDefaultPrompt(promptType.value); defaultText = r.system_prompt || '' } catch {}
+  promptForm.value = { name:'', system_prompt: defaultText, is_default:false }
+  showPromptForm.value = true
+}
+function openPromptEdit(p) {
+  editingPromptId.value = p.id
+  promptForm.value = { name:p.name, system_prompt:p.system_prompt, is_default:p.is_default }
+  showPromptForm.value = true
+}
+async function savePrompt() {
+  if (editingPromptId.value) {
+    await updatePrompt(editingPromptId.value, { name:promptForm.value.name, system_prompt:promptForm.value.system_prompt, is_default:promptForm.value.is_default })
+  } else {
+    await createPrompt(promptForm.value.name, promptType.value, promptForm.value.system_prompt, promptForm.value.is_default)
+  }
+  showPromptForm.value = false
+  await loadPrompts()
+}
+async function doDeletePrompt(id) { await deletePrompt(id); await loadPrompts() }
+async function doSetDefaultPrompt(id) { await setDefaultPrompt(id); await loadPrompts() }
+watch(promptType, loadPrompts)
+onMounted(() => { loadPrompts() })
+
+// v1.5.4: 轮询间隔 (毫秒→显示用秒方便用户)
+const pollDashboardS = ref(10)
+const pollPortraitsS = ref(10)
+const pollStatsS = ref(30)
+async function loadPollSettings() {
+  try {
+    const settings = await getAppSettings()
+    const map = {}
+    for (const s of settings) map[s.key] = { value:s.value, value_type:s.value_type }
+    if (map.poll_interval_dashboard_ms) pollDashboardS.value = Math.round(parseInt(map.poll_interval_dashboard_ms.value)/1000) || 10
+    if (map.poll_interval_portraits_ms) pollPortraitsS.value = Math.round(parseInt(map.poll_interval_portraits_ms.value)/1000) || 10
+    if (map.poll_interval_stats_s) pollStatsS.value = parseInt(map.poll_interval_stats_s.value) || 30
+  } catch {}
+}
+async function savePollSetting(key, seconds) {
+  const ms = key.endsWith('_ms') ? seconds * 1000 : seconds
+  await updateAppSetting(key, String(ms))
+  // 同步到 localStorage 供 Dashboard/Portraits 直接读取
+  localStorage.setItem('poll_interval_dashboard_ms', pollDashboardS.value * 1000)
+  localStorage.setItem('poll_interval_portraits_ms', pollPortraitsS.value * 1000)
+  localStorage.setItem('poll_interval_stats_s', pollStatsS.value)
+}
+onMounted(loadPollSettings)
 
 // ---- State ----
 const configs = ref([])
@@ -646,6 +726,33 @@ onMounted(async () => {
                    class="w-28 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
         </div>
       </div>
+
+      <!-- v1.5.4: 提示词风格 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <div class="w-1 h-5 rounded-full bg-indigo-400"></div><Sparkles :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">提示词风格</span></div>
+        <div class="p-5 space-y-4">
+          <p class="text-xs text-slate-400">自定义 AI 的角色和语气，仅修改 system prompt（不影响 JSON 输出格式）</p>
+          <div class="flex items-center gap-2">
+            <select v-model="promptType" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"><option v-for="(label, key) in promptTypeLabel" :key="key" :value="key">{{ label }}</option></select>
+            <button @click="openPromptCreate" class="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"><Plus :size="14" />添加</button></div>
+          <div v-if="promptsLoading" class="text-center py-4 text-sm text-slate-400"><Loader2 :size="16" class="animate-spin inline mr-1" />加载中</div>
+          <div v-else-if="!prompts.length" class="text-center py-4 text-sm text-slate-400">暂无自定义提示词，使用默认风格</div>
+          <div v-else class="space-y-2">
+            <div v-for="p in prompts" :key="p.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors">
+              <div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="text-sm font-medium text-slate-700">{{ p.name }}</span><span v-if="p.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">默认</span></div><div class="text-xs text-slate-400 truncate mt-0.5">{{ p.system_prompt?.slice(0, 80) }}{{ (p.system_prompt || '').length > 80 ? '...' : '' }}</div></div>
+              <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                <button v-if="!p.is_default" @click="doSetDefaultPrompt(p.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
+                <button @click="openPromptEdit(p)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
+                <button v-if="!p.is_default" @click="doDeletePrompt(p.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button></div></div></div></div></div>
+
+      <!-- v1.5.4: 轮询间隔 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-slate-400"></div><Clock :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">轮询间隔</span></div>
+        <div class="p-5 grid grid-cols-3 gap-4">
+          <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS = Number($event.target.value); savePollSetting('poll_interval_dashboard_ms', pollDashboardS)" min="3" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS = Number($event.target.value); savePollSetting('poll_interval_portraits_ms', pollPortraitsS)" min="3" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS = Number($event.target.value); savePollSetting('poll_interval_stats_s', pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div></div></div>
     </div>
 
     <!-- ====== 弹窗 ====== -->
@@ -694,5 +801,25 @@ onMounted(async () => {
         </div>
       </div>
     </Teleport>
+
+  <!-- v1.5.4: 提示词编辑弹窗 -->
+  <Teleport to="body">
+    <div v-if="showPromptForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showPromptForm = false">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-4">
+        <h3 class="text-lg font-semibold text-slate-800">{{ editingPromptId ? '编辑提示词' : '添加提示词' }}</h3>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">名称</label>
+          <input v-model="promptForm.name" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" placeholder="如：吐槽风" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">System Prompt <span class="text-slate-400 font-normal">（角色/风格描述，不含 JSON 格式指令）</span></label>
+          <textarea v-model="promptForm.system_prompt" rows="5" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none resize-y" placeholder="如：你是一位毒舌的群聊观察者..."></textarea></div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input v-model="promptForm.is_default" type="checkbox" class="w-4 h-4 rounded border-slate-300 text-indigo-600" /><span class="text-sm text-slate-700">设为默认</span></label>
+        <div class="flex gap-2 pt-2">
+          <button @click="showPromptForm = false" class="flex-1 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">取消</button>
+          <button @click="savePrompt" :disabled="!promptForm.name" class="flex-1 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">{{ editingPromptId ? '保存' : '创建' }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
   </div>
 </template>

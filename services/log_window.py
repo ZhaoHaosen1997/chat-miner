@@ -253,7 +253,14 @@ class LogWindow:
             except Exception:
                 # 服务还没就绪，稍后重试
                 pass
-            self._root.after(30000, _poll)  # v1.5.2: 30s间隔，降低IO
+            # v1.5.4: 从 DB 读取轮询间隔，fallback 30s
+            try:
+                from models.database import get_app_setting
+                s = get_app_setting("poll_interval_stats_s")
+                interval_s = int(s["value"]) if s and s.get("value") else 30
+            except Exception:
+                interval_s = 30
+            self._root.after(interval_s * 1000, _poll)
 
         self._root.after(2000, _poll)
 

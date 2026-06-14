@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.database import (
+    get_default_prompt,
     create_persona, link_member_to_persona, unlink_member_from_persona,
     get_persona, get_persona_by_member, list_personas, delete_persona,
     merge_personas,
@@ -298,7 +299,7 @@ async def _run_comprehensive_portrait(persona: dict, task, model_id: int | None 
         # 3. 调用在线模型
         from services.online_model import call_online_chat
         result = await call_online_chat(
-            system_prompt=COMPREHENSIVE_PORTRAIT_SYSTEM,
+            system_prompt=get_default_prompt("comprehensive") or COMPREHENSIVE_PORTRAIT_SYSTEM,
             user_prompt=user_prompt,
             model_config=model_config,
             temperature=0.7,

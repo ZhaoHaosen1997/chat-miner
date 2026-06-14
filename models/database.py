@@ -394,6 +394,8 @@ def init_db():
         _migrate_v1_5_0(conn)
         # v1.5.2: 全面画像
         _migrate_v1_5_2(conn)
+        # v1.5.4: 可配置提示词 + 轮询间隔
+        _migrate_v1_5_4(conn)
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
 
@@ -522,6 +524,25 @@ def _migrate_v1_5_2(conn):
         logging.getLogger(__name__).info('DB migrate v1.5.2: added personas.comprehensive_portrait_updated')
 
 
+def _migrate_v1_5_4(conn):
+    """v1.5.4: prompt_profiles 表 + 轮询间隔 app_settings
+
+    纯增量：仅 CREATE TABLE + INSERT 默认数据。
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS prompt_profiles (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT NOT NULL,
+            analysis_type TEXT NOT NULL,
+            system_prompt TEXT NOT NULL DEFAULT '',
+            is_default    INTEGER NOT NULL DEFAULT 0,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    logger.info("DB migrate v1.5.4: prompt_profiles table ready")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -641,6 +662,13 @@ _SETTINGS_DEFS = [
          "WeFlow Access Token"),
         ("weflow_sync_interval_hours", str(config.WEFLOW_SYNC_INTERVAL_HOURS), "int",
          "WeFlow 自动同步间隔(小时)"),
+        # v1.5.4: 轮询间隔
+        ("poll_interval_dashboard_ms", "10000", "int",
+         "仪表盘轮询间隔(毫秒)"),
+        ("poll_interval_portraits_ms", "10000", "int",
+         "画像页轮询间隔(毫秒)"),
+        ("poll_interval_stats_s", "30", "int",
+         "GUI统计轮询间隔(秒)"),
     ]
     # _seed_app_settings 使用 _SETTINGS_DEFS + _get_settings_registry() 统一处理
 
@@ -2112,3 +2140,89 @@ def get_cross_group_wxids() -> list[dict]:
             ORDER BY group_cnt DESC
         """).fetchall()
     return [dict(r) for r in rows]
+
+# ==================== Prompt Profiles v1.5.4 ====================
+
+def list_prompt_profiles(analysis_type: str = '') -> list[dict]:
+    """列出提示词配置，可按 analysis_type 筛选"""
+    with db() as conn:
+        if analysis_type:
+            rows = conn.execute(
+                "SELECT * FROM prompt_profiles WHERE analysis_type=? ORDER BY is_default DESC, id ASC",
+                (analysis_type,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM prompt_profiles ORDER BY analysis_type, is_default DESC, id ASC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_prompt_profile(profile_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM prompt_profiles WHERE id=?", (profile_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_prompt_profile(name: str, analysis_type: str, system_prompt: str, is_default: bool = False) -> int:
+    with db() as conn:
+        if is_default:
+            conn.execute(
+                "UPDATE prompt_profiles SET is_default=0, updated_at=CURRENT_TIMESTAMP WHERE analysis_type=? AND is_default=1",
+                (analysis_type,)
+            )
+        cur = conn.execute(
+            "INSERT INTO prompt_profiles (name, analysis_type, system_prompt, is_default) VALUES (?,?,?,?)",
+            (name, analysis_type, system_prompt, 1 if is_default else 0)
+        )
+        return cur.lastrowid
+
+
+def update_prompt_profile(profile_id: int, **kwargs) -> bool:
+    allowed = {"name", "system_prompt", "is_default"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not fields:
+        return False
+    with db() as conn:
+        existing = conn.execute("SELECT * FROM prompt_profiles WHERE id=?", (profile_id,)).fetchone()
+        if not existing:
+            return False
+        if fields.get("is_default"):
+            conn.execute(
+                "UPDATE prompt_profiles SET is_default=0, updated_at=CURRENT_TIMESTAMP WHERE analysis_type=? AND is_default=1 AND id!=?",
+                (existing["analysis_type"], profile_id)
+            )
+        fields["updated_at"] = __import__('datetime').datetime.now().isoformat()
+        sets = ", ".join(f"{k}=?" for k in fields)
+        values = list(fields.values()) + [profile_id]
+        conn.execute(f"UPDATE prompt_profiles SET {sets} WHERE id=?", values)
+    return True
+
+
+def delete_prompt_profile(profile_id: int) -> bool:
+    with db() as conn:
+        existing = conn.execute("SELECT * FROM prompt_profiles WHERE id=?", (profile_id,)).fetchone()
+        if not existing:
+            return False
+        conn.execute("DELETE FROM prompt_profiles WHERE id=?", (profile_id,))
+        if existing["is_default"]:
+            first = conn.execute(
+                "SELECT id FROM prompt_profiles WHERE analysis_type=? ORDER BY id ASC LIMIT 1",
+                (existing["analysis_type"],)
+            ).fetchone()
+            if first:
+                conn.execute("UPDATE prompt_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (first["id"],))
+    return True
+
+
+def get_default_prompt(analysis_type: str) -> str | None:
+    """获取某分析类型的默认 system_prompt，无配置时返回 None（调用方用硬编码 fallback）"""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT system_prompt FROM prompt_profiles WHERE analysis_type=? AND is_default=1 LIMIT 1",
+            (analysis_type,)
+        ).fetchone()
+    return row["system_prompt"] if row and row["system_prompt"] else None
+

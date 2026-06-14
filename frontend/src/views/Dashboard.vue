@@ -22,7 +22,8 @@ let _refreshTimer = null
 watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
-    _refreshTimer = setInterval(() => loadTaskProgress(), 10000)
+    const interval = parseInt(localStorage.getItem('poll_interval_dashboard_ms')) || 10000
+    _refreshTimer = setInterval(() => loadTaskProgress(), interval)
   } else if (oldVal) {
     // 任务结束时清理状态 + 刷新数据
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }

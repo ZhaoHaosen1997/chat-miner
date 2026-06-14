@@ -1,3 +1,4 @@
+from models.database import get_default_prompt
 """
 年度报告 + 颁奖典礼 生成服务
 

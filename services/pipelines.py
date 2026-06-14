@@ -699,7 +699,7 @@ async def run_daily_pipeline_online(
 
     try:
         result = await call_online_chat(
-            system_prompt=DAILY_ONLINE_SYSTEM,
+            system_prompt=get_default_prompt("daily") or DAILY_ONLINE_SYSTEM,
             user_prompt=user_prompt,
             model_config=model_config,
             temperature=0.3,
@@ -1083,7 +1083,7 @@ async def run_portrait_pipeline_online(
 
     try:
         result = await call_online_chat(
-            system_prompt=PORTRAIT_ONLINE_SYSTEM,
+            system_prompt=get_default_prompt("portrait") or PORTRAIT_ONLINE_SYSTEM,
             user_prompt=user_prompt,
             model_config=model_config,
             temperature=0.4,

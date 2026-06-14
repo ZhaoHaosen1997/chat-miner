@@ -8,6 +8,8 @@ from pydantic import BaseModel, field_validator
 from config import config
 from models.database import (
     list_model_configs, get_model_config, create_model_config,
+    list_prompt_profiles, get_prompt_profile, create_prompt_profile,
+    update_prompt_profile, delete_prompt_profile,
     update_model_config, delete_model_config,
     get_all_app_settings, upsert_app_setting, upsert_app_settings_batch,
     get_stopwords_text,
@@ -312,3 +314,87 @@ async def api_update_stopwords(body: StopwordsUpdate):
         "message": "停用词已更新，下次分析时生效",
         "data": None,
     }
+
+
+# ---- v1.5.4: 提示词管理 ----
+
+class PromptCreate(BaseModel):
+    name: str
+    analysis_type: str
+    system_prompt: str = ""
+    is_default: bool = False
+
+class PromptUpdate(BaseModel):
+    name: str | None = None
+    system_prompt: str | None = None
+    is_default: bool | None = None
+
+
+@router.get("/prompts")
+async def api_list_prompts(analysis_type: str = ""):
+    """列出提示词配置"""
+    profiles = list_prompt_profiles(analysis_type)
+    return {"code": 200, "message": "ok", "data": profiles}
+
+
+@router.post("/prompts")
+async def api_create_prompt(body: PromptCreate):
+    if not body.name.strip():
+        raise HTTPException(400, "名称不能为空")
+    if not body.analysis_type:
+        raise HTTPException(400, "分析类型不能为空")
+    pid = create_prompt_profile(body.name.strip(), body.analysis_type,
+                                 body.system_prompt, body.is_default)
+    profile = get_prompt_profile(pid)
+    return {"code": 200, "message": "创建成功", "data": profile}
+
+
+@router.put("/prompts/{profile_id}")
+async def api_update_prompt(profile_id: int, body: PromptUpdate):
+    updates = {}
+    if body.name is not None:
+        updates["name"] = body.name.strip()
+    if body.system_prompt is not None:
+        updates["system_prompt"] = body.system_prompt
+    if body.is_default is not None:
+        updates["is_default"] = body.is_default
+    if not updates:
+        raise HTTPException(400, "无更新字段")
+    if not update_prompt_profile(profile_id, **updates):
+        raise HTTPException(404, "配置不存在")
+    profile = get_prompt_profile(profile_id)
+    return {"code": 200, "message": "更新成功", "data": profile}
+
+
+@router.delete("/prompts/{profile_id}")
+async def api_delete_prompt(profile_id: int):
+    if not delete_prompt_profile(profile_id):
+        raise HTTPException(404, "配置不存在")
+    return {"code": 200, "message": "已删除", "data": None}
+
+
+@router.put("/prompts/{profile_id}/default")
+async def api_set_default_prompt(profile_id: int):
+    """设为默认"""
+    if not update_prompt_profile(profile_id, is_default=True):
+        raise HTTPException(404, "配置不存在")
+    profile = get_prompt_profile(profile_id)
+    return {"code": 200, "message": "已设为默认", "data": profile}
+
+
+# v1.5.4: 各分析类型的硬编码默认 system prompt（供前端预填参考）
+_DEFAULT_SYSTEM_PROMPTS = {
+    "daily": "你是一个群聊观察者，善于从对话中提取关键信息。请用简洁有趣的方式总结。",
+    "portrait": "你是一个性格分析师，善于从聊天记录中洞察说话者的性格特征和语言风格。",
+    "weekly": "你是一位喜剧作家+人类学家+小说家。请用幽默深刻的笔触撰写群聊周报。",
+    "monthly": "你是一位人类学家+社区分析师+电影预告片编剧。请用宏大叙事撰写群聊月报。",
+    "annual": "你是一位颁奖典礼主持人+群聊人类学家。请用典礼风格撰写年度报告。",
+    "comprehensive": "你是一位跨群人格分析专家。同一个人在不同群里可能展现不同侧面，你的任务是综合所有群的表现，提炼出核心人格特质和群际差异。",
+}
+
+
+@router.get("/prompts/default")
+async def api_get_default_prompt(analysis_type: str):
+    """获取某分析类型的系统默认提示词（供新建时参考）"""
+    prompt = _DEFAULT_SYSTEM_PROMPTS.get(analysis_type, "")
+    return {"code": 200, "message": "ok", "data": {"analysis_type": analysis_type, "system_prompt": prompt}}

@@ -1,3 +1,4 @@
+from models.database import get_default_prompt
 """
 周报/月报生成服务
 

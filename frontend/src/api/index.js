@@ -375,3 +375,16 @@ export const analyzeComprehensivePortrait = async (personaId, modelId = null) =>
   return data.data  // { task_id, status }
 }
 
+// ==================== Prompts v1.5.4 ====================
+export const getPrompts = (analysisType = '') =>
+  request(`/settings/prompts${analysisType ? `?analysis_type=${encodeURIComponent(analysisType)}` : ''}`)
+export const createPrompt = (name, analysis_type, system_prompt, is_default = false) =>
+  request('/settings/prompts', { method: 'POST', body: JSON.stringify({ name, analysis_type, system_prompt, is_default }) })
+export const updatePrompt = (id, updates) =>
+  request(`/settings/prompts/${id}`, { method: 'PUT', body: JSON.stringify(updates) })
+export const deletePrompt = (id) =>
+  request(`/settings/prompts/${id}`, { method: 'DELETE' })
+export const setDefaultPrompt = (id) =>
+  request(`/settings/prompts/${id}/default`, { method: 'PUT' })
+export const getDefaultPrompt = (analysisType) =>
+  request(`/settings/prompts/default?analysis_type=${encodeURIComponent(analysisType)}`)
