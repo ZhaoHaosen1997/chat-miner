@@ -189,7 +189,10 @@ class TaskManager:
             yield f"data: {{\"error\": \"任务不存在\"}}\n\n"
             return
 
-        # 先发当前状态
+        # 先发重连间隔设置（30 秒，避免浏览器默认 3 秒过于激进）
+        yield "retry: 30000\n\n"
+
+        # 再发当前状态
         yield task.to_event()
 
         # 持续监听状态变化

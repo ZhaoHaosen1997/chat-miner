@@ -22,7 +22,8 @@ let _refreshTimer = null
 watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
-    const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_dashboard_ms')) || 10000)
+    // v1.5.12: 提高到 30s 默认间隔，减少长时间运行时的磁盘 I/O 压力
+    const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_dashboard_ms')) || 30000)
     _refreshTimer = setInterval(() => loadTaskProgress(), interval)
   } else if (oldVal) {
     // 任务结束时清理状态 + 刷新数据

@@ -204,7 +204,8 @@ watch(activeTaskId, (newVal, oldVal) => {
     triggerRefresh?.()
   }
   if (newVal && !oldVal) {
-    const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_portraits_ms')) || 10000)
+    // v1.5.12: 提高到 30s 默认间隔，减少长时间运行时的磁盘 I/O 压力
+    const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_portraits_ms')) || 30000)
     _refreshTimer = setInterval(() => load(true), interval)
   }
 })

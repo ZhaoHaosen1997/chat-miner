@@ -19,8 +19,10 @@ const expanded = ref(true)
 const showCancelConfirm = ref(false)
 const taskType = ref('')
 let eventSource = null
+let reconnectCount = 0
 
 function connect() {
+  reconnectCount = 0  // v1.5.12: 重置重连计数器
   const url = `/api/tasks/${props.taskId}/stream`
   eventSource = new EventSource(url)
 
@@ -37,6 +39,8 @@ function connect() {
       duration.value = data.duration_ms || 0
       if (data.type) taskType.value = data.type
 
+      reconnectCount = 0  // v1.5.12: 收到有效消息时重置重连计数，防止间歇性断连累计超限
+
       if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
         emit('done', data)
         eventSource?.close()
@@ -45,23 +49,30 @@ function connect() {
   }
 
   eventSource.onerror = () => {
-    // v1.5.5: 防止浏览器自动重连导致的磁盘 I/O 泄漏
+    // v1.5.12: 防止浏览器自动重连导致的磁盘 I/O 泄漏
     // 终止状态：立即关闭
     if (status.value === 'done' || status.value === 'failed' || status.value === 'cancelled') {
       eventSource?.close()
       return
     }
     // 连接出错且未收到过任何有效消息：等待 5s 后若仍未连接成功则关闭
-    // 避免浏览器在任务不存在时陷入无限重连循环
     if (status.value === 'pending') {
-      const es = eventSource  // v1.5.5: 捕获当前 EventSource 实例，防止闭包引用被新任务覆盖
+      const es = eventSource
       setTimeout(() => {
         if (status.value === 'pending' && es) {
           es.close()
           emit('done', { status: 'failed', type: '', step: '连接失败', error: { type: 'connection_lost', detail: '无法建立 SSE 连接' } })
         }
       }, 5000)
+      return
     }
+    // 运行状态（inference/waiting_gpu/parsing 等）：限次重连，最多 5 次
+    reconnectCount++
+    if (reconnectCount >= 5) {
+      eventSource?.close()
+      emit('done', { status: 'failed', type: '', step: '连接已断开', error: { type: 'connection_lost', detail: '与服务器连接已断开，请刷新页面重试' } })
+    }
+    // 未达到上限：浏览器会继续自动重连（服务端已通过 SSE retry: 30000 调整为 30s 间隔）
   }
 }
 
