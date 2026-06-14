@@ -1,7 +1,5 @@
 """
 周报/月报生成服务
-"""
-from models.database import get_default_prompt
 
 v0.7.2 架构升级：
 - 新增 _extract_period_raw_data() 直接从原始消息提取 Python 统计 + 匿名化采样
@@ -12,6 +10,7 @@ v0.7.2 架构升级：
 - 自然周：ISO 8601，周一~周日，标识如 2026-W23
 - 自然月：1日~月末，标识如 2026-06
 """
+from models.database import get_default_prompt
 import json
 import re
 import logging

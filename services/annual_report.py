@@ -1,7 +1,5 @@
 """
 年度报告 + 颁奖典礼 生成服务
-"""
-from models.database import get_default_prompt
 
 v0.11.0：
 - 利用 DeepSeek V4 Flash 1M 上下文，基于全年数据 + 月报摘要生成年度颁奖典礼
@@ -11,6 +9,7 @@ v0.11.0：
 数据流：
 原始消息 → Python 统计 + 匿名化采样 → 月报摘要聚合 → DeepSeek → 脱敏还原 → 保存
 """
+from models.database import get_default_prompt
 import json
 import re
 import logging
