@@ -91,17 +91,18 @@ def get_treasury_endpoint(group_id: int):
 
 @router.get("/upgrades")
 def get_upgrades_endpoint(group_id: int):
-    """获取鱼塘升级状态"""
-    upgrades = db.get_upgrades(group_id)
-    return {"code": 200, "message": "ok", "data": [
-        {"key": u["upgrade_key"], "level": u["level"],
-         "name": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("name", ""),
-         "icon": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("icon", ""),
-         "desc": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("desc", ""),
-         "next_cost": fp.UPGRADE_COSTS[u["level"]] if u["level"] < 5 else 0,
-         }
-        for u in upgrades
-    ]}
+    """获取鱼塘升级状态（含未购买的升级项，level=0）"""
+    purchased = {u["upgrade_key"]: u["level"] for u in db.get_upgrades(group_id)}
+    result = []
+    for key, defn in fp.UPGRADE_DEFS.items():
+        level = purchased.get(key, 0)
+        costs = defn.get("costs") or fp.UPGRADE_COSTS
+        result.append({
+            "key": key, "level": level,
+            "name": defn["name"], "icon": defn["icon"], "desc": defn["desc"],
+            "next_cost": costs[level] if level < 5 else 0,
+        })
+    return {"code": 200, "message": "ok", "data": result}
 
 
 @router.post("/upgrade")

@@ -200,6 +200,34 @@ def trigger_passive_events(group_id: int) -> list[dict]:
 
     events_log = []
 
+    # 0. 每日结算（当天首次触发时执行一次，异常不影响后续事件）
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    settle_key = f"pond_last_settle_date_{group_id}"
+    settle_conn = db.get_conn()
+    row = settle_conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (settle_key,)
+    ).fetchone()
+    need_settle = True
+    if row and row["value"]:
+        need_settle = row["value"] != date_str
+    if need_settle:
+        try:
+            from services.fish_pond import settle_all_fish
+            settle_result = settle_all_fish(group_id, date_str)
+            if settle_result.get("settled"):
+                settle_conn.execute(
+                    "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (settle_key, date_str)
+                )
+                settle_conn.commit()
+                events_log.append({"type": "daily_settle", "weather": settle_result.get("weather")})
+                logger.info(f"鱼塘每日结算完成 group={group_id} date={date_str} "
+                           f"fish={settle_result.get('fish_count', 0)}")
+        except Exception as e:
+            logger.warning(f"鱼塘每日结算失败 group={group_id}: {e}")
+    settle_conn.close()
+
     # 1. 精力恢复
     from config import config as cfg
     regen_amt = getattr(cfg, "POND_ENERGY_REGEN_AMOUNT", 5)

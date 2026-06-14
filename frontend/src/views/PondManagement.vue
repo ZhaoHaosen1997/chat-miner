@@ -26,6 +26,7 @@ const upgradeDefs = {
   nutrient: { icon: '🌿', name: '营养剂', desc: '全体日成长 +1/级' },
   radar: { icon: '📡', name: '探测器', desc: '宝藏概率×1.2/级' },
   medbay: { icon: '🏥', name: '医疗站', desc: '日自动回血 +1HP/级' },
+  lucky_bait: { icon: '🎣', name: '幸运鱼饵', desc: '领养稀有度概率提升/级' },
 }
 
 const ALL_TITLES = {

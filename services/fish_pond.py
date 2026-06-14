@@ -571,28 +571,21 @@ def get_proficiencies(species_key: str) -> list[str]:
 
 # ==================== 稀有度 ====================
 
-def compute_rarity(group_id: int, message_count: int) -> str:
-    """根据消息量在群内百分位确定稀有度"""
-    fish_list = db.get_alive_fish(group_id)
-    if not fish_list:
-        return "普通"
-
-    counts = sorted([f["growth"] for f in fish_list], reverse=True)
-    # 用成长值做排序参考（新鱼 growth=0，按 message_count 做初始估算）
-    total = len(counts)
-    if total < 4:
-        return "普通"
-
-    # message_count 排名
-    better = sum(1 for _ in range(total))
-    # 简化：用 message_count 自身做阈值
-    if message_count >= 2000:
-        return "传说"
-    elif message_count >= 800:
-        return "史诗"
-    elif message_count >= 200:
-        return "稀有"
-    return "普通"
+def compute_rarity(group_id: int, message_count: int = 0) -> str:
+    """纯随机稀有度，受「幸运鱼饵」升级影响"""
+    level = _get_upgrade_level(group_id, "lucky_bait")
+    # 权重表 [普通, 稀有, 史诗, 传说]
+    WEIGHTS = [
+        [60, 25, 12,  3],  # Lv0 无升级
+        [50, 28, 16,  6],  # Lv1
+        [40, 30, 20, 10],  # Lv2
+        [28, 32, 25, 15],  # Lv3
+        [15, 35, 30, 20],  # Lv4
+        [ 5, 35, 35, 25],  # Lv5
+    ]
+    w = WEIGHTS[min(level, 5)]
+    rarities = ["普通", "稀有", "史诗", "传说"]
+    return random.choices(rarities, weights=w, k=1)[0]
 
 
 # ==================== XP 与等级 ====================
@@ -1307,7 +1300,7 @@ def cmd_adopt(group_id: int, wxid: str, display_name: str,
 
 # ==================== v1.16.2: 升级 + 决议 + 领养 + 热搜 + 称号 ====================
 
-UPGRADE_COSTS = [100, 300, 600, 1000, 1500]  # Lv1→5 各等级消耗
+UPGRADE_COSTS = [100, 300, 600, 1000, 1500]  # Lv1→5 各等级消耗（默认）
 
 UPGRADE_DEFS = {
     "purifier":  {"name": "💧 净水器", "desc": "疾病概率 -15%/级", "icon": "💧"},
@@ -1315,6 +1308,8 @@ UPGRADE_DEFS = {
     "nutrient":  {"name": "🌿 营养剂", "desc": "全体日成长 +1/级", "icon": "🌿"},
     "radar":     {"name": "📡 探测器", "desc": "宝藏概率 ×1.2/级", "icon": "📡"},
     "medbay":    {"name": "🏥 医疗站", "desc": "日自动回血 +1HP/级", "icon": "🏥"},
+    "lucky_bait":{"name": "🎣 幸运鱼饵", "desc": "领养时稀有度概率提升/级",
+                  "icon": "🎣", "costs": [80, 200, 500, 1200, 2000]},
 }
 
 DECREE_DEFS = {
@@ -1350,7 +1345,7 @@ def upgrade_pond(group_id: int, upgrade_key: str) -> dict:
     if current >= 5:
         return {"error": f"{UPGRADE_DEFS[upgrade_key]['name']}已满级(Lv5)"}
 
-    cost = UPGRADE_COSTS[current]  # current=0→cost=100, current=4→cost=1500
+    cost = (UPGRADE_DEFS[upgrade_key].get("costs") or UPGRADE_COSTS)[current]
     if treasury["balance"] < cost:
         return {"error": f"金库余额不足，需要 {cost} 鳞币，当前 {treasury['balance']}"}
 
