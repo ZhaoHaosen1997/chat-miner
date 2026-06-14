@@ -31,7 +31,7 @@ const ranked = computed(() => {
 </script>
 
 <template>
-  <div class="bg-white rounded-xl border border-slate-200 p-4">
+  <div>
     <h3 class="text-sm font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
       <TrendingUp :size="14" class="text-amber-500" /> 排行榜
     </h3>

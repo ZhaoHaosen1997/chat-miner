@@ -1,6 +1,6 @@
 <script setup>
-import { ref, inject, watch, computed } from 'vue'
-import { getFishPond, adoptFish, settleFishPond, feedFish,
+import { ref, inject, watch, computed, onUnmounted } from 'vue'
+import { getFishPond, adoptFish, settleFishPond, feedFish, batchAdopt,
          touchFish, exploreFish, showoffFish, trainFish, battleFish, deleteFish,
          renameFish, parseFishCommands, getFishDetail, getFishLeaderboard }
   from '../api/index.js'
@@ -8,13 +8,13 @@ import FishTank from '../components/FishTank.vue'
 import FishCard from '../components/FishCard.vue'
 import FishLeaderboard from '../components/FishLeaderboard.vue'
 import ChatSimulator from '../components/ChatSimulator.vue'
-import PondEventTimeline from '../components/PondEventTimeline.vue'  // v1.16.1
-import PondManagement from './PondManagement.vue'  // v1.16.2
-import { Fish, RefreshCw, Coins, Search, X, BookOpen, Clock } from 'lucide-vue-next'
+import PondEventTimeline from '../components/PondEventTimeline.vue'
+import PondManagement from './PondManagement.vue'
+import { Fish, RefreshCw, X, BookOpen, Clock, Crown, Anchor, Sparkles } from 'lucide-vue-next'
 
 const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
-const showError = inject('showError')  // v0.13.3: 统一错误弹窗
+const showError = inject('showError')
 
 const pondState = ref(null)
 const loading = ref(false)
@@ -25,17 +25,19 @@ const leaderboardSort = ref('growth')
 const parseLog = ref(null)
 const showParseLog = ref(false)
 const showTutorial = ref(false)
-let _pondRefreshTimer = null  // v1.16.2: 被动事件轮询
+const activeTab = ref('events')
+let _pondRefreshTimer = null
 
 const gid = computed(() => currentGroup.value?.id)
 
-// v1.16.2: 静默鱼塘开启时自动轮询刷新（每60s），关掉时停止
+// v1.16.2: auto-refresh when silent pond is enabled
 watch(() => pondState.value?.auto_events_enabled, (enabled) => {
   if (_pondRefreshTimer) { clearInterval(_pondRefreshTimer); _pondRefreshTimer = null }
   if (enabled) {
     _pondRefreshTimer = setInterval(() => loadPond(true), 60000)
   }
 })
+onUnmounted(() => { if (_pondRefreshTimer) clearInterval(_pondRefreshTimer) })
 
 watch(() => gid.value, () => loadPond(), { immediate: true })
 
@@ -77,6 +79,18 @@ async function handleAdopt(wxid, displayName) {
   } catch (e) { showError('领养失败', e.message) }
 }
 
+const showBatchConfirm = ref(false)
+const batchLoading = ref(false)
+async function handleBatchAdopt() {
+  showBatchConfirm.value = false
+  batchLoading.value = true
+  try {
+    await batchAdopt(gid.value)
+    await loadPond()
+  } catch (e) { showError('一键领养失败', e.message) }
+  finally { batchLoading.value = false }
+}
+
 function handleFishClick(fish) {
   selectedFish.value = fish
   showCard.value = true
@@ -85,21 +99,19 @@ function handleFishClick(fish) {
 async function handleFishAction(action, wxid, extra) {
   actionLoading.value = action
   try {
-    let result
     switch (action) {
-      case 'feed': result = await feedFish(gid.value, wxid); break
-      case 'touch': result = await touchFish(gid.value, wxid); break
-      case 'explore': result = await exploreFish(gid.value, wxid); break
-      case 'showoff': result = await showoffFish(gid.value, wxid); break
-      case 'train': result = await trainFish(gid.value, wxid, extra); break
-      case 'rename': result = await renameFish(gid.value, wxid, extra); break
-      case 'battle': result = await battleFish(gid.value, wxid, extra); break
+      case 'feed': await feedFish(gid.value, wxid); break
+      case 'touch': await touchFish(gid.value, wxid); break
+      case 'explore': await exploreFish(gid.value, wxid); break
+      case 'showoff': await showoffFish(gid.value, wxid); break
+      case 'train': await trainFish(gid.value, wxid, extra); break
+      case 'rename': await renameFish(gid.value, wxid, extra); break
+      case 'battle': await battleFish(gid.value, wxid, extra); break
       case 'delete':
-        result = await deleteFish(gid.value, wxid)
+        await deleteFish(gid.value, wxid)
         showCard.value = false; selectedFish.value = null
         break
     }
-    // Refresh detail if card is open
     if (showCard.value && selectedFish.value?.wxid === wxid) {
       const detail = await getFishDetail(gid.value, wxid)
       selectedFish.value = { ...selectedFish.value, ...detail.fish }
@@ -117,138 +129,163 @@ const deadFish = computed(() =>
 )
 const weather = computed(() => pondState.value?.weather)
 const recentEvents = computed(() => pondState.value?.recent_events || [])
-const sidebarTab = ref('events')  // v1.16.1: 'events' | 'leaderboard'
 
-// Rarity colors
-const rarityColors = { '普通': 'bg-gray-400', '稀有': 'bg-blue-500', '史诗': 'bg-purple-500', '传说': 'bg-orange-500' }
-const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传说': '橙' }
+const tabs = [
+  { key: 'events', icon: Clock, label: '事件线', desc: '今日鱼塘动态' },
+  { key: 'leaderboard', icon: Crown, label: '排行榜', desc: '最强鱼儿角逐' },
+  { key: 'management', icon: Anchor, label: '管理', desc: '升级·决议·称号' },
+]
+
+// Weather display config
+const weatherConfig = {
+  sunny:  { emoji: '☀️', label: '晴天', bg: 'from-amber-400/20 via-yellow-400/10 to-transparent', border: 'border-amber-300/40', text: 'text-amber-700' },
+  rain:   { emoji: '🌧️', label: '雨天', bg: 'from-blue-400/20 via-indigo-400/10 to-transparent', border: 'border-blue-300/40', text: 'text-blue-700' },
+  storm:  { emoji: '⛈️', label: '暴风雨', bg: 'from-slate-500/25 via-gray-400/15 to-transparent', border: 'border-slate-400/40', text: 'text-slate-700' },
+  rainbow:{ emoji: '🌈', label: '彩虹', bg: 'from-pink-400/15 via-purple-400/10 to-transparent', border: 'border-pink-300/40', text: 'text-pink-700' },
+}
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
+  <div class="pond-page">
+    <!-- ===== Header ===== -->
+    <header class="pond-header">
       <div class="flex items-center gap-3">
-        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center">
-          <Fish class="w-4 h-4 text-cyan-600" />
-        </span>
-        <h1 class="text-xl font-bold text-slate-800">群鱼塘</h1>
-        <span v-if="pondState" class="text-sm text-slate-400">
-          {{ pondState.alive_count }} 条活鱼 · {{ pondState.dead_count }} 条亡鱼
-        </span>
+        <div class="pond-brand-icon">
+          <Fish :size="18" class="text-white" />
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-slate-800 tracking-tight">群鱼塘</h1>
+          <p v-if="pondState" class="text-xs text-slate-400">
+            {{ pondState.alive_count }} 条活鱼 · {{ pondState.dead_count }} 条亡鱼
+          </p>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <button @click="showTutorial = true"
-          class="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-200 rounded-xl
-                 hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-500 font-medium">
-          <BookOpen :size="16" />
-          教程
+          class="pond-btn pond-btn-ghost">
+          <BookOpen :size="15" />
+          <span class="hidden sm:inline">教程</span>
         </button>
       </div>
+    </header>
+
+    <!-- ===== Loading ===== -->
+    <div v-if="loading" class="flex flex-col items-center justify-center py-32 text-slate-400">
+      <div class="relative mb-4">
+        <RefreshCw :size="48" class="animate-spin text-slate-300" />
+        <span class="absolute inset-0 flex items-center justify-center text-xl">🐟</span>
+      </div>
+      <p class="text-sm font-medium">正在潜入鱼塘...</p>
     </div>
 
-    <!-- Weather Bar -->
-    <div v-if="weather" class="rounded-xl p-4 bg-gradient-to-r"
-      :class="{
-        'from-amber-50 to-yellow-50 border border-amber-200': weather.type === 'sunny',
-        'from-blue-50 to-indigo-50 border border-blue-200': weather.type === 'rain',
-        'from-slate-100 to-gray-200 border border-slate-300': weather.type === 'storm',
-        'from-pink-50 to-purple-50 border border-pink-200': weather.type === 'rainbow',
-      }">
-      <div class="flex items-center gap-3">
-        <span class="text-4xl">{{ weather.emoji }}</span>
-        <div>
-          <div class="font-semibold text-slate-800">{{ weather.name }}</div>
-          <div class="text-sm text-slate-500">{{ weather.effect }}</div>
+    <!-- ===== Empty State ===== -->
+    <div v-else-if="!pondState || pondState.alive_count === 0" class="pond-empty">
+      <div class="empty-illustration">
+        <span class="text-8xl block mb-4">🐟</span>
+        <div class="empty-ripple"></div>
+      </div>
+      <h2 class="text-xl font-bold text-slate-600 mb-1">鱼塘里还没有鱼</h2>
+      <p class="text-slate-400 text-sm max-w-sm mx-auto mb-8">
+        为所有群成员自动领养第一条鱼，或使用右下角<strong>指令模拟器</strong>逐个测试
+      </p>
+      <div v-if="!showBatchConfirm" class="flex items-center justify-center gap-3">
+        <button @click="showBatchConfirm = true" :disabled="batchLoading"
+          class="pond-btn pond-btn-primary px-6 py-3 text-base">
+          🎁 {{ batchLoading ? '领养中...' : '一键领养' }}
+        </button>
+        <button @click="showTutorial = true"
+          class="pond-btn pond-btn-ghost px-6 py-3 text-base">
+          <BookOpen :size="18" /> 教程
+        </button>
+      </div>
+      <div v-else class="flex flex-col items-center gap-3">
+        <p class="text-sm text-slate-600">确定要为所有无鱼成员自动领养吗？</p>
+        <div class="flex items-center gap-2">
+          <button @click="handleBatchAdopt" :disabled="batchLoading"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-sky-500 text-white hover:bg-sky-600 transition">
+            {{ batchLoading ? '领养中...' : '确认' }}
+          </button>
+          <button @click="showBatchConfirm = false"
+            class="px-4 py-2 rounded-lg text-sm border border-slate-200 text-slate-500 hover:bg-slate-50 transition">
+            取消
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-20 text-slate-400">
-      <RefreshCw :size="40" class="mx-auto mb-3 animate-spin" />
-      <p>正在加载鱼塘...</p>
-    </div>
+    <!-- ===== Main Content ===== -->
+    <template v-else>
+      <!-- Hero Tank -->
+      <section class="tank-hero">
+        <!-- Weather pill overlay -->
+        <div v-if="weather" class="weather-pill"
+          :class="[
+            weatherConfig[weather.type]?.border || 'border-slate-300/40',
+            weatherConfig[weather.type]?.text || 'text-slate-600',
+          ]">
+          <span class="text-xl">{{ weatherConfig[weather.type]?.emoji || weather.emoji }}</span>
+          <div>
+            <div class="font-semibold text-sm leading-tight">{{ weather.name }}</div>
+            <div class="text-[11px] opacity-70 leading-tight">{{ weather.effect }}</div>
+          </div>
+        </div>
 
-    <!-- Empty State -->
-    <div v-else-if="!pondState || pondState.alive_count === 0" class="card p-16 text-center animate-scale-in">
-      <span class="text-7xl mb-4 block">🐟</span>
-      <h2 class="text-xl font-semibold text-slate-600">鱼塘里还没有鱼</h2>
-      <p class="text-slate-400 mt-2 mb-6 max-w-sm mx-auto">点击"解析指令"从聊天记录中寻找 /领养 指令，或点击"结算"自动为活跃成员创建鱼</p>
-      <div class="flex items-center justify-center gap-3">
-        <button @click="handleParseCommands" :disabled="!!actionLoading"
-          class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg shadow-amber-200 flex items-center gap-2">
-          <Search :size="16" /> 解析指令
-        </button>
-        <button @click="handleSettle" :disabled="!!actionLoading"
-          class="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition-all flex items-center gap-2">
-          <RefreshCw :size="16" /> 结算
-        </button>
-      </div>
-    </div>
-
-    <!-- Main Content -->
-    <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Fish Tank -->
-      <div class="lg:col-span-2">
         <FishTank
           :fish="aliveFish"
           :dead-fish="deadFish"
+          :weather="weather"
           @fish-click="handleFishClick"
           @adopt="handleAdopt"
         />
-      </div>
+      </section>
 
-      <!-- Sidebar -->
-      <div class="space-y-4">
+      <!-- Dashboard Tabs -->
+      <section class="pond-dashboard card">
+        <!-- Tab nav -->
+        <nav class="dashboard-tabs">
+          <button
+            v-for="tab in tabs" :key="tab.key"
+            @click="activeTab = tab.key"
+            :class="['dashboard-tab', activeTab === tab.key ? 'active' : '']"
+            :title="tab.desc">
+            <component :is="tab.icon" :size="15" />
+            <span>{{ tab.label }}</span>
+          </button>
+        </nav>
 
-            <!-- Quick Stats -->
-        <div class="card p-4">
-          <h3 class="text-sm font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
-            <Coins :size="14" class="text-amber-500" /> 稀有度分布
-          </h3>
-          <div class="space-y-2">
-            <div v-for="(color, rarity) in rarityColors" :key="rarity"
-              class="flex items-center justify-between text-xs">
-              <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="color"></span>
-                <span class="text-slate-600 font-medium">{{ rarity }}</span>
-                <span class="text-[10px] text-slate-300">{{ rarityLabels[rarity] }}</span>
-              </div>
-              <span class="text-slate-500 font-semibold stat-ticker">
-                {{ aliveFish.filter(f => f.rarity === rarity).length }}
-              </span>
+        <!-- Tab content -->
+        <div class="dashboard-content">
+          <div v-if="activeTab === 'events'" class="animate-fade-in">
+            <div class="tab-section-header">
+              <Sparkles :size="14" class="text-indigo-400" />
+              <span>今日事件流</span>
             </div>
+            <PondEventTimeline :events="recentEvents" />
           </div>
-        </div>
 
-        <!-- v1.16.1: Sidebar Tabs: Events / Stats -->
-        <div class="card overflow-hidden">
-          <div class="flex border-b border-slate-100">
-            <button @click="sidebarTab = 'events'"
-              :class="['flex-1 py-2.5 text-xs font-semibold transition', sidebarTab === 'events' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-slate-400 hover:text-slate-600']">
-              <Clock :size="12" class="inline mr-1" /> 事件
-            </button>
-            <button @click="sidebarTab = 'leaderboard'"
-              :class="['flex-1 py-2.5 text-xs font-semibold transition', sidebarTab === 'leaderboard' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-slate-400 hover:text-slate-600']">
-              🏆 排行
-            </button>
-          </div>
-          <div class="p-3 max-h-80 overflow-y-auto">
-            <PondEventTimeline v-if="sidebarTab === 'events'" :events="recentEvents" />
+          <div v-else-if="activeTab === 'leaderboard'" class="animate-fade-in">
             <FishLeaderboard
-              v-else
               :fish="aliveFish"
               :sort="leaderboardSort"
               @update:sort="leaderboardSort = $event"
               @fish-click="handleFishClick"
             />
           </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Fish Card Modal -->
+          <div v-else-if="activeTab === 'management'" class="animate-fade-in">
+            <PondManagement @pond-refresh="loadPond" />
+          </div>
+        </div>
+      </section>
+
+    </template>
+
+    <!-- Floating Chat Simulator — fixed bottom-right, always on top -->
+    <Teleport to="body">
+      <ChatSimulator @pond-refresh="loadPond" />
+    </Teleport>
+
+    <!-- ===== Fish Card Modal ===== -->
     <Teleport to="body">
       <FishCard
         v-if="showCard && selectedFish"
@@ -261,19 +298,12 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
       />
     </Teleport>
 
-    <!-- v1.16.2: Pond Management -->
-    <PondManagement v-if="pondState" @pond-refresh="loadPond" />
-
-    <!-- Chat Simulator -->
-    <ChatSimulator @pond-refresh="loadPond" />
-
-    <!-- Parse Log Modal -->
+    <!-- ===== Parse Log Modal ===== -->
     <Teleport to="body">
       <div v-if="showParseLog && parseLog"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
         @click.self="showParseLog = false">
-        <div class="bg-white rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden">
-          <!-- Header -->
+        <div class="bg-white rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden animate-scale-in">
           <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
             <div>
               <h2 class="font-bold text-slate-800">📋 今日解析日志</h2>
@@ -287,8 +317,6 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
               <X :size="18" />
             </button>
           </div>
-
-          <!-- Log entries -->
           <div class="flex-1 overflow-y-auto px-5 py-3 space-y-2">
             <div v-if="parseLog.log.length === 0" class="text-center py-8 text-slate-400 text-sm">
               今天没有 / 开头的鱼塘指令
@@ -300,7 +328,6 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
                 'bg-green-50/50 border-green-100': entry.type === 'adopt',
                 'bg-white': !entry.error && entry.type !== 'adopt',
               }">
-              <!-- Time + Sender -->
               <div class="flex items-center justify-between mb-1.5">
                 <div class="flex items-center gap-2">
                   <span class="text-slate-400 font-mono">{{ entry.time?.slice(11, 16) || '--:--' }}</span>
@@ -321,11 +348,8 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
                           treasure:'寻宝',showoff:'晒鱼',battle:'斗鱼',rename:'改名',pond:'鱼塘'
                          }[entry.type] || entry.type }}</span>
               </div>
-              <!-- Command -->
               <div class="font-mono text-slate-600 mb-1">{{ entry.command }}</div>
-              <!-- Error -->
               <div v-if="entry.error" class="text-red-600">❌ {{ entry.error }}</div>
-              <!-- D20 result -->
               <div v-if="entry.d20" class="flex items-center gap-2 text-[10px]">
                 <span class="font-mono font-bold"
                   :class="{
@@ -340,24 +364,19 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
                   {{ entry.d20.critical_hit ? '🎉大成功!' : entry.d20.critical_miss ? '💀大失败!' : entry.d20.success ? '✅成功' : '❌失败' }}
                 </span>
               </div>
-              <!-- Rewards -->
               <div v-if="entry.growth || entry.happiness || entry.coin_amount" class="flex flex-wrap gap-1 mt-1">
                 <span v-if="entry.growth" class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px]">成长+{{ entry.growth }}</span>
                 <span v-if="entry.happiness" class="px-1.5 py-0.5 rounded bg-pink-50 text-pink-700 text-[10px]">幸福+{{ entry.happiness }}</span>
                 <span v-if="entry.coin_amount" class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px]">鳞币+{{ entry.coin_amount }}</span>
                 <span v-if="entry.evolved" class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px]">进化→{{ entry.new_stage }}</span>
               </div>
-              <!-- Adopt result -->
               <div v-if="entry.fish" class="text-green-700 mt-1">🐟 {{ entry.fish.name }} ({{ entry.fish.rarity }})</div>
-              <!-- Battle result -->
               <div v-if="entry.battle_winner" class="text-xs mt-1"
                 :class="entry.battle_winner === entry.wxid ? 'text-green-600' : 'text-red-500'">
                 ⚔️ {{ entry.battle_winner === entry.wxid ? '胜!' : '败...' }}
               </div>
             </div>
           </div>
-
-          <!-- Footer -->
           <div class="px-5 py-3 border-t border-slate-100 flex justify-between items-center">
             <span class="text-xs text-slate-400">
               {{ parseLog.settle?.fish_count || 0 }} 条鱼已结算 ·
@@ -379,12 +398,12 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
       </div>
     </Teleport>
 
-    <!-- Tutorial Modal -->
+    <!-- ===== Tutorial Modal ===== -->
     <Teleport to="body">
       <div v-if="showTutorial" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
         @click.self="showTutorial = false">
-        <div class="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto">
-          <div class="sticky top-0 bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto animate-scale-in">
+          <div class="sticky top-0 bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between z-10">
             <h2 class="font-bold text-slate-800 text-lg">🐟 群鱼塘教程</h2>
             <button @click="showTutorial = false" class="p-1 hover:bg-slate-100 rounded text-slate-400"><X :size="18" /></button>
           </div>
@@ -445,3 +464,186 @@ const rarityLabels = { '普通': '白', '稀有': '蓝', '史诗': '紫', '传�
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+/* ===== Page background ===== */
+.pond-page {
+  background: linear-gradient(175deg, #f0f4f8 0%, #e8eff5 30%, #eef3f8 100%);
+  border-radius: var(--radius-2xl, 24px);
+  padding: 24px;
+  min-height: 100%;
+}
+@media (max-width: 640px) {
+  .pond-page { padding: 12px; border-radius: var(--radius-lg, 16px); }
+}
+
+/* ===== Header ===== */
+.pond-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.pond-brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 50%, #0369a1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+}
+
+/* ===== Buttons ===== */
+.pond-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.pond-btn-primary {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  color: white;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.25);
+}
+.pond-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.35);
+  transform: translateY(-1px);
+}
+.pond-btn-ghost {
+  background: white;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.pond-btn-ghost:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.pond-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Empty state ===== */
+.pond-empty {
+  text-align: center;
+  padding: 64px 16px;
+}
+.empty-illustration {
+  position: relative;
+  display: inline-block;
+}
+.empty-ripple {
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  border: 2px solid rgba(14, 165, 233, 0.1);
+  animation: empty-pulse 2.5s ease-in-out infinite;
+}
+@keyframes empty-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.15); opacity: 0.05; }
+}
+
+/* ===== Tank hero ===== */
+.tank-hero {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+/* Weather pill */
+.weather-pill {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid;
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+@media (max-width: 640px) {
+  .weather-pill {
+    top: 8px;
+    right: 8px;
+    padding: 6px 12px;
+    gap: 6px;
+    border-radius: 10px;
+  }
+  .weather-pill .text-xl { font-size: 1rem; }
+}
+
+/* ===== Dashboard tabs ===== */
+.pond-dashboard {
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.dashboard-tabs {
+  display: flex;
+  border-bottom: 1px solid #e8ecf0;
+  background: #fafbfc;
+}
+.dashboard-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.dashboard-tab::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: transparent;
+  border-radius: 1px 1px 0 0;
+  transition: all 0.25s ease;
+}
+.dashboard-tab:hover { color: #64748b; background: rgba(255,255,255,0.5); }
+.dashboard-tab.active {
+  color: #0ea5e9;
+  background: white;
+}
+.dashboard-tab.active::after {
+  left: 10%;
+  right: 10%;
+  background: #0ea5e9;
+}
+.dashboard-content {
+  padding: 16px;
+  min-height: 120px;
+}
+
+.tab-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+</style>

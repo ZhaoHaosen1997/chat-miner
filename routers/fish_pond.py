@@ -51,7 +51,7 @@ async def get_pond(group_id: int):
 
 @router.post("/settle")
 async def settle_pond(group_id: int, body: SettleBody = SettleBody()):
-    """触发全群结算"""
+    """[已弃用] 触发全群结算 — 静默鱼塘开启后由定时事件自动结算，此接口保留兼容旧版"""
     result = await asyncio.to_thread(fp.settle_all_fish, group_id, body.reference_date)
     return {"code": 200, "message": "结算完成", "data": result}
 
@@ -526,7 +526,7 @@ def fish_events(group_id: int, wxid: str = "", limit: int = 20):
 
 @router.post("/parse-commands")
 def parse_commands(group_id: int):
-    """扫描今日聊天记录中的 / 指令并执行，然后自动结算"""
+    """[已弃用] 扫描今日聊天记录中的 / 指令并执行 — 静默鱼塘开启后由定时事件自动处理，此接口保留兼容旧版和指令模拟器"""
     from datetime import datetime as dt
     try:
         from routers.groups import get_chat_cache

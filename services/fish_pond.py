@@ -171,49 +171,49 @@ AQUATIC_SPECIES = {
     },
     # ========== v1.16.0: 新物种（iconify emoji）==========
     "seahorse": {
-        "name": "海马", "emoji": "mdi:seahorse", "color": "#F9A8D4",
+        "name": "海马", "emoji": "🐟", "color": "#F9A8D4",
         "asi": {"dex": 2, "cha": 3, "str": -2, "con": -1},
         "proficiencies": ["acrobatics", "performance"],
         "desc": "优雅的舞者，独特的外形下藏着敏捷的身手"
     },
     "manta": {
-        "name": "蝠鲼", "emoji": "mdi:stingray", "color": "#1C1F33",
+        "name": "蝠鲼", "emoji": "🐟", "color": "#1C1F33",
         "asi": {"dex": 3, "wis": 2, "str": -1, "cha": -1},
         "proficiencies": ["acrobatics", "stealth"],
         "desc": "水中滑翔机，悄无声息地巡游深海"
     },
     "urchin": {
-        "name": "海胆", "emoji": "mdi:sea-urchin", "color": "#4B0082",
+        "name": "海胆", "emoji": "🐟", "color": "#4B0082",
         "asi": {"con": 4, "str": 1, "dex": -2, "cha": -2},
         "proficiencies": ["endurance"],
         "desc": "浑身是刺的防御大师，谁碰谁后悔"
     },
     "starfish": {
-        "name": "海星", "emoji": "twemoji:starfish", "color": "#FF6347",
+        "name": "海星", "emoji": "⭐", "color": "#FF6347",
         "asi": {"con": 3, "wis": 2, "dex": -2, "int": -1},
         "proficiencies": ["endurance", "nature"],
         "desc": "断肢重生能力逆天，慢悠悠但生命力顽强"
     },
     "mantis_shrimp": {
-        "name": "螳螂虾", "emoji": "twemoji:shrimp", "color": "#DC143C",
+        "name": "螳螂虾", "emoji": "🦐", "color": "#DC143C",
         "asi": {"str": 3, "con": 2, "dex": -1, "int": -2},
         "proficiencies": ["athletics", "endurance"],
         "desc": "大钳子威猛无比，出拳速度堪比子弹"
     },
     "conch": {
-        "name": "海螺", "emoji": "twemoji:conch-shell", "color": "#F5DEB3",
+        "name": "海螺", "emoji": "🐚", "color": "#F5DEB3",
         "asi": {"wis": 4, "cha": 2, "dex": -3, "str": -2},
         "proficiencies": ["insight", "nature", "performance"],
         "desc": "能听到大海声音的智者，行动虽慢但洞察一切"
     },
     "otter2": {
-        "name": "海獭", "emoji": "twemoji:otter", "color": "#8B4513",
+        "name": "海獭", "emoji": "🦦", "color": "#8B4513",
         "asi": {"dex": 2, "int": 2, "cha": 2, "str": -2},
         "proficiencies": ["acrobatics", "investigation", "performance"],
         "desc": "会用工具的小机灵鬼，萌到犯规的海洋精灵"
     },
     "walrus": {
-        "name": "海象", "emoji": "twemoji:walrus", "color": "#A0522D",
+        "name": "海象", "emoji": "🦭", "color": "#A0522D",
         "asi": {"str": 3, "con": 3, "dex": -2, "int": -1},
         "proficiencies": ["athletics", "endurance"],
         "desc": "吨位即是正义，长牙之下众生平等"
@@ -706,6 +706,7 @@ def create_fish(group_id: int, wxid: str, display_name: str,
     variants = EMOJI_VARIANTS.get(species, [species_info.get("emoji", "🐟")])
     emoji_variant = random.choice(variants) if variants else species_info.get("emoji", "🐟")
 
+    max_hp_val = compute_max_hp(attrs["constitution"], 1, "鱼苗")
     fid = db.upsert_fish(
         group_id=group_id, wxid=wxid, fish_name=fish_name,
         species=species, rarity=rarity,
@@ -713,11 +714,12 @@ def create_fish(group_id: int, wxid: str, display_name: str,
         constitution=attrs["constitution"], intelligence=attrs["intelligence"],
         wisdom=attrs["wisdom"], charisma=attrs["charisma"],
         experience=0, level=1, growth=0, happiness=60,
-        hp=compute_max_hp(attrs["constitution"], 1, "鱼苗"),
+        hp=max_hp_val,
         stage="鱼苗", is_alive=1,
         energy=100, max_energy=100,  # v1.16.0
         personality_traits=_json.dumps(selected_traits, ensure_ascii=False),  # v1.16.0
         emoji_variant=emoji_variant,  # v1.16.0
+        max_hp=max_hp_val,  # v1.16.3
     )
 
     db.add_fish_event(group_id, wxid, "born", {
@@ -1203,6 +1205,7 @@ def cmd_train(group_id: int, wxid: str, attr_name: str,
         if attr_key == "constitution":
             new_hp = compute_max_hp(new_val, fish["level"], fish["stage"])
             db.update_fish_field(group_id, wxid, "hp", new_hp)
+            db.update_fish_field(group_id, wxid, "max_hp", new_hp)
         xp_amount = 15
         xp_result = add_xp(group_id, wxid, xp_amount, "train")
         attr_increased = True
@@ -1401,6 +1404,7 @@ def execute_decree(group_id: int, decree_key: str,
         if fish:
             max_hp = compute_max_hp(fish.get("constitution", 10), fish.get("level", 1), fish.get("stage", "成鱼"))
             db.update_fish_field(group_id, target_wxid, "hp", max_hp)
+            db.update_fish_field(group_id, target_wxid, "max_hp", max_hp)
             effect = {"wxid": target_wxid, "hp": max_hp}
 
     elif decree_key == "force_event":
@@ -1646,8 +1650,9 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
     new_stage = determine_stage(fish["growth"])
     if new_stage != fish["stage"]:
         db.update_fish_field(group_id, wxid, "stage", new_stage)
-        db.update_fish_field(group_id, wxid, "hp",
-                            compute_max_hp(fish["constitution"], fish["level"], new_stage))
+        new_max_hp = compute_max_hp(fish["constitution"], fish["level"], new_stage)
+        db.update_fish_field(group_id, wxid, "hp", new_max_hp)
+        db.update_fish_field(group_id, wxid, "max_hp", new_max_hp)
         db.add_fish_event(group_id, wxid, "evolve", {
             "old_stage": fish["stage"], "new_stage": new_stage
         })

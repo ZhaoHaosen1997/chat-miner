@@ -436,6 +436,8 @@ def init_db():
         _migrate_v1_16_1(conn)
         # v1.16.2: 鱼塘升级系统
         _migrate_v1_16_2(conn)
+        # v1.16.3: 鱼塘 max_hp
+        _migrate_v1_16_3(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -640,6 +642,44 @@ def _migrate_v1_16_2(conn):
         )
     """)
     logger.info("DB migrate v1.16.2: pond_upgrades table ready")
+
+
+def _migrate_v1_16_3(conn):
+    """v1.16.3: 鱼塘 max_hp — 存储最大生命值，修正鱼缸血条显示
+    仅在列首次添加时一次性计算所有鱼的 max_hp。后续启动不再重复计算，由业务逻辑维护。"""
+    cur = conn.execute("PRAGMA table_info(fish_pond)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "max_hp" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN max_hp INTEGER DEFAULT 20")
+        logger.info("DB migrate v1.16.3: added fish_pond.max_hp")
+        # 一次性：为已有鱼计算 max_hp（从 con + level + stage 推导）
+        from services.fish_pond import compute_max_hp as _cmh
+        rows = conn.execute(
+            "SELECT id, group_id, wxid, constitution, level, stage, hp FROM fish_pond"
+        ).fetchall()
+        fixed = 0
+        for row in rows:
+            try:
+                mx = _cmh(row[3] or 10, row[4] or 1, row[5] or "鱼苗")
+            except Exception:
+                mx = 20
+            if mx < 1:
+                mx = 1
+            # 如果当前 hp 超过新计算的 max_hp，修正 hp 到 max_hp
+            cur_hp = row[6] or 0
+            if cur_hp > mx:
+                conn.execute(
+                    "UPDATE fish_pond SET max_hp=?, hp=? WHERE id=?",
+                    (mx, mx, row[0])
+                )
+            else:
+                conn.execute(
+                    "UPDATE fish_pond SET max_hp=? WHERE id=?",
+                    (mx, row[0])
+                )
+            fixed += 1
+        if fixed:
+            logger.info("DB migrate v1.16.3: computed max_hp for %d fish", fixed)
 
 
 def _seed_default_model_configs(conn):
@@ -1407,7 +1447,8 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                 is_alive: int = 1,
                 energy: int = 100, max_energy: int = 100,  # v1.16.0
                 personality_traits: str = "[]",  # v1.16.0: JSON array
-                emoji_variant: str = "") -> int:  # v1.16.0
+                emoji_variant: str = "",  # v1.16.0
+                max_hp: int = 20) -> int:  # v1.16.3
     """创建或更新鱼（按 group_id + wxid 唯一键）"""
     with db() as conn:
         cur = conn.execute(
@@ -1417,8 +1458,8 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                 experience, level, growth, happiness, hp, stage,
                 consecutive_days, last_active_date, last_fed_date, is_alive,
                 energy, max_energy, personality_traits, emoji_variant,
-                updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                max_hp, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(group_id, wxid) DO UPDATE SET
                fish_name = excluded.fish_name,
                species = excluded.species,
@@ -1443,12 +1484,13 @@ def upsert_fish(group_id: int, wxid: str, fish_name: str, species: str,
                max_energy = excluded.max_energy,
                personality_traits = excluded.personality_traits,
                emoji_variant = excluded.emoji_variant,
+               max_hp = excluded.max_hp,
                updated_at = datetime('now')""",
             (group_id, wxid, fish_name, species, rarity,
              strength, dexterity, constitution, intelligence, wisdom, charisma,
              experience, level, growth, happiness, hp, stage,
              consecutive_days, last_active_date, last_fed_date, is_alive,
-             energy, max_energy, personality_traits, emoji_variant)
+             energy, max_energy, personality_traits, emoji_variant, max_hp)
         )
         fid = cur.lastrowid
     return fid
@@ -1505,6 +1547,7 @@ _FISH_FIELD_WHITELIST = {
     "consecutive_days", "last_active_date", "last_fed_date", "is_alive",
     "equipped_item", "active_consumable",
     "energy", "max_energy", "personality_traits", "emoji_variant",  # v1.16.0
+    "max_hp",  # v1.16.3
 }
 
 

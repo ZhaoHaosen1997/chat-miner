@@ -228,7 +228,7 @@ def trigger_passive_events(group_id: int) -> list[dict]:
             return events_log
 
     # 单体事件（累计 ~57%，随机选目标）
-    total_single = sum(ch for _, ch, _, _, _, _, _, _, _ in SINGLE_EVENTS)
+    total_single = sum(ch for _, ch, _, _, _, _, _, _ in SINGLE_EVENTS)
     if rng.randint(1, 100) <= total_single:
         evt = _weighted_pick(SINGLE_EVENTS, rng)
         if evt:
