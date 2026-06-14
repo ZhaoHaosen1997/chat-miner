@@ -101,7 +101,7 @@ async function savePollSetting(key, seconds) {
 
 // v1.16.1: 静默鱼塘设置
 const pondExpanded = ref(false); const pondEnabled = ref(false)
-const pondInterval = ref(30); const pondTaxRate = ref(5)
+const pondInterval = ref(30)
 async function loadPondSettings() {
   try {
     const settings = await getAppSettings()
@@ -109,7 +109,6 @@ async function loadPondSettings() {
     for (const s of settings) map[s.key] = { value:s.value, value_type:s.value_type }
     if (map.pond_auto_events_enabled) pondEnabled.value = map.pond_auto_events_enabled.value === 'true'
     if (map.pond_event_interval_minutes) pondInterval.value = parseInt(map.pond_event_interval_minutes.value) || 30
-    if (map.pond_treasury_tax_rate) pondTaxRate.value = parseInt(map.pond_treasury_tax_rate.value) || 5
   } catch (e) { console.error('加载鱼塘设置失败:', e) }
 }
 async function togglePondEnabled() {
@@ -805,11 +804,6 @@ onMounted(async () => {
           <label class="text-xs text-slate-500">事件间隔 (分钟)</label>
           <input type="number" :value="pondInterval" @change="pondInterval = Math.max(5, Math.min(180, Number($event.target.value))); savePondSetting('pond_event_interval_minutes', pondInterval)" min="5" max="180" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
           <p class="text-[10px] text-slate-400 mt-1">建议 15-60 分钟。间隔越短事件越密集</p>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500">金库税率 (%)</label>
-          <input type="number" :value="pondTaxRate" @change="pondTaxRate = Math.max(1, Math.min(20, Number($event.target.value))); savePondSetting('pond_treasury_tax_rate', pondTaxRate)" min="1" max="20" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
-          <p class="text-[10px] text-slate-400 mt-1">每次事件触发时，全群鳞币总和的百分比进入金库</p>
         </div>
       </div>
     </div>

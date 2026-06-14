@@ -434,6 +434,8 @@ def init_db():
         _migrate_v1_16_0(conn)
         # v1.16.1: 鱼塘金库
         _migrate_v1_16_1(conn)
+        # v1.16.2: 鱼塘升级系统
+        _migrate_v1_16_2(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -623,6 +625,21 @@ def _migrate_v1_16_1(conn):
         );
     """)
     logger.info("DB migrate v1.16.1: pond_treasury tables ready")
+
+
+def _migrate_v1_16_2(conn):
+    """v1.16.2: 鱼塘升级系统"""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pond_upgrades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            upgrade_key TEXT NOT NULL,
+            level INTEGER DEFAULT 0,
+            UNIQUE(group_id, upgrade_key),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        )
+    """)
+    logger.info("DB migrate v1.16.2: pond_upgrades table ready")
 
 
 def _seed_default_model_configs(conn):
@@ -1599,6 +1616,43 @@ def get_treasury_log(group_id: int, limit: int = 20) -> list[dict]:
             (group_id, limit)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ==================== v1.16.2: 升级 + 决议 CRUD ====================
+
+def get_upgrades(group_id: int) -> list[dict]:
+    """获取鱼塘所有升级状态"""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pond_upgrades WHERE group_id = ?", (group_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_upgrade(group_id: int, upgrade_key: str, level: int):
+    """设置某升级项的等级"""
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO pond_upgrades (group_id, upgrade_key, level)
+               VALUES (?, ?, ?)
+               ON CONFLICT(group_id, upgrade_key) DO UPDATE SET level = ?""",
+            (group_id, upgrade_key, level, level)
+        )
+
+
+def count_today_decrees(group_id: int, decree_key: str,
+                        date_str: str = None) -> int:
+    """统计某决议今日已使用次数"""
+    from datetime import datetime as dt
+    today = date_str or dt.now().strftime("%Y-%m-%d")
+    with db() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM fish_events
+               WHERE group_id=? AND event_type=?
+               AND date(created_at)=?""",
+            (group_id, f"decree_{decree_key}", today)
+        ).fetchone()
+    return row["cnt"] if row else 0
 
 
 # ==================== 鱼塘事件 CRUD ====================

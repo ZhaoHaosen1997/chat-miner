@@ -86,6 +86,68 @@ def get_treasury_endpoint(group_id: int):
     }}
 
 
+# ---- v1.16.2: 升级 + 决议 + 领养 + 热搜 ----
+
+
+@router.get("/upgrades")
+def get_upgrades_endpoint(group_id: int):
+    """获取鱼塘升级状态"""
+    upgrades = db.get_upgrades(group_id)
+    return {"code": 200, "message": "ok", "data": [
+        {"key": u["upgrade_key"], "level": u["level"],
+         "name": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("name", ""),
+         "icon": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("icon", ""),
+         "desc": fp.UPGRADE_DEFS.get(u["upgrade_key"], {}).get("desc", ""),
+         "next_cost": fp.UPGRADE_COSTS[u["level"]] if u["level"] < 5 else 0,
+         }
+        for u in upgrades
+    ]}
+
+
+@router.post("/upgrade")
+async def upgrade_endpoint(group_id: int, body: dict):
+    """升级鱼塘设施"""
+    result = await asyncio.to_thread(fp.upgrade_pond, group_id, body.get("upgrade_key", ""))
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return {"code": 200, "message": f"{result['name']}升级到 Lv{result['new_level']}", "data": result}
+
+
+@router.post("/decree")
+async def decree_endpoint(group_id: int, body: dict):
+    """执行塘主决议"""
+    result = await asyncio.to_thread(fp.execute_decree, group_id,
+                                      body.get("decree", ""),
+                                      body.get("target_wxid"))
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return {"code": 200, "message": f"{result['name']}执行完成", "data": result}
+
+
+@router.get("/decree-limits")
+def decree_limits(group_id: int):
+    """查询当日决议剩余次数"""
+    limits = {}
+    for key, d in fp.DECREE_DEFS.items():
+        used = db.count_today_decrees(group_id, key)
+        limits[key] = {"name": d["name"], "used": used, "max": d.get("daily", 1)}
+    return {"code": 200, "message": "ok", "data": limits}
+
+
+@router.post("/batch-adopt")
+async def batch_adopt_endpoint(group_id: int):
+    """一键领养：为所有无鱼成员创建鱼"""
+    results = await asyncio.to_thread(fp.batch_adopt, group_id)
+    return {"code": 200, "message": f"领养 {len(results)} 条鱼", "data": results}
+
+
+@router.get("/hot-search")
+def hot_search_endpoint(group_id: int, days: int = 7):
+    """鱼塘热搜榜"""
+    data = fp.get_hot_search(group_id, days)
+    return {"code": 200, "message": "ok", "data": data}
+
+
 # ---- 鱼塘日报 ----
 
 @router.post("/generate-report")

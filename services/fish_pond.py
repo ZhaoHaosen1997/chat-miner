@@ -1297,6 +1297,273 @@ def cmd_adopt(group_id: int, wxid: str, display_name: str,
                        message_count=message_count, portrait_traits=portrait_traits)
 
 
+# ==================== v1.16.2: 升级 + 决议 + 领养 + 热搜 + 称号 ====================
+
+UPGRADE_COSTS = [100, 300, 600, 1000, 1500]  # Lv1→5 各等级消耗
+
+UPGRADE_DEFS = {
+    "purifier":  {"name": "💧 净水器", "desc": "疾病概率 -15%/级", "icon": "💧"},
+    "shark_net": {"name": "🛡️ 防鲨网", "desc": "掠食者伤害 -2/级", "icon": "🛡️"},
+    "nutrient":  {"name": "🌿 营养剂", "desc": "全体日成长 +1/级", "icon": "🌿"},
+    "radar":     {"name": "📡 探测器", "desc": "宝藏概率 ×1.2/级", "icon": "📡"},
+    "medbay":    {"name": "🏥 医疗站", "desc": "日自动回血 +1HP/级", "icon": "🏥"},
+}
+
+DECREE_DEFS = {
+    "feed_all":    {"name": "🍞 全员投喂", "cost": 50,  "daily": 3,  "desc": "全体鱼获得喂食效果"},
+    "energy_boost":{"name": "⚡ 精力补给", "cost": 80,  "daily": 2,  "desc": "全体鱼恢复 30 精力"},
+    "elite_train": {"name": "🎓 精英培训", "cost": 200, "daily": 1,  "desc": "选一只鱼，随机属性+2", "needs_target": True},
+    "heal":        {"name": "💊 急救包",   "cost": 30,  "daily": 5,  "desc": "选一只鱼，HP 回满", "needs_target": True},
+    "force_event": {"name": "🎪 举办活动", "cost": 300, "daily": 1,  "desc": "强制触发一次稀有事件"},
+    "rain":        {"name": "🌧️ 人工降雨", "cost": 100, "daily": 2,  "desc": "触发有益群体事件"},
+    "clean":       {"name": "🪣 清理鱼塘", "cost": 20,  "daily": 3,  "desc": "全体 happiness+5，精力+10"},
+    "title_award": {"name": "🏆 命名表彰", "cost": 50,  "daily": 999,"desc": "给鱼授予特殊称号", "needs_target": True},
+}
+
+POND_KEEPER_TITLES = {
+    "newbie":          {"label": "🌱 新手塘主", "desc": "首次开启自动事件"},
+    "builder":         {"label": "🏗️ 基建狂魔", "desc": "任意升级达到 Lv5"},
+    "gambler":         {"label": "🎰 赌怪",     "desc": "手动触发事件 50 次"},
+    "capitalist":      {"label": "💰 资本家",   "desc": "金库余额突破 5000"},
+    "necromancer":     {"label": "👻 亡灵法师", "desc": "幽灵鱼复活 3 条鱼"},
+    "dragon_lord":     {"label": "🐉 龙骑士",   "desc": "拥有 5 条传说级鱼"},
+    "sweeper":         {"label": "🧹 勤劳清洁工","desc": "清理鱼塘 30 次"},
+    "philanthropist":  {"label": "🎁 大慈善家", "desc": "全员投喂 50 次"},
+}
+
+
+def upgrade_pond(group_id: int, upgrade_key: str) -> dict:
+    """升级鱼塘设施：检查金库→扣钱→升级+1"""
+    if upgrade_key not in UPGRADE_DEFS:
+        return {"error": f"未知升级项: {upgrade_key}"}
+
+    treasury = db.get_treasury(group_id)
+    current = _get_upgrade_level(group_id, upgrade_key)
+    if current >= 5:
+        return {"error": f"{UPGRADE_DEFS[upgrade_key]['name']}已满级(Lv5)"}
+
+    cost = UPGRADE_COSTS[current]  # current=0→cost=100, current=4→cost=1500
+    if treasury["balance"] < cost:
+        return {"error": f"金库余额不足，需要 {cost} 鳞币，当前 {treasury['balance']}"}
+
+    db.add_treasury(group_id, -cost, "upgrade",
+                    f"{UPGRADE_DEFS[upgrade_key]['name']} Lv{current+1}→Lv{current+2}")
+    db.set_upgrade(group_id, upgrade_key, current + 1)
+
+    return {"upgrade_key": upgrade_key, "name": UPGRADE_DEFS[upgrade_key]["name"],
+            "new_level": current + 1, "cost": cost}
+
+
+def execute_decree(group_id: int, decree_key: str,
+                   target_wxid: str = None) -> dict:
+    """执行塘主决议"""
+    if decree_key not in DECREE_DEFS:
+        return {"error": f"未知决议: {decree_key}"}
+
+    d = DECREE_DEFS[decree_key]
+    daily = d.get("daily", 1)
+    count = db.count_today_decrees(group_id, decree_key)
+    if count >= daily:
+        return {"error": f"{d['name']}今日已达上限 ({count}/{daily})"}
+
+    treasury = db.get_treasury(group_id)
+    cost = d["cost"]
+    if treasury["balance"] < cost:
+        return {"error": f"金库余额不足，需要 {cost} 鳞币，当前 {treasury['balance']}"}
+
+    if d.get("needs_target") and not target_wxid:
+        return {"error": "此决议需要指定目标鱼"}
+
+    # 执行效果
+    alive = db.get_alive_fish(group_id)
+    effect = {}
+
+    if decree_key == "feed_all":
+        for fish in alive:
+            cmd_feed(group_id, fish["wxid"], seed=f"decree_feed_{fish['wxid']}")
+        effect["fed_count"] = len(alive)
+
+    elif decree_key == "energy_boost":
+        for fish in alive:
+            db.update_fish_energy(group_id, fish["wxid"], -30)
+        effect["boosted"] = len(alive)
+
+    elif decree_key == "elite_train":
+        attrs = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+        attr = random.choice(attrs)
+        fish = db.get_fish(group_id, target_wxid)
+        if fish:
+            db.update_fish_field(group_id, target_wxid, attr, fish.get(attr, 10) + 2)
+            effect = {"wxid": target_wxid, "attr": attr, "new_val": fish.get(attr, 10) + 2}
+
+    elif decree_key == "heal":
+        fish = db.get_fish(group_id, target_wxid)
+        if fish:
+            max_hp = compute_max_hp(fish.get("constitution", 10), fish.get("level", 1), fish.get("stage", "成鱼"))
+            db.update_fish_field(group_id, target_wxid, "hp", max_hp)
+            effect = {"wxid": target_wxid, "hp": max_hp}
+
+    elif decree_key == "force_event":
+        from services.passive_events import trigger_passive_events
+        results = trigger_passive_events(group_id)
+        effect = {"events": len(results)}
+
+    elif decree_key == "rain":
+        for fish in alive:
+            g = fish.get("growth", 0) + 5
+            h = min(100, fish.get("happiness", 50) + 5)
+            db.update_fish_field(group_id, fish["wxid"], "growth", g)
+            db.update_fish_field(group_id, fish["wxid"], "happiness", h)
+            db.update_fish_energy(group_id, fish["wxid"], -10)
+        effect = {"growth": 5, "happiness": 5, "energy": 10}
+
+    elif decree_key == "clean":
+        for fish in alive:
+            h = min(100, fish.get("happiness", 50) + 5)
+            db.update_fish_field(group_id, fish["wxid"], "happiness", h)
+            db.update_fish_energy(group_id, fish["wxid"], -10)
+        effect = {"happiness": 5, "energy": 10}
+
+    elif decree_key == "title_award":
+        db.update_fish_field(group_id, target_wxid, "fish_name",
+                           f"{db.get_fish(group_id, target_wxid)['fish_name']}🏅")
+        effect = {"wxid": target_wxid}
+
+    # 扣金库 + 记录事件
+    db.add_treasury(group_id, -cost, "decree",
+                    f"{d['name']}消耗 {cost} 鳞币")
+    db.add_fish_event(group_id, target_wxid or "", f"decree_{decree_key}",
+                      {"decree": decree_key, "cost": cost, "effect": effect})
+
+    # 称号检查
+    _check_keeper_titles(group_id, decree_key)
+
+    return {"decree": decree_key, "name": d["name"], "cost": cost, "effect": effect}
+
+
+def batch_adopt(group_id: int) -> list[dict]:
+    """一键领养：为所有没有存活鱼的群成员创建鱼"""
+    conn = db.get_conn()
+    members = conn.execute(
+        "SELECT wxid, display_name FROM group_members WHERE group_id = ?", (group_id,)
+    ).fetchall()
+    conn.close()
+
+    results = []
+    for m in members:
+        existing = db.get_fish(group_id, m["wxid"])
+        if existing and existing.get("is_alive"):
+            continue
+        import json as _json
+        portrait_traits = None
+        try:
+            conn2 = db.get_conn()
+            mb = conn2.execute(
+                "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, m["wxid"])
+            ).fetchone()
+            conn2.close()
+            if mb:
+                portrait = db.get_portrait(group_id, mb["id"])
+                if portrait and portrait.get("portrait_json"):
+                    pd = _json.loads(portrait["portrait_json"])
+                    if isinstance(pd, dict):
+                        portrait_traits = pd.get("traits", [])
+        except Exception:
+            pass
+        result = create_fish(group_id, m["wxid"], m["display_name"] or m["wxid"],
+                           portrait_traits=portrait_traits)
+        results.append({"wxid": m["wxid"], "display_name": m["display_name"],
+                       "fish_name": result.get("fish", {}).get("fish_name", ""),
+                       "species": result.get("species_info", {}).get("name", "")})
+
+    return results
+
+
+def get_hot_search(group_id: int, days: int = 7) -> dict:
+    """鱼塘热搜榜：从 fish_events 聚合"""
+    from datetime import datetime as dt, timedelta
+    since = (dt.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    conn = db.get_conn()
+
+    # 最卷鱼王
+    trains = conn.execute(
+        """SELECT wxid, COUNT(*) as cnt FROM fish_events
+           WHERE group_id=? AND event_type='train' AND created_at >= ?
+           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+        (group_id, since)
+    ).fetchone()
+
+    # 最欧锦鲤
+    treasures = conn.execute(
+        """SELECT wxid, COUNT(*) as cnt FROM fish_events
+           WHERE group_id=? AND event_type='treasure' AND created_at >= ?
+           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+        (group_id, since)
+    ).fetchone()
+
+    # 斗鱼狂魔
+    battles = conn.execute(
+        """SELECT wxid, COUNT(*) as cnt FROM fish_events
+           WHERE group_id=? AND event_type='battle' AND created_at >= ?
+           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+        (group_id, since)
+    ).fetchone()
+
+    conn.close()
+
+    def fish_name(wxid):
+        if not wxid: return "—"
+        f = db.get_fish(group_id, wxid)
+        return f["fish_name"] if f else wxid[:12]
+
+    return {
+        "most_trained":    {"label": "🔥 最卷鱼王", "fish": fish_name(trains["wxid"]) if trains else "—", "data": trains["cnt"] if trains else 0},
+        "most_treasures":  {"label": "🍀 最欧锦鲤", "fish": fish_name(treasures["wxid"]) if treasures else "—", "data": treasures["cnt"] if treasures else 0},
+        "most_battles":    {"label": "🥊 斗鱼狂魔", "fish": fish_name(battles["wxid"]) if battles else "—", "data": battles["cnt"] if battles else 0},
+    }
+
+
+def _get_upgrade_level(group_id: int, upgrade_key: str) -> int:
+    upgrades = {u["upgrade_key"]: u["level"] for u in db.get_upgrades(group_id)}
+    return upgrades.get(upgrade_key, 0)
+
+
+def _check_keeper_titles(group_id: int, context: str = ""):
+    """检查并解锁塘主称号"""
+    import json as _json
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'pond_keeper_titles'"
+    ).fetchone()
+    conn.close()
+    unlocked = _json.loads(row["value"]) if row and row["value"] else []
+
+    treasury = db.get_treasury(group_id)
+    upgrades = {u["upgrade_key"]: u["level"] for u in db.get_upgrades(group_id)}
+    alive = db.get_alive_fish(group_id)
+
+    checks = {
+        "newbie": lambda: "newbie" not in unlocked,
+        "builder": lambda: any(v >= 5 for v in upgrades.values()),
+        "capitalist": lambda: treasury["balance"] >= 5000,
+        "dragon_lord": lambda: sum(1 for f in alive if f.get("rarity") == "传说") >= 5,
+    }
+
+    for key, check in checks.items():
+        if key not in unlocked and key in POND_KEEPER_TITLES and check():
+            unlocked.append(key)
+
+    conn = db.get_conn()
+    conn.execute(
+        """INSERT INTO app_settings (key, value, value_type, description)
+           VALUES ('pond_keeper_titles', ?, 'string', '塘主已解锁称号')
+           ON CONFLICT(key) DO UPDATE SET value = ?""",
+        (_json.dumps(unlocked, ensure_ascii=False), _json.dumps(unlocked, ensure_ascii=False))
+    )
+    conn.commit()
+    conn.close()
+
+
 # ==================== 结算 ====================
 
 def _generate_weather(group_id: int, date_str: str) -> dict:

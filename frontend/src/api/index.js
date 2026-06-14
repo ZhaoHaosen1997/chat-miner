@@ -172,6 +172,20 @@ export const triggerPondEvent = (gid) =>                        // v1.16.1
   request(`/groups/${gid}/fishpond/trigger-event`, { method: 'POST' })
 export const getPondTreasury = (gid) =>                         // v1.16.1
   request(`/groups/${gid}/fishpond/treasury`)
+export const getTreasuryLog = (gid, limit = 20) =>             // v1.16.2
+  request(`/groups/${gid}/fishpond/treasury?limit=${limit}`)
+export const getUpgrades = (gid) =>                            // v1.16.2
+  request(`/groups/${gid}/fishpond/upgrades`)
+export const upgradePond = (gid, upgradeKey) =>                // v1.16.2
+  request(`/groups/${gid}/fishpond/upgrade`, { method:'POST', body:JSON.stringify({upgrade_key:upgradeKey}) })
+export const executeDecree = (gid, decreeKey, targetWxid) =>   // v1.16.2
+  request(`/groups/${gid}/fishpond/decree`, { method:'POST', body:JSON.stringify({decree:decreeKey, target_wxid:targetWxid}) })
+export const getDecreeLimits = (gid) =>                        // v1.16.2
+  request(`/groups/${gid}/fishpond/decree-limits`)
+export const batchAdopt = (gid) =>                             // v1.16.2
+  request(`/groups/${gid}/fishpond/batch-adopt`, { method:'POST' })
+export const getHotSearch = (gid, days = 7) =>                 // v1.16.2
+  request(`/groups/${gid}/fishpond/hot-search?days=${days}`)
 export const exploreFish = (gid, wxid) =>
   request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/explore`, { method: 'POST' })
 export const showoffFish = (gid, wxid) =>
