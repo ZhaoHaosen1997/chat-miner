@@ -361,4 +361,17 @@ export const autoLinkPersonas = () =>
   request('/personas/auto-link', { method: 'POST' })
 export const getCrossGroupWxids = () => request('/personas/cross-group/wxids')
 export const getCrossGroupDetail = (wxid) => request(`/personas/cross-group/${wxid}`)
+// v1.5.2: 全面画像
+export const analyzeComprehensivePortrait = async (personaId, modelId = null) => {
+  const params = new URLSearchParams()
+  const body = modelId ? { model_id: modelId } : {}
+  const res = await fetch(`${BASE}/personas/${personaId}/comprehensive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '生成失败')
+  return data.data  // { task_id, status }
+}
 

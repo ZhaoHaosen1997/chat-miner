@@ -392,6 +392,8 @@ def init_db():
         _migrate_display_name_priority(conn)
         # v1.5.0: 跨群身份 + QQ 平台支持
         _migrate_v1_5_0(conn)
+        # v1.5.2: 全面画像
+        _migrate_v1_5_2(conn)
     # 清理过期日志（不阻塞启动）
     cleanup_old_logs()
 
@@ -502,6 +504,23 @@ def _migrate_v1_5_0(conn):
         );
     """)
     logger.info("DB migrate v1.5.0: personas + persona_members tables ready")
+
+
+def _migrate_v1_5_2(conn):
+    """v1.5.2: personas comprehensive_portrait columns
+    Pure additive: only ADD COLUMN, no data modification.
+    """
+    cur = conn.execute('PRAGMA table_info(personas)')
+    cols = {row[1] for row in cur.fetchall()}
+    if 'comprehensive_portrait_json' not in cols:
+        conn.execute("ALTER TABLE personas ADD COLUMN comprehensive_portrait_json TEXT DEFAULT ''")
+        import logging
+        logging.getLogger(__name__).info('DB migrate v1.5.2: added personas.comprehensive_portrait_json')
+    if 'comprehensive_portrait_updated' not in cols:
+        conn.execute('ALTER TABLE personas ADD COLUMN comprehensive_portrait_updated TIMESTAMP')
+        import logging
+        logging.getLogger(__name__).info('DB migrate v1.5.2: added personas.comprehensive_portrait_updated')
+
 
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
@@ -1945,7 +1964,26 @@ def get_persona(persona_id: int) -> dict | None:
         """, (persona_id,)).fetchall()
         result = dict(persona)
         result["members"] = [dict(m) for m in members]
+        # v1.5.2: 解析全面画像
+        raw = result.get("comprehensive_portrait_json")
+        if raw:
+            try:
+                result["comprehensive_portrait"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                result["comprehensive_portrait"] = None
+        else:
+            result["comprehensive_portrait"] = None
         return result
+
+
+def save_comprehensive_portrait(persona_id: int, portrait_json: str):
+    """v1.5.2: 保存全面画像"""
+    with db() as conn:
+        conn.execute(
+            """UPDATE personas SET comprehensive_portrait_json=?,
+               comprehensive_portrait_updated=? WHERE id=?""",
+            (portrait_json, datetime.now().isoformat(), persona_id)
+        )
 
 
 def get_persona_by_member(member_id: int) -> dict | None:
@@ -1984,6 +2022,15 @@ def list_personas() -> list[dict]:
                 ORDER BY cg.platform, cg.name
             """, (p["id"],)).fetchall()
             p["members"] = [dict(m) for m in members]
+            # v1.5.2: 解析全面画像
+            raw = p.get("comprehensive_portrait_json")
+            if raw:
+                try:
+                    p["comprehensive_portrait"] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    p["comprehensive_portrait"] = None
+            else:
+                p["comprehensive_portrait"] = None
             personas.append(p)
     return personas
 

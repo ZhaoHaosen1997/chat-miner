@@ -14,6 +14,7 @@ import FishDailyReport from './views/FishDailyReport.vue'
 import AnnualReport from './views/AnnualReport.vue'
 import Settings from './views/Settings.vue'
 import TaskHistory from './views/TaskHistory.vue'
+import ComprehensivePortrait from './views/ComprehensivePortrait.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -27,6 +28,7 @@ const routes = [
   { path: '/annual/:yearId', component: AnnualReport, props: true },
   { path: '/settings', component: Settings },
   { path: '/tasks', component: TaskHistory },
+  { path: '/comprehensive/:personaId', component: ComprehensivePortrait, props: true },
 ]
 
 const router = createRouter({

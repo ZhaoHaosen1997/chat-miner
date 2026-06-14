@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, inject, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations, getPersonas, getCrossGroupWxids, autoLinkPersonas, manualLinkMembers, listGroups } from '../api/index.js'
+import { getPortraits, analyzePortrait, analyzeAllPortraits, getMembers, getRelations, getPersonas, getCrossGroupWxids, autoLinkPersonas, manualLinkMembers, listGroups, analyzeComprehensivePortrait } from '../api/index.js'
 import { Loader2, Sparkles, RefreshCw, User, Zap, Clock, Share2, LayoutGrid, Users, Link2, ArrowRight, Plus, Search, X } from 'lucide-vue-next'
 const router = useRouter()
 const currentGroup = inject('currentGroup')
@@ -44,6 +44,16 @@ async function doAutoLink() {
   try {
     await autoLinkPersonas()
     await loadCrossGroup()
+  } catch (e) { console.error(e) }
+}
+
+async function doComprehensivePortrait(personaId) {
+  if (activeTaskId.value) return
+  try {
+    const result = await analyzeComprehensivePortrait(personaId)
+    if (result.task_id) {
+      activeTaskId.value = result.task_id
+    }
   } catch (e) { console.error(e) }
 }
 
@@ -190,10 +200,11 @@ watch(activeTaskId, (newVal, oldVal) => {
     batchAnalyzing.value = false
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
     load()
+    loadCrossGroup()  // v1.5.2: 任务完成后刷新跨群数据
     triggerRefresh?.()
   }
   if (newVal && !oldVal) {
-    _refreshTimer = setInterval(() => load(true), 3000)  // 静默刷新，不显示loading
+    _refreshTimer = setInterval(() => load(true), 10000)  // v1.5.2: 10s间隔，降低IO
   }
 })
 onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
@@ -473,6 +484,21 @@ const unanalyzedCount = computed(() =>
                   </span>
                 </div>
               </div>
+              <!-- v1.5.2: 全面画像 -->
+              <div v-if="p.comprehensive_portrait" class="mt-3 bg-white rounded-lg p-3 border border-indigo-100 cursor-pointer hover:border-indigo-300 transition-colors"
+                   @click="$router.push(`/comprehensive/${p.id}?group_id=${currentGroup?.id}`)">
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <Sparkles class="w-3.5 h-3.5 text-indigo-500" />
+                  <span class="text-xs font-medium text-indigo-600">全面画像</span>
+                  <span class="text-[10px] text-indigo-400 ml-auto">查看 →</span>
+                </div>
+                <p class="text-sm text-slate-700 font-medium">{{ p.comprehensive_portrait.unified_oneline }}</p>
+                <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">{{ p.comprehensive_portrait.core_personality }}</p>
+              </div>
+              <button v-else-if="p.member_count >= 2" @click="doComprehensivePortrait(p.id)"
+                      class="mt-2 text-xs text-indigo-500 hover:text-indigo-600 font-medium flex items-center gap-1">
+                <Sparkles class="w-3 h-3" />生成全面画像
+              </button>
             </div>
           </div>
         </div>

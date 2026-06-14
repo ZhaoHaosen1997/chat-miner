@@ -108,6 +108,7 @@ const typeLabels = {
   'generate_weekly': '周报生成',
   'generate_monthly': '月报生成',
   'generate_annual': '年报生成',
+  'comprehensive_portrait': '全面画像',
 }
 
 watch(() => props.taskId, (id) => {

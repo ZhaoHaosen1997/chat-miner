@@ -253,7 +253,7 @@ class LogWindow:
             except Exception:
                 # 服务还没就绪，稍后重试
                 pass
-            self._root.after(10000, _poll)
+            self._root.after(30000, _poll)  # v1.5.2: 30s间隔，降低IO
 
         self._root.after(2000, _poll)
 

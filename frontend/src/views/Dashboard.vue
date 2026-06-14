@@ -17,11 +17,11 @@ const activeTaskId = inject('activeTaskId')
 const showError = inject('showError')
 const gid = computed(() => currentGroup.value?.id)
 
-// 批量任务运行时定时刷新（逐个标绿）
+// 批量任务运行时定时刷新（逐个标绿）— v1.5.2: 10s间隔 + 仅刷新关键数据
 let _refreshTimer = null
 watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
-    _refreshTimer = setInterval(() => loadAll(true), 3000)
+    _refreshTimer = setInterval(() => loadTaskProgress(), 10000)
   } else if (oldVal) {
     // 任务结束时清理状态 + 刷新数据
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
@@ -99,6 +99,24 @@ function collapseMonthly() {
 }
 const showAnnualConfirm = ref(false)
 const pendingAnnualYear = ref('')
+
+async function loadTaskProgress() {
+  // v1.5.2: 批量任务期间轻量刷新，仅取变化的数据（stats / dates / taskHistory）
+  if (!currentGroup.value) return
+  const gid = currentGroup.value.id
+  try {
+    const [s, d, h] = await Promise.allSettled([
+      getGroupStats(gid),
+      getDates(gid),
+      getTaskHistory(gid, 8),
+    ])
+    stats.value = s.status === 'fulfilled' ? s.value : stats.value
+    const datesArr = d.status === 'fulfilled' ? d.value : null
+    if (datesArr) dates.value = Array.isArray(datesArr) ? datesArr : []
+    const histArr = h.status === 'fulfilled' ? h.value : null
+    if (histArr) taskHistory.value = Array.isArray(histArr) ? histArr : []
+  } catch (e) { /* silent */ }
+}
 
 async function loadAll(silent = false) {
   if (!currentGroup.value) return

@@ -814,6 +814,21 @@ const currentVersion = computed(() => {
           </div>
         </div>
 
+        <!-- v1.5.2: 全面画像入口 -->
+        <div v-if="hasPersona && personaData.id" class="mt-4 border-t border-slate-100 pt-4">
+          <div v-if="personaData.comprehensive_portrait"
+               class="card p-4 bg-white border border-indigo-100 cursor-pointer hover:border-indigo-300 transition-colors"
+               @click="$router.push(`/comprehensive/${personaData.id}?group_id=${currentGroup?.id}`)">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <Sparkles class="w-3.5 h-3.5 text-indigo-500" />
+              <span class="text-xs font-medium text-indigo-600">全面画像</span>
+              <span class="text-[10px] text-indigo-400 ml-auto">查看 →</span>
+            </div>
+            <p class="text-sm text-slate-700 font-medium">{{ personaData.comprehensive_portrait.unified_oneline }}</p>
+            <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">{{ personaData.comprehensive_portrait.core_personality }}</p>
+          </div>
+        </div>
+
         <!-- 无跨群数据 -->
         <div v-if="!hasCrossGroup && !hasPersona" class="card p-8 text-center">
           <Users2 class="w-10 h-10 text-slate-200 mx-auto mb-2" />
