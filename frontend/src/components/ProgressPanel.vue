@@ -54,9 +54,10 @@ function connect() {
     // 连接出错且未收到过任何有效消息：等待 5s 后若仍未连接成功则关闭
     // 避免浏览器在任务不存在时陷入无限重连循环
     if (status.value === 'pending') {
+      const es = eventSource  // v1.5.5: 捕获当前 EventSource 实例，防止闭包引用被新任务覆盖
       setTimeout(() => {
-        if (status.value === 'pending' && eventSource) {
-          eventSource.close()
+        if (status.value === 'pending' && es) {
+          es.close()
           emit('done', { status: 'failed', type: '', step: '连接失败', error: { type: 'connection_lost', detail: '无法建立 SSE 连接' } })
         }
       }, 5000)

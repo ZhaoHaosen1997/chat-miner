@@ -2194,7 +2194,7 @@ def update_prompt_profile(profile_id: int, **kwargs) -> bool:
                 "UPDATE prompt_profiles SET is_default=0, updated_at=CURRENT_TIMESTAMP WHERE analysis_type=? AND is_default=1 AND id!=?",
                 (existing["analysis_type"], profile_id)
             )
-        fields["updated_at"] = __import__('datetime').datetime.now().isoformat()
+        fields["updated_at"] = datetime.now().isoformat()
         sets = ", ".join(f"{k}=?" for k in fields)
         values = list(fields.values()) + [profile_id]
         conn.execute(f"UPDATE prompt_profiles SET {sets} WHERE id=?", values)

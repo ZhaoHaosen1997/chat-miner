@@ -90,12 +90,12 @@ async function loadPollSettings() {
   } catch {}
 }
 async function savePollSetting(key, seconds) {
-  const ms = key.endsWith('_ms') ? seconds * 1000 : seconds
+  // v1.5.5: 负值兜底 + 最小值限制
+  const clamped = Math.max(key.endsWith('_ms') ? 5 : 10, seconds)
+  const ms = key.endsWith('_ms') ? clamped * 1000 : clamped
   await updateAppSetting(key, String(ms))
   // 同步到 localStorage 供 Dashboard/Portraits 直接读取
-  localStorage.setItem('poll_interval_dashboard_ms', pollDashboardS.value * 1000)
-  localStorage.setItem('poll_interval_portraits_ms', pollPortraitsS.value * 1000)
-  localStorage.setItem('poll_interval_stats_s', pollStatsS.value)
+  localStorage.setItem(key, String(ms))
 }
 onMounted(loadPollSettings)
 
@@ -750,8 +750,8 @@ onMounted(async () => {
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-slate-400"></div><Clock :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">轮询间隔</span></div>
         <div class="p-5 grid grid-cols-3 gap-4">
-          <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS = Number($event.target.value); savePollSetting('poll_interval_dashboard_ms', pollDashboardS)" min="3" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS = Number($event.target.value); savePollSetting('poll_interval_portraits_ms', pollPortraitsS)" min="3" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS = Number($event.target.value); savePollSetting('poll_interval_dashboard_ms', pollDashboardS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS = Number($event.target.value); savePollSetting('poll_interval_portraits_ms', pollPortraitsS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS = Number($event.target.value); savePollSetting('poll_interval_stats_s', pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div></div></div>
     </div>
 

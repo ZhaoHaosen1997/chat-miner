@@ -1,6 +1,7 @@
-from models.database import get_default_prompt
 """
 年度报告 + 颁奖典礼 生成服务
+"""
+from models.database import get_default_prompt
 
 v0.11.0：
 - 利用 DeepSeek V4 Flash 1M 上下文，基于全年数据 + 月报摘要生成年度颁奖典礼

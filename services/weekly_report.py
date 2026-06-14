@@ -1,6 +1,7 @@
-from models.database import get_default_prompt
 """
 周报/月报生成服务
+"""
+from models.database import get_default_prompt
 
 v0.7.2 架构升级：
 - 新增 _extract_period_raw_data() 直接从原始消息提取 Python 统计 + 匿名化采样

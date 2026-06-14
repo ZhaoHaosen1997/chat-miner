@@ -204,7 +204,7 @@ watch(activeTaskId, (newVal, oldVal) => {
     triggerRefresh?.()
   }
   if (newVal && !oldVal) {
-    const interval = parseInt(localStorage.getItem('poll_interval_portraits_ms')) || 10000
+    const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_portraits_ms')) || 10000)
     _refreshTimer = setInterval(() => load(true), interval)
   }
 })
