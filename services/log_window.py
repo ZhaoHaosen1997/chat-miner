@@ -114,7 +114,7 @@ class LogWindow:
         root = self._root
         self._running = True
 
-        root.title(f"Chat-Miner v1.5.0")
+        root.title(f"Chat-Miner v1.5.5")
         root.geometry("420x340")
         root.minsize(320, 300)
         root.configure(fg_color="#f8fafc")
@@ -147,7 +147,7 @@ class LogWindow:
         # 标题
         ctk.CTkLabel(card, text="Chat-Miner", font=("Microsoft YaHei", 16, "bold"),
                      text_color="#1e293b").pack()
-        ctk.CTkLabel(card, text="v1.5.0 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
+        ctk.CTkLabel(card, text="v1.5.5 · 群聊内容分析", font=ctk.CTkFont(family="Microsoft YaHei", size=12),
                      text_color="#94a3b8").pack(pady=(0, 10))
 
         # ---- 启动进度条 ----

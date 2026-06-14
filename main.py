@@ -127,6 +127,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# v1.5.5: Cache-Control 中间件：防止浏览器将 API 响应写入磁盘缓存
+# 同时为静态资源设置合理的浏览器内存缓存时间
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/"):
+            # API 响应禁止缓存，防止浏览器写入磁盘缓存
+            response.headers["Cache-Control"] = "no-store"
+        elif path.startswith("/assets/") or any(
+            path.endswith(ext) for ext in (".js", ".css", ".svg", ".ico", ".png", ".jpg", ".woff2")
+        ):
+            # 静态资源允许浏览器内存缓存 1 小时，避免重复下载
+            response.headers["Cache-Control"] = "public, max-age=3600, immutable"
+        return response
+
+app.add_middleware(CacheControlMiddleware)
+
 # 版本/健康检查
 @app.get("/api/health")
 async def api_health():

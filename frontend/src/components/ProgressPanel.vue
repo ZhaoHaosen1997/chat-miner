@@ -45,9 +45,21 @@ function connect() {
   }
 
   eventSource.onerror = () => {
-    // SSE 会定期重连，但任务完成后我们主动关闭
-    if (status.value === 'done' || status.value === 'failed') {
+    // v1.5.5: 防止浏览器自动重连导致的磁盘 I/O 泄漏
+    // 终止状态：立即关闭
+    if (status.value === 'done' || status.value === 'failed' || status.value === 'cancelled') {
       eventSource?.close()
+      return
+    }
+    // 连接出错且未收到过任何有效消息：等待 5s 后若仍未连接成功则关闭
+    // 避免浏览器在任务不存在时陷入无限重连循环
+    if (status.value === 'pending') {
+      setTimeout(() => {
+        if (status.value === 'pending' && eventSource) {
+          eventSource.close()
+          emit('done', { status: 'failed', type: '', step: '连接失败', error: { type: 'connection_lost', detail: '无法建立 SSE 连接' } })
+        }
+      }, 5000)
     }
   }
 }
