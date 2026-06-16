@@ -1669,6 +1669,8 @@ def _build_relationships(group_id: int, date_str: str) -> int:
 
         if etype in group_event_types:
             wxid = e.get("wxid", "")
+            if not wxid:  # 跳过群公告等无发送者事件
+                continue
             if edate not in daily_group_participants:
                 daily_group_participants[edate] = set()
             daily_group_participants[edate].add(wxid)
@@ -1689,14 +1691,15 @@ def _build_relationships(group_id: int, date_str: str) -> int:
                 key = tuple(sorted([p_list[i], p_list[j]]))
                 friendship_pairs[key] = friendship_pairs.get(key, 0) + 1
 
-    # 写入关系
+    # 写入关系：首次运行阈值3，后续阈值1（增量模式）
+    threshold = 3 if existing_count == 0 else 1
     count = 0
     for (a, b), strength in friendship_pairs.items():
-        if strength >= 3:
+        if strength >= threshold:
             db.upsert_fish_relationship(group_id, a, b, "friendship", 1)
             count += 1
     for (a, b), strength in rivalry_pairs.items():
-        if strength >= 3:
+        if strength >= threshold:
             db.upsert_fish_relationship(group_id, a, b, "rivalry", 1)
             count += 1
 
@@ -1936,21 +1939,24 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
                            member_message_count=0, member_active=False)
         results.append({"wxid": wxid, "fish_name": fish["fish_name"], **result})
 
-    # 应用天气效果
-    if weather.get("growth_bonus"):
-        for fish in alive_fish:
-            g = fish["growth"] + weather["growth_bonus"]
-            db.update_fish_field(group_id, fish["wxid"], "growth", g)
+    # 应用天气 + 季节效果（从 DB 重读当前值，避免快照覆盖 settle_fish 写入）
+    wxids = [f["wxid"] for f in alive_fish]
+    if weather.get("growth_bonus") or season.get("growth_mult"):
+        for wxid in wxids:
+            fresh = db.get_fish(group_id, wxid)
+            if not fresh: continue
+            g = fresh["growth"]
+            if weather.get("growth_bonus"):
+                g += weather["growth_bonus"]
+            if season.get("growth_mult"):
+                g = int(g * season["growth_mult"])
+            db.update_fish_field(group_id, wxid, "growth", g)
     if weather.get("happiness_bonus"):
-        for fish in alive_fish:
-            h = max(0, min(100, fish["happiness"] + weather["happiness_bonus"]))
-            db.update_fish_field(group_id, fish["wxid"], "happiness", h)
-
-    # 应用季节 buff
-    if season.get("growth_mult"):
-        for fish in alive_fish:
-            g = int(fish["growth"] * season["growth_mult"])
-            db.update_fish_field(group_id, fish["wxid"], "growth", g)
+        for wxid in wxids:
+            fresh = db.get_fish(group_id, wxid)
+            if not fresh: continue
+            h = max(0, min(100, fresh["happiness"] + weather["happiness_bonus"]))
+            db.update_fish_field(group_id, wxid, "happiness", h)
 
     # 换季检测
     settle_conn = db.get_conn()

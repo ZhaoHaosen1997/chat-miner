@@ -808,13 +808,15 @@ async def do_legendary_quest(group_id: int, wxid: str):
 
         # 记录今日挑战
         conn = db.get_conn()
-        conn.execute(
-            "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (quest_date_key, date_str)
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (quest_date_key, date_str)
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         if check.success:
             new_step = step + 1
@@ -933,7 +935,7 @@ async def debug_coins(group_id: int, body: DebugCoinsBody):
         if amount > 0:
             db.earn_coins(group_id, body.wxid, amount, "debug", "被不明力量赠与了鳞币")
         else:
-            wallet = db.get_coin_balance(group_id, body.wxid)
+            wallet = db.get_coin_wallet(group_id, body.wxid)
             current = wallet.get("balance", 0) if wallet else 0
             deduct = min(current, -amount)
             if deduct > 0:
@@ -952,10 +954,14 @@ class DebugEventBody(BaseModel):
 
 @router.post("/debug/trigger-event")
 async def debug_trigger_event(group_id: int, body: DebugEventBody):
-    """强制触发被动事件"""
+    """强制触发指定分组的被动事件"""
     _require_cheat()
     try:
-        from services.passive_events import trigger_passive_events, get_merged_flavor_events
+        from services.passive_events import (
+            trigger_passive_events, get_merged_flavor_events,
+            DANGER_EVENTS, LUCKY_EVENTS, WELFARE_EVENTS,
+            RARE_EVENTS, CHALLENGE_EVENTS,
+        )
         import random as _random
         group = body.event_group
         db.add_fish_event(group_id, "", "flavor", {
@@ -966,8 +972,22 @@ async def debug_trigger_event(group_id: int, body: DebugEventBody):
             text = _random.choice(flavors) if flavors else "不明力量拂过水面..."
             db.add_fish_event(group_id, "", "flavor", {"text": text})
         else:
-            # 触发实际事件
-            trigger_passive_events(group_id)
+            # 从指定分组随机选一个事件执行
+            evt_pool = {"danger": DANGER_EVENTS, "lucky": LUCKY_EVENTS,
+                        "welfare": WELFARE_EVENTS, "rare": RARE_EVENTS,
+                        "challenge": CHALLENGE_EVENTS}.get(group)
+            if not evt_pool:
+                raise HTTPException(400, f"未知事件分组: {group}")
+            alive = db.get_alive_fish(group_id)
+            if not alive:
+                raise HTTPException(400, "鱼塘没有活鱼")
+            from services.passive_events import _execute_single_event, _execute_rare_event
+            evt = _random.choice(evt_pool)
+            if group == "rare":
+                _execute_rare_event(group_id, evt[0], evt[1], evt[2], alive)
+            else:
+                target = _random.choice(alive)
+                _execute_single_event(group_id, evt, target)
         return {"code": 200, "message": f"已触发 {group} 事件"}
     except HTTPException: raise
     except Exception as e: raise HTTPException(500, f"触发失败: {e}")

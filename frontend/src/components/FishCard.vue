@@ -23,11 +23,9 @@ async function saveRename() {
   if (!name || name.length > 20) return
   renameSaving.value = true
   try {
-    const res = await renameFish(props.groupId, props.fish.wxid, name)
-    if (res.code === 200) {
-      showRenameInput.value = false
-      emit('refresh')
-    }
+    await renameFish(props.groupId, props.fish.wxid, name)
+    showRenameInput.value = false
+    emit('refresh')
   } catch (e) { /* ignore */ }
   finally { renameSaving.value = false }
 }
@@ -40,7 +38,7 @@ async function loadQuestStatus() {
   if (!props.groupId || !props.fish?.wxid) return
   try {
     const res = await getLegendaryQuestStatus(props.groupId, props.fish.wxid)
-    if (res.code === 200) questStatus.value = res.data
+    questStatus.value = res
   } catch (e) { /* ignore */ }
 }
 async function startLegendaryQuest() {
@@ -48,11 +46,9 @@ async function startLegendaryQuest() {
   questResult.value = null
   try {
     const res = await doLegendaryQuest(props.groupId, props.fish.wxid)
-    if (res.code === 200) {
-      questResult.value = res.data
-      await loadQuestStatus()
-      emit('refresh')
-    }
+    questResult.value = res
+    await loadQuestStatus()
+    emit('refresh')
   } catch (e) { /* ignore */ }
   finally { questLoading.value = false }
 }
@@ -60,18 +56,15 @@ const canQuest = computed(() => {
   if (!questStatus.value) return false
   return questStatus.value.can_challenge
 })
-const questStepNames = computed(() => questStatus.value?.step_names || [])
 
 // --- v1.16.4: 朋友圈 ---
 const relationships = ref([])
-const relsLoaded = ref(false)
 async function loadRelationships() {
   if (!props.groupId || !props.fish?.wxid) return
   try {
     const res = await getFishRelationships(props.groupId, props.fish.wxid)
-    if (res.code === 200) relationships.value = res.data?.relationships || []
+    relationships.value = res?.relationships || []
   } catch (e) { /* ignore */ }
-  finally { relsLoaded.value = true }
 }
 onMounted(() => {
   loadQuestStatus()

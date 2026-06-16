@@ -1630,6 +1630,7 @@ _FISH_FIELD_WHITELIST = {
     "equipped_item", "active_consumable",
     "energy", "max_energy", "personality_traits", "emoji_variant",  # v1.16.0
     "max_hp",  # v1.16.3
+    "legendary_quest_step",  # v1.16.4
 }
 
 
@@ -1851,9 +1852,9 @@ def get_fish_relationships(group_id: int, wxid: str) -> list[dict]:
                FROM fish_relationships fr
                LEFT JOIN fish_pond fp ON fp.group_id = fr.group_id
                  AND (fp.wxid = CASE WHEN fr.fish_wxid_a = ? THEN fr.fish_wxid_b ELSE fr.fish_wxid_a END)
+                 AND fp.is_alive = 1
                WHERE fr.group_id = ?
                  AND (fr.fish_wxid_a = ? OR fr.fish_wxid_b = ?)
-                 AND fp.is_alive = 1
                ORDER BY fr.strength DESC""",
             (wxid, group_id, wxid, wxid)
         ).fetchall()

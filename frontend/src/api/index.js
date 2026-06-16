@@ -345,6 +345,16 @@ export const updateAppSetting = (key, value) =>
   request('/settings/app-settings', {
     method: 'PUT', body: JSON.stringify({ key, value })
   })
+
+// v1.16.5: 共享作弊模式检查
+export async function isCheatModeEnabled() {
+  try {
+    const settings = await getAppSettings()
+    if (!Array.isArray(settings)) return false
+    const s = settings.find(s => s.key === 'pond_cheat_mode')
+    return s ? s.value === 'true' : false
+  } catch { return false }
+}
 export const updateAppSettingsBatch = (updates) =>
   request('/settings/app-settings/batch', {
     method: 'PUT', body: JSON.stringify({ updates })
