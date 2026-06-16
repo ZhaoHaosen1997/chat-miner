@@ -1617,24 +1617,147 @@ def _check_keeper_titles(group_id: int, context: str = ""):
 
 # ==================== 结算 ====================
 
-def _generate_weather(group_id: int, date_str: str) -> dict:
-    """确定性天气生成"""
-    seed_str = f"weather_{group_id}_{date_str}"
+def _build_relationships(group_id: int, date_str: str) -> int:
+    """从当日 fish_events 构建鱼际关系（每日结算时调用）"""
+    import json as _json
+    today_events = db.get_fish_events(group_id, wxid="", limit=500)
+    # 过滤当日事件
+    today_events = [e for e in today_events
+                    if e.get("created_at", "")[:10] == date_str]
+    if not today_events:
+        return 0
+
+    # 首批构建：检查是否首次运行（fish_relationships 为空）
+    conn = db.get_conn()
+    existing_count = conn.execute(
+        "SELECT COUNT(*) FROM fish_relationships WHERE group_id=?", (group_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    if existing_count == 0:
+        # 首次运行：扫描最近30天的 group 事件
+        all_events = db.get_fish_events(group_id, wxid="", limit=2000)
+        cutoff = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
+        recent_events = [e for e in all_events
+                         if e.get("created_at", "")[:10] >= cutoff]
+        scan_events = recent_events
+    else:
+        scan_events = today_events
+
+    # 聚合：按 (wxid_a, wxid_b) 统计
+    friendship_pairs = {}  # {(a,b): count}
+    rivalry_pairs = {}
+
+    group_event_types = {
+        "race", "storm", "rainbow", "acid_rain", "feed_ship",
+        "bubble_party", "underwater_concert", "siren"
+    }
+
+    # 按天分组的群体事件参与者
+    daily_group_participants = {}  # date → set of wxids
+    for e in scan_events:
+        edata_str = e.get("event_data", "{}")
+        try:
+            edata = _json.loads(edata_str) if isinstance(edata_str, str) else edata_str
+        except (_json.JSONDecodeError, TypeError):
+            edata = {}
+        etype = e.get("event_type", "")
+        edate = e.get("created_at", "")[:10]
+
+        if etype in group_event_types:
+            wxid = e.get("wxid", "")
+            if edate not in daily_group_participants:
+                daily_group_participants[edate] = set()
+            daily_group_participants[edate].add(wxid)
+
+        elif etype == "battle":
+            # 检查 event_data 中的 target
+            target = edata.get("target_wxid", "")
+            wxid = e.get("wxid", "")
+            if target and wxid:
+                key = tuple(sorted([wxid, target]))
+                rivalry_pairs[key] = rivalry_pairs.get(key, 0) + 1
+
+    # 友谊：同一天群体事件中出现 ≥2 次（同组参与者各计）
+    for date_key, participants in daily_group_participants.items():
+        p_list = list(participants)
+        for i in range(len(p_list)):
+            for j in range(i + 1, len(p_list)):
+                key = tuple(sorted([p_list[i], p_list[j]]))
+                friendship_pairs[key] = friendship_pairs.get(key, 0) + 1
+
+    # 写入关系
+    count = 0
+    for (a, b), strength in friendship_pairs.items():
+        if strength >= 3:
+            db.upsert_fish_relationship(group_id, a, b, "friendship", 1)
+            count += 1
+    for (a, b), strength in rivalry_pairs.items():
+        if strength >= 3:
+            db.upsert_fish_relationship(group_id, a, b, "rivalry", 1)
+            count += 1
+
+    return count
+
+
+
+def _get_season(date_str: str = None) -> dict:
+    """根据真实月份返回季节（全服统一）"""
+    dt = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
+    m = dt.month
+    if 3 <= m <= 5:
+        return {"type": "spring", "name": "春", "emoji": "🌸",
+                "effect": "全体鱼成长 +10%", "growth_mult": 1.1,
+                "css_class": "season-spring"}
+    elif 6 <= m <= 8:
+        return {"type": "summer", "name": "夏", "emoji": "☀️",
+                "effect": "竞速/选美奖励 ×1.5", "event_bonus_mult": 1.5,
+                "css_class": "season-summer"}
+    elif 9 <= m <= 11:
+        return {"type": "autumn", "name": "秋", "emoji": "🍂",
+                "effect": "宝藏概率 +15%，鳞币收益 +20%", "treasure_bonus": 0.15,
+                "coin_mult": 1.2, "css_class": "season-autumn"}
+    else:
+        return {"type": "winter", "name": "冬", "emoji": "❄️",
+                "effect": "稀有事件概率 ×2", "rare_event_mult": 2.0,
+                "css_class": "season-winter"}
+
+
+def _generate_weather(date_str: str) -> dict:
+    """全服统一天气（按日期确定性生成）"""
+    seed_str = f"weather_{date_str}"
     rng = random.Random(seed_str)
     roll = rng.randint(1, 100)
-    if roll <= 60:
-        weather = {"type": "sunny", "name": "晴天", "emoji": "☀️",
-                   "effect": "无特殊效果", "growth_bonus": 0, "happiness_bonus": 0}
+    if roll <= 40:
+        return {"type": "sunny", "name": "晴天", "emoji": "☀️",
+                "effect": "无特殊效果", "growth_bonus": 0, "happiness_bonus": 0,
+                "css_class": "weather-sunny"}
+    elif roll <= 60:
+        return {"type": "rain", "name": "雨天", "emoji": "🌧️",
+                "effect": "全体 +5 成长值", "growth_bonus": 5, "happiness_bonus": 0,
+                "css_class": "weather-rain"}
+    elif roll <= 70:
+        return {"type": "storm", "name": "暴风雨", "emoji": "⛈️",
+                "effect": "全体幸福值 -5", "growth_bonus": 0, "happiness_bonus": -5,
+                "css_class": "weather-storm"}
+    elif roll <= 75:
+        return {"type": "rainbow", "name": "彩虹", "emoji": "🌈",
+                "effect": "全体 +10 幸福值", "growth_bonus": 0, "happiness_bonus": 10,
+                "css_class": "weather-rainbow"}
+    elif roll <= 78:
+        return {"type": "double_rainbow", "name": "双彩虹", "emoji": "🌈🌈",
+                "effect": "全体幸福值 +20", "growth_bonus": 0, "happiness_bonus": 20,
+                "css_class": "weather-double-rainbow"}
     elif roll <= 85:
-        weather = {"type": "rain", "name": "雨天", "emoji": "🌧️",
-                   "effect": "全体 +5 成长值", "growth_bonus": 5, "happiness_bonus": 0}
-    elif roll <= 95:
-        weather = {"type": "storm", "name": "暴风雨", "emoji": "⛈️",
-                   "effect": "全体幸福值 -5", "growth_bonus": 0, "happiness_bonus": -5}
+        return {"type": "sandstorm", "name": "沙尘暴", "emoji": "🌪️",
+                "effect": "检定 -1，宝藏概率 +10%", "growth_bonus": 0,
+                "happiness_bonus": -3, "sandstorm_penalty": 1, "treasure_bonus": 0.10,
+                "css_class": "weather-sandstorm"}
     else:
-        weather = {"type": "rainbow", "name": "彩虹", "emoji": "🌈",
-                   "effect": "全体 +10 幸福值", "growth_bonus": 0, "happiness_bonus": 10}
-    return weather
+        return {"type": "meteor", "name": "流星雨", "emoji": "🌠",
+                "effect": "流星许愿事件必定触发且 DC -5",
+                "growth_bonus": 0, "happiness_bonus": 5, "meteor_bonus": True,
+                "css_class": "weather-meteor"}
 
 
 def settle_fish(group_id: int, wxid: str, reference_date: str = None,
@@ -1761,12 +1884,14 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
 def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
     """全群结算"""
     date_str = reference_date or datetime.now().strftime("%Y-%m-%d")
-    weather = _generate_weather(group_id, date_str)
+    weather = _generate_weather(date_str)
+    season = _get_season(date_str)
 
     # 获取群成员活跃数据（需要用 ParsedChat，这里尝试获取）
     alive_fish = db.get_alive_fish(group_id)
     if not alive_fish:
-        return {"settled": False, "error": "鱼塘里还没有鱼", "weather": weather}
+        return {"settled": False, "error": "鱼塘里还没有鱼",
+                "weather": weather, "season": season}
 
     results = []
     for fish in alive_fish:
@@ -1777,14 +1902,44 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
         results.append({"wxid": wxid, "fish_name": fish["fish_name"], **result})
 
     # 应用天气效果
-    if weather["growth_bonus"]:
+    if weather.get("growth_bonus"):
         for fish in alive_fish:
             g = fish["growth"] + weather["growth_bonus"]
             db.update_fish_field(group_id, fish["wxid"], "growth", g)
-    if weather["happiness_bonus"]:
+    if weather.get("happiness_bonus"):
         for fish in alive_fish:
             h = max(0, min(100, fish["happiness"] + weather["happiness_bonus"]))
             db.update_fish_field(group_id, fish["wxid"], "happiness", h)
+
+    # 应用季节 buff
+    if season.get("growth_mult"):
+        for fish in alive_fish:
+            g = int(fish["growth"] * season["growth_mult"])
+            db.update_fish_field(group_id, fish["wxid"], "growth", g)
+
+    # 换季检测
+    settle_conn = db.get_conn()
+    last_season_row = settle_conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?",
+        (f"pond_last_season_{group_id}",)
+    ).fetchone()
+    last_season = last_season_row["value"] if last_season_row else ""
+    if last_season and last_season != season["type"]:
+        db.add_fish_event(group_id, "", "flavor", {
+            "type": "season_change",
+            "old_season": last_season,
+            "new_season": season["type"],
+            "name": season["name"],
+            "emoji": season["emoji"],
+            "desc": f"季节变换：{season['emoji']} {season['name']}到了！{season['effect']}",
+        })
+    settle_conn.execute(
+        "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (f"pond_last_season_{group_id}", season["type"])
+    )
+    settle_conn.commit()
+    settle_conn.close()
 
     # 鲨鱼来袭 (1% 概率, DC12 STR 检定, v1.16.3 改为不直接杀)
     rng = random.Random(f"shark_{group_id}_{date_str}")
@@ -1848,12 +2003,17 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
     # 生成黑市
     black_market = generate_black_market(group_id, date_str)
 
+    # 鱼际关系构建
+    relationship_count = _build_relationships(group_id, date_str)
+
     return {
         "settled": True,
         "date": date_str,
         "weather": weather,
+        "season": season,
         "results": results,
         "fish_count": len(alive_fish),
+        "relationship_count": relationship_count,
         "black_market": [{
             "key": bm["key"],
             "name": ITEMS.get(bm["key"], {}).get("name", bm["key"]),
@@ -1870,7 +2030,8 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
 def get_pond_state(group_id: int, reference_date: str = None) -> dict:
     """获取鱼塘全貌"""
     date_str = reference_date or datetime.now().strftime("%Y-%m-%d")
-    weather = _generate_weather(group_id, date_str)
+    weather = _generate_weather(date_str)
+    season = _get_season(date_str)
     fish_list = db.get_all_fish(group_id)
 
     # 附加品种信息
@@ -1904,6 +2065,7 @@ def get_pond_state(group_id: int, reference_date: str = None) -> dict:
 
     return {
         "weather": weather,
+        "season": season,
         "fish": enriched,
         "alive_count": len([f for f in fish_list if f.get("is_alive")]),
         "dead_count": len([f for f in fish_list if not f.get("is_alive")]),

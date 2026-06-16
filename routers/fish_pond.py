@@ -4,6 +4,7 @@
 import json
 import asyncio
 import logging
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Path
 
 logger = logging.getLogger(__name__)
@@ -697,3 +698,212 @@ def parse_commands(group_id: int):
                 },
                 "report_url": f"/#/fish-report/{today}",
             }}
+
+
+# ==================== v1.16.4: 鱼际关系 API ====================
+
+class RelationTarget(BaseModel):
+    pass  # 预留，无请求体
+
+
+@router.get("/fish/{wxid}/relationships")
+async def get_fish_relationships(group_id: int, wxid: str):
+    """获取某鱼的关系列表（朋友圈）"""
+    try:
+        rels = db.get_fish_relationships(group_id, wxid)
+        return {"code": 200, "message": "ok", "data": {"wxid": wxid, "relationships": rels}}
+    except Exception as e:
+        logger.error(f"查询鱼际关系失败: {e}")
+        raise HTTPException(500, f"查询失败: {e}")
+
+
+# ==================== v1.16.4: 传奇鱼任务 API ====================
+
+class LegendaryQuestBody(BaseModel):
+    pass  # 无额外参数
+
+
+@router.get("/fish/{wxid}/legendary-quest-status")
+async def get_legendary_quest_status(group_id: int, wxid: str):
+    """查询传奇试炼状态"""
+    try:
+        fish = db.get_fish(group_id, wxid)
+        if not fish:
+            raise HTTPException(404, "鱼不存在")
+        step = fish.get("legendary_quest_step", 0)
+        # 检查今日是否已挑战
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        quest_date_key = f"legendary_quest_date_{group_id}_{wxid}"
+        conn = db.get_conn()
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
+        ).fetchone()
+        conn.close()
+        today_attempted = (row and row["value"] == date_str)
+        return {"code": 200, "message": "ok", "data": {
+            "step": step,
+            "step_names": ["未开始", "力量试炼(STR DC15)", "智慧试炼(WIS DC18)", "意志试炼(CHA DC20)", "已通关"],
+            "today_attempted": today_attempted,
+            "can_challenge": (step > 0 and step < 4 and not today_attempted
+                              and fish.get("stage") == "传说" and fish.get("level", 0) >= 8
+                              and fish.get("energy", 0) >= 50),
+        }}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询传奇任务状态失败: {e}")
+        raise HTTPException(500, f"查询失败: {e}")
+
+
+@router.post("/fish/{wxid}/legendary-quest")
+async def do_legendary_quest(group_id: int, wxid: str):
+    """执行传奇试炼下一步"""
+    from datetime import datetime as dt
+    try:
+        fish = db.get_fish(group_id, wxid)
+        if not fish or not fish.get("is_alive"):
+            raise HTTPException(400, "鱼不存在或已死亡")
+        if fish.get("stage") != "传说" or fish.get("level", 0) < 8:
+            raise HTTPException(400, "仅传说阶段且等级≥8的鱼可挑战传奇试炼")
+        if fish.get("energy", 0) < 50:
+            raise HTTPException(400, f"精力不足（需要50，当前{fish['energy']}）")
+
+        step = fish.get("legendary_quest_step", 0)
+        if step == 0:
+            # 首次发起：设为第1步
+            step = 1
+            db.update_fish_field(group_id, wxid, "legendary_quest_step", 1)
+        if step >= 4:
+            raise HTTPException(400, "已通关传奇试炼，不可重复挑战")
+
+        # 检查今日是否已尝试
+        date_str = dt.now().strftime("%Y-%m-%d")
+        quest_date_key = f"legendary_quest_date_{group_id}_{wxid}"
+        conn = db.get_conn()
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
+        ).fetchone()
+        if row and row["value"] == date_str:
+            conn.close()
+            raise HTTPException(400, "今日已挑战过，明天再来")
+        conn.close()
+
+        # 消耗精力
+        db.update_fish_energy(group_id, wxid, 50)
+
+        # 根据当前 step 执行检定
+        from services.d20 import ability_check
+        from services.passive_events import _has_proficiency
+        import random as _random
+
+        step_config = {
+            1: ("strength", 15, "力量试炼"),
+            2: ("wisdom", 18, "智慧试炼"),
+            3: ("charisma", 20, "意志试炼"),
+        }
+        attr, dc, name = step_config[step]
+        is_prof = _has_proficiency(fish, attr)
+        check = ability_check(fish.get(attr, 10), dc=dc,
+                              is_proficient=is_prof, level=fish.get("level", 1))
+
+        # 记录今日挑战
+        conn = db.get_conn()
+        conn.execute(
+            "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (quest_date_key, date_str)
+        )
+        conn.commit()
+        conn.close()
+
+        if check.success:
+            new_step = step + 1
+            db.update_fish_field(group_id, wxid, "legendary_quest_step", new_step)
+            db.add_fish_event(group_id, wxid, "legendary_quest", {
+                "step": step, "step_name": name, "success": True,
+                "dc": dc, "attr": attr, "new_step": new_step,
+                "check": check.to_dict(),
+            })
+            if new_step == 4:
+                # 通关！全塘广播
+                db.add_fish_event(group_id, "", "flavor", {
+                    "type": "legendary_complete",
+                    "fish_name": fish["fish_name"],
+                    "desc": f"{fish['fish_name']}通过传奇试炼！全塘鱼仰望！",
+                })
+                # 奖励：写入永久优势标记（存在 personality_traits 中）
+                import json as _json
+                traits_raw = fish.get("personality_traits", "[]")
+                try:
+                    traits = _json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+                except (_json.JSONDecodeError, TypeError):
+                    traits = []
+                if "传奇" not in traits:
+                    traits.append("传奇")
+                    db.update_fish_field(group_id, wxid, "personality_traits",
+                                        _json.dumps(traits, ensure_ascii=False))
+                return {"code": 200,
+                        "message": f"🎉 通关！{fish['fish_name']}完成全部传奇试炼！",
+                        "data": {"step": 4, "success": True, "completed": True,
+                                 "check": check.to_dict()}}
+            return {"code": 200,
+                    "message": f"✓ {name}通过！进入下一步",
+                    "data": {"step": new_step, "success": True, "completed": False,
+                             "check": check.to_dict()}}
+        else:
+            db.add_fish_event(group_id, wxid, "legendary_quest", {
+                "step": step, "step_name": name, "success": False,
+                "dc": dc, "attr": attr,
+                "check": check.to_dict(),
+            })
+            return {"code": 200,
+                    "message": f"✗ {name}失败，明天再试",
+                    "data": {"step": step, "success": False, "completed": False,
+                             "check": check.to_dict()}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"传奇试炼失败: {e}")
+        raise HTTPException(500, f"传奇试炼出错: {e}")
+
+
+# ==================== v1.16.4: 公告牌 API ====================
+
+class BulletinBody(BaseModel):
+    content: str
+
+
+@router.get("/bulletin")
+async def get_bulletin(group_id: int):
+    """获取鱼塘公告牌"""
+    try:
+        from config import config as _cfg
+        content = getattr(_cfg, "POND_BULLETIN_BOARD", "")
+        return {"code": 200, "message": "ok", "data": {"content": content or ""}}
+    except Exception as e:
+        raise HTTPException(500, f"获取公告牌失败: {e}")
+
+
+@router.post("/bulletin")
+async def set_bulletin(group_id: int, body: BulletinBody):
+    """设置鱼塘公告牌"""
+    try:
+        content = (body.content or "").strip()
+        if len(content) > 200:
+            raise HTTPException(400, "公告牌内容最多200字符")
+        conn = db.get_conn()
+        conn.execute(
+            "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_bulletin_board', ?, 'string') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (content,)
+        )
+        conn.commit()
+        conn.close()
+        # 刷新 config
+        from config import config as _cfg
+        _cfg.POND_BULLETIN_BOARD = content
+        return {"code": 200, "message": "公告牌已更新", "data": {"content": content}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"设置公告牌失败: {e}")

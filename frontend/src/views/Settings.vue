@@ -19,7 +19,7 @@ import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt,
 const router = useRouter()
 
 // ---- v1.5.4: Tab 切换 ----
-const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks'
+const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks' | 'creative'
 
 // v1.5.4: 折叠面板 (key → true=展开)
 const collapsedSections = ref(loadCollapsed())
@@ -118,7 +118,51 @@ async function togglePondEnabled() {
 async function savePondSetting(key, val) {
   await updateAppSetting(key, String(val))
 }
-onMounted(() => { loadPollSettings(); loadPondSettings() })
+onMounted(() => { loadPollSettings(); loadPondSettings(); loadCreativeWorkshop() })
+
+// ---- v1.16.4: 创意工坊 ----
+const bulletinText = ref('')
+const customFlavorText = ref('')
+const customLastWords = ref('')
+const customDailyStatus = ref('')
+
+async function loadCreativeWorkshop() {
+  try {
+    const { apiGet } = await import('../api/index.js')
+    const settings = await apiGet('/api/settings/app-settings')
+    if (!Array.isArray(settings)) return
+    for (const s of settings) {
+      if (s.key === 'pond_bulletin_board') bulletinText.value = s.value || ''
+      if (s.key === 'custom_flavor_texts') {
+        try { const arr = JSON.parse(s.value); customFlavorText.value = Array.isArray(arr) ? arr.join('\n') : '' } catch { customFlavorText.value = '' }
+      }
+      if (s.key === 'custom_last_words') {
+        try { const arr = JSON.parse(s.value); customLastWords.value = Array.isArray(arr) ? arr.join('\n') : '' } catch { customLastWords.value = '' }
+      }
+      if (s.key === 'custom_daily_status') {
+        try { const arr = JSON.parse(s.value); customDailyStatus.value = Array.isArray(arr) ? arr.join('\n') : '' } catch { customDailyStatus.value = '' }
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function saveBulletin() {
+  try {
+    const { setBulletin } = await import('../api/index.js')
+    await setBulletin(0, bulletinText.value)  // group_id 在 API 内部处理
+    // Actually use the raw API
+    await updateAppSetting('pond_bulletin_board', bulletinText.value)
+  } catch (e) { /* ignore */ }
+}
+
+function textareaToJsonArray(text) {
+  return text.split('\n').map(l => l.trim()).filter(l => l)
+}
+
+async function saveCustom(key, text) {
+  const arr = textareaToJsonArray(text)
+  await updateAppSetting(key, JSON.stringify(arr))
+}
 
 // ---- State ----
 const configs = ref([])
@@ -415,11 +459,83 @@ onMounted(async () => {
           activeTab==='tasks' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
         <ClipboardList class="w-4 h-4" />任务记录
       </button>
+      <button @click="activeTab='creative'"
+        :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
+          activeTab==='creative' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+        🎨 创意工坊
+      </button>
     </div>
 
     <!-- ====== 任务记录 ====== -->
     <div v-if="activeTab==='tasks'">
       <TaskHistory />
+    </div>
+
+    <!-- ====== v1.16.4: 创意工坊 ====== -->
+    <div v-if="activeTab==='creative'" class="space-y-6">
+      <!-- 公告牌 -->
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-slate-600 mb-1">📢 鱼塘公告牌</h3>
+        <p class="text-xs text-slate-400 mb-3">显示在鱼塘管理面板顶部，最多 200 字</p>
+        <div class="flex gap-2">
+          <input v-model="bulletinText" maxlength="200"
+            class="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400"
+            placeholder="写一句塘主宣言..." />
+          <button @click="saveBulletin"
+            class="px-4 py-2 bg-indigo-500 text-white text-sm rounded-lg hover:bg-indigo-600 transition">
+            保存
+          </button>
+        </div>
+        <div class="text-xs text-slate-400 mt-1">{{ bulletinText.length }}/200</div>
+      </div>
+
+      <!-- 自定义风味文本 -->
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-slate-600 mb-1">📝 自定义风味文本</h3>
+        <p class="text-xs text-slate-400 mb-3">每行一条，与内置风味文本合并使用。最多 5000 字符</p>
+        <textarea v-model="customFlavorText" maxlength="5000" rows="6"
+          class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 resize-y"
+          placeholder="一只海龟慢悠悠地游过鱼塘上空...&#10;每条风味文本一行..."></textarea>
+        <div class="flex items-center gap-2 mt-2">
+          <button @click="saveCustom('custom_flavor_texts', customFlavorText)"
+            class="px-4 py-1.5 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition">保存</button>
+          <button @click="customFlavorText = ''"
+            class="px-3 py-1.5 text-xs text-slate-400 hover:text-red-500 transition">恢复默认</button>
+          <span class="text-xs text-slate-400 ml-auto">{{ customFlavorText.length }}/5000</span>
+        </div>
+      </div>
+
+      <!-- 自定义遗言 -->
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-slate-600 mb-1">🪦 自定义鱼遗言</h3>
+        <p class="text-xs text-slate-400 mb-3">每行一条遗言，鱼死亡时随机使用。最多 5000 字符</p>
+        <textarea v-model="customLastWords" maxlength="5000" rows="4"
+          class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 resize-y"
+          placeholder="告诉塘主...我柜子里还有三颗鱼食没吃...&#10;每条遗言一行..."></textarea>
+        <div class="flex items-center gap-2 mt-2">
+          <button @click="saveCustom('custom_last_words', customLastWords)"
+            class="px-4 py-1.5 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition">保存</button>
+          <button @click="customLastWords = ''"
+            class="px-3 py-1.5 text-xs text-slate-400 hover:text-red-500 transition">恢复默认</button>
+          <span class="text-xs text-slate-400 ml-auto">{{ customLastWords.length }}/5000</span>
+        </div>
+      </div>
+
+      <!-- 自定义状态语 -->
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-slate-600 mb-1">💬 自定义状态语</h3>
+        <p class="text-xs text-slate-400 mb-3">鱼无特别事件时随机使用。每行一条，最多 5000 字符</p>
+        <textarea v-model="customDailyStatus" maxlength="5000" rows="4"
+          class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 resize-y"
+          placeholder="又是和平的一天。水很清，心情还行。&#10;每条状态语一行..."></textarea>
+        <div class="flex items-center gap-2 mt-2">
+          <button @click="saveCustom('custom_daily_status', customDailyStatus)"
+            class="px-4 py-1.5 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition">保存</button>
+          <button @click="customDailyStatus = ''"
+            class="px-3 py-1.5 text-xs text-slate-400 hover:text-red-500 transition">恢复默认</button>
+          <span class="text-xs text-slate-400 ml-auto">{{ customDailyStatus.length }}/5000</span>
+        </div>
+      </div>
     </div>
 
     <!-- ====== 基础设置 ====== -->

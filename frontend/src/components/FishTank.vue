@@ -3,6 +3,7 @@ const props = defineProps({
   fish: { type: Array, default: () => [] },
   deadFish: { type: Array, default: () => [] },
   weather: { type: Object, default: null },
+  season: { type: Object, default: null },
 })
 
 const emit = defineEmits(['fish-click', 'adopt'])
@@ -64,6 +65,31 @@ function getAnimName(f) {
   <div class="fish-tank-wrapper rounded-2xl overflow-hidden border border-slate-300/60 shadow-lg shadow-slate-300/40">
     <!-- Tank body -->
     <div class="tank-body relative h-[480px] overflow-hidden">
+      <!-- v1.16.4: Season particles -->
+      <div v-if="season?.css_class" :class="['season-particles', season.css_class]">
+        <div v-for="i in 15" :key="'sp-'+i" class="season-particle"
+          :style="{ left: `${i * 6.5 + 2}%`, animationDelay: `${i * 0.4}s`, animationDuration: `${6 + i * 0.8}s` }"></div>
+      </div>
+
+      <!-- v1.16.4: Weather overlay -->
+      <div v-if="weather?.css_class" :class="['weather-overlay', weather.css_class]">
+        <template v-if="weather.type === 'rain' || weather.type === 'storm'">
+          <div v-for="i in 30" :key="'wd-'+i" class="weather-drop"
+            :style="{ left: `${i * 3.3}%`, animationDelay: `${i * 0.1}s`, animationDuration: `${0.4 + i * 0.03}s` }"></div>
+        </template>
+        <div v-if="weather.type === 'storm'" class="storm-flash"></div>
+        <div v-if="weather.type === 'rainbow' || weather.type === 'double_rainbow'" class="rainbow-arc"></div>
+        <div v-if="weather.type === 'double_rainbow'" class="rainbow-arc rainbow-arc-2"></div>
+        <template v-if="weather.type === 'sandstorm'">
+          <div v-for="i in 20" :key="'ss-'+i" class="sand-particle"
+            :style="{ top: `${5 + i * 4.5}%`, animationDelay: `${i * 0.2}s` }"></div>
+        </template>
+        <template v-if="weather.type === 'meteor'">
+          <div v-for="i in 3" :key="'mt-'+i" class="meteor"
+            :style="{ left: `${20 + i * 25}%`, animationDelay: `${i * 2.5}s` }"></div>
+        </template>
+      </div>
+
       <!-- Deep water gradient layers -->
       <div class="water-layer water-surface"></div>
       <div class="water-layer water-sunlit"></div>
@@ -575,4 +601,130 @@ function getAnimName(f) {
   border: 1px solid rgba(255,255,255,0.08);
 }
 .memorial-fish:hover .memorial-tooltip { display: block; }
+
+/* ===== v1.16.4: Season Particles ===== */
+.season-particles {
+  position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden;
+}
+.season-particle {
+  position: absolute;
+  top: -10px;
+  opacity: 0.6;
+  animation: particle-fall linear infinite;
+}
+.season-spring .season-particle {
+  width: 8px; height: 8px;
+  background: radial-gradient(circle, #fbbfca 0%, #f9a8d4 60%, transparent 70%);
+  border-radius: 50%;
+}
+.season-summer .season-particle {
+  width: 6px; height: 6px;
+  background: radial-gradient(circle, rgba(255,255,255,0.7) 0%, rgba(200,230,255,0.3) 50%, transparent 70%);
+  border-radius: 50%;
+}
+.season-autumn .season-particle {
+  width: 10px; height: 10px;
+  background: radial-gradient(ellipse, #f59e0b 0%, #d97706 60%, transparent 70%);
+  border-radius: 2px 50% 2px 50%;
+  animation: particle-fall-rotate linear infinite;
+}
+.season-winter .season-particle {
+  width: 6px; height: 6px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 3px rgba(255,255,255,0.5);
+}
+@keyframes particle-fall {
+  0% { transform: translateY(-20px) translateX(0); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.3; }
+  100% { transform: translateY(500px) translateX(30px); opacity: 0; }
+}
+@keyframes particle-fall-rotate {
+  0% { transform: translateY(-20px) translateX(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.3; }
+  100% { transform: translateY(500px) translateX(40px) rotate(360deg); opacity: 0; }
+}
+
+/* ===== v1.16.4: Weather Overlay ===== */
+.weather-overlay {
+  position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden;
+}
+.weather-drop {
+  position: absolute; top: -20px;
+  width: 2px; height: 12px;
+  background: linear-gradient(to bottom, transparent, rgba(147,197,253,0.6), rgba(59,130,246,0.3));
+  animation: rain-fall linear infinite;
+}
+.weather-storm .weather-drop {
+  width: 3px; height: 20px;
+  background: linear-gradient(to bottom, transparent, rgba(148,163,184,0.8), rgba(71,85,105,0.5));
+  animation: rain-fall-storm linear infinite;
+}
+@keyframes rain-fall {
+  0% { transform: translateY(-30px); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(500px); opacity: 0; }
+}
+@keyframes rain-fall-storm {
+  0% { transform: translateY(-30px) translateX(0); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(500px) translateX(-30px); opacity: 0; }
+}
+.storm-flash {
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,0.08);
+  animation: storm-flash 5s ease-in-out infinite;
+}
+@keyframes storm-flash {
+  0%, 90%, 100% { opacity: 0; }
+  92% { opacity: 1; }
+  94% { opacity: 0; }
+  96% { opacity: 0.6; }
+  98% { opacity: 0; }
+}
+.rainbow-arc {
+  position: absolute; top: 5%; left: -10%; right: -10%; height: 60%;
+  background: radial-gradient(ellipse at 50% 100%,
+    transparent 40%,
+    rgba(239,68,68,0.08) 46%, rgba(251,146,60,0.08) 52%, rgba(234,179,8,0.08) 58%,
+    rgba(34,197,94,0.08) 64%, rgba(59,130,246,0.08) 70%, rgba(168,85,247,0.08) 76%,
+    transparent 82%);
+  pointer-events: none;
+}
+.rainbow-arc-2 {
+  top: 10%; height: 50%;
+  background: radial-gradient(ellipse at 50% 100%,
+    transparent 50%,
+    rgba(239,68,68,0.05) 55%, rgba(251,146,60,0.05) 60%, rgba(234,179,8,0.05) 65%,
+    rgba(34,197,94,0.05) 70%, rgba(59,130,246,0.05) 75%, rgba(168,85,247,0.05) 80%,
+    transparent 86%);
+}
+.sand-particle {
+  position: absolute; left: -10px;
+  width: 4px; height: 4px;
+  background: rgba(194,166,128,0.5);
+  border-radius: 1px;
+  animation: sand-blow linear infinite;
+}
+@keyframes sand-blow {
+  0% { transform: translateX(0); opacity: 0; }
+  10% { opacity: 0.7; }
+  90% { opacity: 0.3; }
+  100% { transform: translateX(110vw); opacity: 0; }
+}
+.meteor {
+  position: absolute; top: -5px;
+  width: 2px; height: 40px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.9), rgba(255,255,255,0.1), transparent);
+  transform: rotate(-30deg);
+  animation: meteor-fall 4s ease-in infinite;
+}
+@keyframes meteor-fall {
+  0% { transform: translateY(-50px) translateX(0) rotate(-30deg); opacity: 0; }
+  5% { opacity: 1; }
+  15% { opacity: 0; transform: translateY(300px) translateX(-100px) rotate(-30deg); }
+  100% { opacity: 0; transform: translateY(300px) translateX(-100px) rotate(-30deg); }
+}
 </style>

@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.16.3"
+    VERSION = "1.16.4"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -86,6 +86,11 @@ class Config:
     POND_AUTO_EVENTS_ENABLED = False   # 全局开关，默认关闭
     POND_EVENT_INTERVAL_MINUTES = 30   # 事件间隔(分钟)
     POND_TREASURY_TAX_RATE = 5         # 金库税率(%)
+    # v1.16.4: 公告牌 + 创意工坊
+    POND_BULLETIN_BOARD = ""           # 鱼塘公告牌内容
+    CUSTOM_FLAVOR_TEXTS = "[]"         # 用户自定义风味文本
+    CUSTOM_LAST_WORDS = "[]"           # 用户自定义鱼遗言
+    CUSTOM_DAILY_STATUS = "[]"         # 用户自定义状态语
 
     LOG_DIR = BASE_DIR / "logs"
     LOG_LEVEL = "INFO"

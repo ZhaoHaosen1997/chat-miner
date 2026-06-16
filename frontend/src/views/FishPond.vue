@@ -128,6 +128,7 @@ const deadFish = computed(() =>
   pondState.value?.fish?.filter(f => !f.is_alive) || []
 )
 const weather = computed(() => pondState.value?.weather)
+const season = computed(() => pondState.value?.season)
 const recentEvents = computed(() => pondState.value?.recent_events || [])
 
 const tabs = [
@@ -234,6 +235,7 @@ const weatherConfig = {
           :fish="aliveFish"
           :dead-fish="deadFish"
           :weather="weather"
+          :season="season"
           @fish-click="handleFishClick"
           @adopt="handleAdopt"
         />

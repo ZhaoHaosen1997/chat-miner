@@ -340,6 +340,19 @@ def init_db():
                 UNIQUE(group_id, date, item_key),
                 FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
             );
+
+            -- v1.16.4 鱼际关系网
+            CREATE TABLE IF NOT EXISTS fish_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                fish_wxid_a TEXT NOT NULL,
+                fish_wxid_b TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                strength INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(group_id, fish_wxid_a, fish_wxid_b, relation_type),
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+            );
         """)
         # v0.12.0: 模型配置
         conn.executescript("""
@@ -438,6 +451,8 @@ def init_db():
         _migrate_v1_16_2(conn)
         # v1.16.3: 鱼塘 max_hp
         _migrate_v1_16_3(conn)
+        # v1.16.4: 鱼塘终章 — 关系网 + 季节 + 天气扩展 + 传奇任务 + 定制
+        _migrate_v1_16_4(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -682,6 +697,33 @@ def _migrate_v1_16_3(conn):
             logger.info("DB migrate v1.16.3: computed max_hp for %d fish", fixed)
 
 
+def _migrate_v1_16_4(conn):
+    """v1.16.4: 鱼塘终章 — 鱼际关系表 + 传奇鱼任务列 + 新 settings key"""
+    # 1. fish_pond 新增 legendary_quest_step 列
+    cur = conn.execute("PRAGMA table_info(fish_pond)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "legendary_quest_step" not in cols:
+        conn.execute("ALTER TABLE fish_pond ADD COLUMN legendary_quest_step INTEGER DEFAULT 0")
+        logger.info("DB migrate v1.16.4: added fish_pond.legendary_quest_step")
+
+    # 2. fish_relationships 表已是 CREATE TABLE IF NOT EXISTS，
+    #    但旧库可能没有（schema 中的 DDL 只在首次创建），这里补建
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS fish_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            fish_wxid_a TEXT NOT NULL,
+            fish_wxid_b TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            strength INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(group_id, fish_wxid_a, fish_wxid_b, relation_type),
+            FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+        );
+    """)
+    logger.info("DB migrate v1.16.4: fish_relationships table ready")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -820,6 +862,15 @@ _SETTINGS_DEFS = [
          "被动事件间隔(分钟)"),
         ("pond_treasury_tax_rate", "5", "int",
          "金库税率(%，全群鳞币总和百分比)"),
+        # v1.16.4: 鱼塘终章 — 公告牌 + 创意工坊
+        ("pond_bulletin_board", "", "string",
+         "鱼塘公告牌内容"),
+        ("custom_flavor_texts", "[]", "string",
+         "用户自定义风味文本（JSON数组）"),
+        ("custom_last_words", "[]", "string",
+         "用户自定义鱼遗言（JSON数组）"),
+        ("custom_daily_status", "[]", "string",
+         "用户自定义状态语（JSON数组）"),
         # 日志清理
         ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
          "分析日志保留天数"),
@@ -1757,6 +1808,66 @@ def get_fish_events(group_id: int, wxid: str = "", limit: int = 20) -> list[dict
                 (group_id, limit)
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ==================== 鱼际关系 CRUD (v1.16.4) ====================
+
+def upsert_fish_relationship(group_id: int, wxid_a: str, wxid_b: str,
+                              relation_type: str, strength: int = 1):
+    """创建或更新鱼际关系（强度累加）"""
+    # 确保 a < b 避免双向重复
+    if wxid_a > wxid_b:
+        wxid_a, wxid_b = wxid_b, wxid_a
+    with db() as conn:
+        existing = conn.execute(
+            """SELECT id, strength FROM fish_relationships
+               WHERE group_id=? AND fish_wxid_a=? AND fish_wxid_b=? AND relation_type=?""",
+            (group_id, wxid_a, wxid_b, relation_type)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE fish_relationships SET strength=?, created_at=CURRENT_TIMESTAMP WHERE id=?",
+                (existing["strength"] + strength, existing["id"])
+            )
+        else:
+            conn.execute(
+                """INSERT INTO fish_relationships
+                   (group_id, fish_wxid_a, fish_wxid_b, relation_type, strength)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (group_id, wxid_a, wxid_b, relation_type, strength)
+            )
+
+
+def get_fish_relationships(group_id: int, wxid: str) -> list[dict]:
+    """获取某鱼的所有关系（含对方鱼信息）"""
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT fr.*, fp.fish_name, fp.species, fp.emoji_variant
+               FROM fish_relationships fr
+               LEFT JOIN fish_pond fp ON fp.group_id = fr.group_id
+                 AND (fp.wxid = CASE WHEN fr.fish_wxid_a = ? THEN fr.fish_wxid_b ELSE fr.fish_wxid_a END)
+               WHERE fr.group_id = ?
+                 AND (fr.fish_wxid_a = ? OR fr.fish_wxid_b = ?)
+                 AND fp.is_alive = 1
+               ORDER BY fr.strength DESC""",
+            (wxid, group_id, wxid, wxid)
+        ).fetchall()
+    result = []
+    for r in rows:
+        # 确定对方 wxid 和方向
+        if r["fish_wxid_a"] == wxid:
+            other_wxid = r["fish_wxid_b"]
+        else:
+            other_wxid = r["fish_wxid_a"]
+        result.append({
+            "relation_type": r["relation_type"],
+            "strength": r["strength"],
+            "other_wxid": other_wxid,
+            "other_name": r["fish_name"] or "?",
+            "other_species": r["species"] or "",
+            "other_emoji": r["emoji_variant"] or "",
+        })
+    return result
 
 
 # ==================== 鳞币 CRUD ====================

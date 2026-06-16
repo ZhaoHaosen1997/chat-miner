@@ -5,6 +5,7 @@ v1.16.3: 静默鱼塘被动事件引擎（分组概率制）
 包含：熟练加值、性格修正、金库进账、遗言、状态语
 """
 import random
+import json as _json
 import logging
 from datetime import datetime, timedelta
 
@@ -12,6 +13,37 @@ from services import d20 as d20lib
 from models import database as db
 
 logger = logging.getLogger(__name__)
+
+
+def _load_custom_texts(key: str) -> list:
+    """从 app_settings 加载用户自定义文本（JSON 数组），与内置池合并"""
+    try:
+        from config import config as _cfg
+        raw = getattr(_cfg, key.upper(), "[]")
+        if isinstance(raw, str):
+            parsed = _json.loads(raw) if raw.strip() else []
+            return parsed if isinstance(parsed, list) else []
+        return []
+    except Exception:
+        return []
+
+
+def get_merged_flavor_events() -> list:
+    """合并内置 + 用户自定义风味文本"""
+    custom = _load_custom_texts("custom_flavor_texts")
+    return FLAVOR_EVENTS + custom
+
+
+def get_merged_last_words() -> list:
+    """合并内置 + 用户自定义遗言"""
+    custom = _load_custom_texts("custom_last_words")
+    return FISH_LAST_WORDS + custom
+
+
+def get_merged_bored_statuses() -> list:
+    """合并内置 + 用户自定义状态语"""
+    custom = _load_custom_texts("custom_daily_status")
+    return BORED_STATUSES + custom
 
 
 # ==================== v1.16.3: 分组事件池 ====================
@@ -305,7 +337,7 @@ def _apply_effects(group_id: int, wxid: str, effects: dict, fish: dict):
 def _kill_fish(group_id: int, wxid: str, fish: dict, cause: str):
     """鱼死亡 + 遗言"""
     db.mark_fish_dead(group_id, wxid)
-    last_words = random.choice(FISH_LAST_WORDS)
+    last_words = random.choice(get_merged_last_words())
     db.add_fish_event(group_id, wxid, "death", {
         "fish_name": fish["fish_name"], "cause": cause,
         "last_words": last_words,
@@ -507,7 +539,7 @@ def _treasury_tick(group_id: int):
 def generate_daily_status(wxid: str, today_events: list) -> str:
     """根据今日事件生成鱼的状态语（事件驱动拼接，不用 AI）"""
     if not today_events:
-        return random.choice(BORED_STATUSES)
+        return random.choice(get_merged_bored_statuses())
 
     for evt in today_events:
         evt_type = evt.get("event_type", evt.get("type", ""))
@@ -539,7 +571,7 @@ def generate_daily_status(wxid: str, today_events: list) -> str:
         if evt_type == "revived":
             return "刚从鬼门关回来了...要珍惜每一天。"
 
-    return random.choice(BORED_STATUSES)
+    return random.choice(get_merged_bored_statuses())
 
 
 def _parse_event_data(evt: dict) -> dict:
@@ -758,7 +790,7 @@ def trigger_passive_events(group_id: int) -> list[dict]:
         return events_log
 
     # 4. 风味文本兜底
-    flavor = rng.choice(FLAVOR_EVENTS)
+    flavor = rng.choice(get_merged_flavor_events())
     events_log.append({"type": "flavor", "flavor_text": flavor})
     db.add_fish_event(group_id, "", "flavor", {"text": flavor})
     _record_last_event(group_id)

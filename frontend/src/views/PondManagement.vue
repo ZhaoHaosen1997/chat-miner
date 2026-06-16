@@ -111,10 +111,49 @@ async function handleBatchAdopt() {
   finally { actionLoading.value = '' }
 }
 
-onMounted(load)
+// --- v1.16.4: 季节 + 天气 + 公告牌 ---
+const season = ref(null)
+const weather = ref(null)
+const bulletin = ref('')
+
+async function loadEnv() {
+  if (!gid.value) return
+  try {
+    const pond = await getFishPond(gid.value)
+    if (pond) {
+      season.value = pond.season || null
+      weather.value = pond.weather || null
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    const { getBulletin } = await import('../api/index.js')
+    const b = await getBulletin(gid.value)
+    if (b?.code === 200) bulletin.value = b.data?.content || ''
+  } catch (e) { /* ignore */ }
+}
+
+onMounted(() => { load(); loadEnv() })
 </script>
 
 <template>
+  <div>
+  <!-- v1.16.4: 公告牌 -->
+  <div v-if="bulletin" class="bulletin-banner">
+    📢 {{ bulletin }}
+  </div>
+
+  <!-- v1.16.4: 季节 + 天气 -->
+  <div v-if="weather || season" class="env-banner">
+    <span v-if="season" class="env-tag season-tag">
+      {{ season.emoji }} {{ season.name }}季
+      <span class="env-hint">{{ season.effect }}</span>
+    </span>
+    <span v-if="weather" class="env-tag weather-tag">
+      {{ weather.emoji }} {{ weather.name }}
+      <span class="env-hint">{{ weather.effect }}</span>
+    </span>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <!-- 左栏：称号+金库+热搜 -->
     <div class="space-y-4">
@@ -240,4 +279,50 @@ onMounted(load)
       </div>
     </div>
   </div>
+  </div> <!-- outer wrapper -->
 </template>
+
+<style scoped>
+/* ===== v1.16.4: Bulletin & Env Banners ===== */
+.bulletin-banner {
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  border: 1px solid #fcd34d;
+}
+.env-banner {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.env-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.season-tag {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.weather-tag {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+.env-hint {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+</style>

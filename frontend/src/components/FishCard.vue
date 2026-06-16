@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { X, Dices, Trash2, TrendingUp, Shield } from 'lucide-vue-next'
+import { ref, computed, onMounted } from 'vue'
+import { X, Dices, Trash2, TrendingUp, Shield, Pencil, Sword, Users } from 'lucide-vue-next'
 import FishStatusBubble from './FishStatusBubble.vue'
+import { getFishRelationships, getLegendaryQuestStatus, doLegendaryQuest, renameFish } from '../api/index.js'
 
 const props = defineProps({
   fish: Object,
@@ -12,6 +13,70 @@ const props = defineProps({
 const emit = defineEmits(['close', 'action', 'refresh'])
 
 const showDeleteConfirm = ref(false)
+
+// --- v1.16.4: 改名 ---
+const showRenameInput = ref(false)
+const renameText = ref('')
+const renameSaving = ref(false)
+async function saveRename() {
+  const name = renameText.value.trim()
+  if (!name || name.length > 20) return
+  renameSaving.value = true
+  try {
+    const res = await renameFish(props.groupId, props.fish.wxid, name)
+    if (res.code === 200) {
+      showRenameInput.value = false
+      emit('refresh')
+    }
+  } catch (e) { /* ignore */ }
+  finally { renameSaving.value = false }
+}
+
+// --- v1.16.4: 传奇试炼 ---
+const questStatus = ref(null)
+const questLoading = ref(false)
+const questResult = ref(null)
+async function loadQuestStatus() {
+  if (!props.groupId || !props.fish?.wxid) return
+  try {
+    const res = await getLegendaryQuestStatus(props.groupId, props.fish.wxid)
+    if (res.code === 200) questStatus.value = res.data
+  } catch (e) { /* ignore */ }
+}
+async function startLegendaryQuest() {
+  questLoading.value = true
+  questResult.value = null
+  try {
+    const res = await doLegendaryQuest(props.groupId, props.fish.wxid)
+    if (res.code === 200) {
+      questResult.value = res.data
+      await loadQuestStatus()
+      emit('refresh')
+    }
+  } catch (e) { /* ignore */ }
+  finally { questLoading.value = false }
+}
+const canQuest = computed(() => {
+  if (!questStatus.value) return false
+  return questStatus.value.can_challenge
+})
+const questStepNames = computed(() => questStatus.value?.step_names || [])
+
+// --- v1.16.4: 朋友圈 ---
+const relationships = ref([])
+const relsLoaded = ref(false)
+async function loadRelationships() {
+  if (!props.groupId || !props.fish?.wxid) return
+  try {
+    const res = await getFishRelationships(props.groupId, props.fish.wxid)
+    if (res.code === 200) relationships.value = res.data?.relationships || []
+  } catch (e) { /* ignore */ }
+  finally { relsLoaded.value = true }
+}
+onMounted(() => {
+  loadQuestStatus()
+  loadRelationships()
+})
 
 const speciesEmoji = {
   goldfish: '🐟', koi: '🎏', clownfish: '🤡', betta: '🐠', arowana: '🐉',
@@ -127,7 +192,19 @@ function confirmDelete() {
         <!-- Name & meta -->
         <div class="fishcard-meta">
           <div class="flex items-center gap-2 flex-wrap">
-            <h2 class="fishcard-name">{{ fish.fish_name }}</h2>
+            <h2 class="fishcard-name">
+              <template v-if="!showRenameInput">{{ fish.fish_name }}
+                <button @click="showRenameInput = true; renameText = fish.fish_name" class="rename-icon-btn">
+                  <Pencil :size="13" />
+                </button>
+              </template>
+              <span v-else class="flex items-center gap-1">
+                <input v-model="renameText" @keyup.enter="saveRename" @keyup.escape="showRenameInput = false"
+                  class="rename-input" maxlength="20" autofocus />
+                <button @click="saveRename" :disabled="renameSaving" class="rename-save-btn">✓</button>
+                <button @click="showRenameInput = false" class="rename-cancel-btn">✕</button>
+              </span>
+            </h2>
             <FishStatusBubble :status="fish.daily_status || ''" />
           </div>
           <div class="fishcard-subtitle">
@@ -265,6 +342,51 @@ function confirmDelete() {
         <div class="footer-stat">
           <span class="footer-stat-icon">🔥</span>
           <span>连活 <b>{{ fish.consecutive_days || 0 }} 天</b></span>
+        </div>
+      </div>
+
+      <!-- ===== v1.16.4: Legendary Quest ===== -->
+      <div v-if="fish.stage === '传说' && fish.level >= 8 && questStatus" class="fishcard-section">
+        <h3 class="fishcard-section-title">
+          <Sword :size="13" /> 传奇试炼
+        </h3>
+        <div v-if="questStatus.step === 4" class="legendary-done">
+          ⚔️ 已通关传奇试炼 — 永久全检定优势
+        </div>
+        <div v-else class="legendary-progress">
+          <div class="quest-steps">
+            <span v-for="(name, idx) in questStatus.step_names.slice(1, 4)" :key="idx"
+              :class="['quest-step', { done: questStatus.step > idx, current: questStatus.step === idx }]">
+              {{ idx === 1 ? '💪' : idx === 2 ? '🧠' : '💋' }} {{ name }}
+            </span>
+          </div>
+          <button v-if="canQuest" @click="startLegendaryQuest" :disabled="questLoading"
+            class="quest-btn">
+            <Sword :size="14" /> {{ questLoading ? '检定中...' : '挑战下一步' }}
+          </button>
+          <div v-else-if="questStatus.today_attempted && questStatus.step < 4" class="quest-hint">
+            今日已挑战，明天再来
+          </div>
+          <div v-if="questResult" class="quest-result" :class="{ success: questResult.success }">
+            {{ questResult.message }}
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== v1.16.4: Relationships ===== -->
+      <div v-if="relationships.length" class="fishcard-section">
+        <h3 class="fishcard-section-title">
+          <Users :size="13" /> 朋友圈
+        </h3>
+        <div class="rel-list">
+          <div v-for="rel in relationships" :key="rel.other_wxid" class="rel-item">
+            <span class="rel-emoji">{{ rel.other_emoji || '🐟' }}</span>
+            <span class="rel-name">{{ rel.other_name }}</span>
+            <span :class="['rel-tag', rel.relation_type === 'friendship' ? 'rel-friend' : 'rel-rival']">
+              {{ rel.relation_type === 'friendship' ? '🤝 友谊' : '⚔️ 劲敌' }}
+            </span>
+            <span class="rel-strength">Lv.{{ rel.strength }}</span>
+          </div>
         </div>
       </div>
 
@@ -606,4 +728,118 @@ function confirmDelete() {
   transition: background 0.2s;
 }
 .delete-cancel-btn:hover { background: #f8fafc; }
+
+/* ===== v1.16.4: Rename ===== */
+.rename-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin-left: 4px;
+  border-radius: 4px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.fishcard-name:hover .rename-icon-btn { opacity: 1; }
+.rename-icon-btn:hover { color: #6366f1; }
+.rename-input {
+  width: 130px;
+  padding: 2px 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  border: 1px solid #6366f1;
+  border-radius: 6px;
+  outline: none;
+  background: white;
+}
+.rename-save-btn, .rename-cancel-btn {
+  padding: 1px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+}
+.rename-save-btn { background: #6366f1; color: white; }
+.rename-cancel-btn { background: #f1f5f9; color: #94a3b8; }
+
+/* ===== v1.16.4: Legendary Quest ===== */
+.legendary-done {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.legendary-progress { display: flex; flex-direction: column; gap: 8px; }
+.quest-steps { display: flex; gap: 6px; }
+.quest-step {
+  flex: 1;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  text-align: center;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-weight: 500;
+}
+.quest-step.done { background: #dcfce7; color: #16a34a; }
+.quest-step.current { background: #ede9fe; color: #7c3aed; font-weight: 700; }
+.quest-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.quest-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(124,58,237,0.3); }
+.quest-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.quest-hint { font-size: 11px; color: #94a3b8; text-align: center; }
+.quest-result {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fef2f2;
+  color: #dc2626;
+}
+.quest-result.success { background: #f0fdf4; color: #16a34a; }
+
+/* ===== v1.16.4: Relationships ===== */
+.rel-list { display: flex; flex-direction: column; gap: 6px; }
+.rel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+}
+.rel-emoji { font-size: 18px; }
+.rel-name { font-size: 13px; font-weight: 600; color: #334155; }
+.rel-tag {
+  padding: 1px 7px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 500;
+}
+.rel-friend { background: #dcfce7; color: #16a34a; }
+.rel-rival { background: #fef2f2; color: #dc2626; }
+.rel-strength { margin-left: auto; font-size: 10px; color: #94a3b8; font-weight: 600; }
 </style>

@@ -244,6 +244,18 @@ export const spendCoins = (gid, wxid, item, amount) =>
   })
 export const getShopItems = (gid) => request(`/groups/${gid}/fishpond/shop`)
 
+// v1.16.4: 鱼际关系 + 传奇任务 + 公告牌
+export const getFishRelationships = (gid, wxid) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/relationships`)
+export const getLegendaryQuestStatus = (gid, wxid) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/legendary-quest-status`)
+export const doLegendaryQuest = (gid, wxid) =>
+  request(`/groups/${gid}/fishpond/fish/${encodeURIComponent(wxid)}/legendary-quest`, { method: 'POST' })
+export const getBulletin = (gid) =>
+  request(`/groups/${gid}/fishpond/bulletin`)
+export const setBulletin = (gid, content) =>
+  request(`/groups/${gid}/fishpond/bulletin`, { method: 'POST', body: JSON.stringify({ content }) })
+
 // --- 周报/月报 ---
 export const getPeriods = (gid, type = 'weekly') =>
   request(`/groups/${gid}/periods?type=${type}`)
