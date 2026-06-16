@@ -1581,6 +1581,9 @@ def _get_upgrade_level(group_id: int, upgrade_key: str) -> int:
 
 def _check_keeper_titles(group_id: int, context: str = ""):
     """检查并解锁塘主称号"""
+    from config import config as _cfg
+    if getattr(_cfg, "POND_CHEAT_MODE", False):
+        return  # v1.16.5: 作弊模式下跳过称号检查
     import json as _json
     conn = db.get_conn()
     row = conn.execute(
@@ -1701,6 +1704,32 @@ def _build_relationships(group_id: int, date_str: str) -> int:
 
 
 
+def _weather_by_type(weather_type: str) -> dict:
+    """根据天气 type 返回完整天气 dict（用于调试覆盖）"""
+    weather_map = {
+        "sunny": {"type": "sunny", "name": "晴天", "emoji": "☀️", "effect": "无特殊效果",
+                  "growth_bonus": 0, "happiness_bonus": 0, "css_class": "weather-sunny"},
+        "rain": {"type": "rain", "name": "雨天", "emoji": "🌧️", "effect": "全体 +5 成长值",
+                 "growth_bonus": 5, "happiness_bonus": 0, "css_class": "weather-rain"},
+        "storm": {"type": "storm", "name": "暴风雨", "emoji": "⛈️", "effect": "全体幸福值 -5",
+                  "growth_bonus": 0, "happiness_bonus": -5, "css_class": "weather-storm"},
+        "rainbow": {"type": "rainbow", "name": "彩虹", "emoji": "🌈", "effect": "全体 +10 幸福值",
+                    "growth_bonus": 0, "happiness_bonus": 10, "css_class": "weather-rainbow"},
+        "double_rainbow": {"type": "double_rainbow", "name": "双彩虹", "emoji": "🌈🌈",
+                           "effect": "全体幸福值 +20", "growth_bonus": 0, "happiness_bonus": 20,
+                           "css_class": "weather-double-rainbow"},
+        "sandstorm": {"type": "sandstorm", "name": "沙尘暴", "emoji": "🌪️",
+                      "effect": "检定 -1，宝藏概率 +10%", "growth_bonus": 0,
+                      "happiness_bonus": -3, "sandstorm_penalty": 1, "treasure_bonus": 0.10,
+                      "css_class": "weather-sandstorm"},
+        "meteor": {"type": "meteor", "name": "流星雨", "emoji": "🌠",
+                   "effect": "流星许愿事件必定触发且 DC -5",
+                   "growth_bonus": 0, "happiness_bonus": 5, "meteor_bonus": True,
+                   "css_class": "weather-meteor"},
+    }
+    return weather_map.get(weather_type, weather_map["sunny"])
+
+
 def _get_season(date_str: str = None) -> dict:
     """根据真实月份返回季节（全服统一）"""
     dt = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
@@ -1725,6 +1754,12 @@ def _get_season(date_str: str = None) -> dict:
 
 def _generate_weather(date_str: str) -> dict:
     """全服统一天气（按日期确定性生成）"""
+    from config import config as _cfg
+    override = getattr(_cfg, "POND_CHEAT_WEATHER_OVERRIDE", "")
+    if override:
+        # v1.16.5: 调试天气覆盖
+        return _weather_by_type(override)
+
     seed_str = f"weather_{date_str}"
     rng = random.Random(seed_str)
     roll = rng.randint(1, 100)
@@ -2005,6 +2040,17 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
 
     # 鱼际关系构建
     relationship_count = _build_relationships(group_id, date_str)
+
+    # v1.16.5: 清除调试天气覆盖
+    from config import config as _cfg2
+    if getattr(_cfg2, "POND_CHEAT_WEATHER_OVERRIDE", ""):
+        clr_conn = db.get_conn()
+        clr_conn.execute(
+            "UPDATE app_settings SET value='' WHERE key='pond_cheat_weather_override'"
+        )
+        clr_conn.commit()
+        clr_conn.close()
+        _cfg2.POND_CHEAT_WEATHER_OVERRIDE = ""
 
     return {
         "settled": True,

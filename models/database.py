@@ -855,9 +855,9 @@ _SETTINGS_DEFS = [
          "鱼塘精力每轮恢复量"),
         ("pond_touch_daily_limit", "5", "int",
          "摸鱼每日次数上限"),
-        # v1.16.1: 静默鱼塘被动事件 + 金库
+        # v1.16.1: 鱼塘自动化被动事件 + 金库
         ("pond_auto_events_enabled", "false", "bool",
-         "静默鱼塘全局开关"),
+         "鱼塘自动化全局开关"),
         ("pond_event_interval_minutes", "30", "int",
          "被动事件间隔(分钟)"),
         ("pond_treasury_tax_rate", "5", "int",
@@ -871,6 +871,11 @@ _SETTINGS_DEFS = [
          "用户自定义鱼遗言（JSON数组）"),
         ("custom_daily_status", "[]", "string",
          "用户自定义状态语（JSON数组）"),
+        # v1.16.5: 作弊模式 + 天气覆盖
+        ("pond_cheat_mode", "false", "bool",
+         "允许作弊开关（开启后禁用成就，启用调试面板）"),
+        ("pond_cheat_weather_override", "", "string",
+         "调试天气覆盖（空=不覆盖）"),
         # 日志清理
         ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
          "分析日志保留天数"),
@@ -2286,10 +2291,18 @@ def load_app_settings_to_config():
         # v1.16.0: 鱼塘精力系统
         "pond_energy_regen_amount": "POND_ENERGY_REGEN_AMOUNT",
         "pond_touch_daily_limit": "POND_TOUCH_DAILY_LIMIT",
-        # v1.16.1: 静默鱼塘
+        # v1.16.1: 鱼塘自动化
         "pond_auto_events_enabled": "POND_AUTO_EVENTS_ENABLED",
         "pond_event_interval_minutes": "POND_EVENT_INTERVAL_MINUTES",
         "pond_treasury_tax_rate": "POND_TREASURY_TAX_RATE",
+        # v1.16.4: 公告牌 + 创意工坊
+        "pond_bulletin_board": "POND_BULLETIN_BOARD",
+        "custom_flavor_texts": "CUSTOM_FLAVOR_TEXTS",
+        "custom_last_words": "CUSTOM_LAST_WORDS",
+        "custom_daily_status": "CUSTOM_DAILY_STATUS",
+        # v1.16.5: 作弊模式
+        "pond_cheat_mode": "POND_CHEAT_MODE",
+        "pond_cheat_weather_override": "POND_CHEAT_WEATHER_OVERRIDE",
         # 日志清理
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",

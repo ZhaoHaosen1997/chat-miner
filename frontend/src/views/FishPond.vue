@@ -2,7 +2,8 @@
 import { ref, inject, watch, computed, onUnmounted } from 'vue'
 import { getFishPond, adoptFish, settleFishPond, feedFish, batchAdopt,
          touchFish, exploreFish, showoffFish, trainFish, battleFish, deleteFish,
-         renameFish, parseFishCommands, getFishDetail, getFishLeaderboard }
+         renameFish, parseFishCommands, getFishDetail, getFishLeaderboard,
+         getAppSettings }
   from '../api/index.js'
 import FishTank from '../components/FishTank.vue'
 import FishCard from '../components/FishCard.vue'
@@ -25,6 +26,23 @@ const leaderboardSort = ref('growth')
 const parseLog = ref(null)
 const showParseLog = ref(false)
 const showTutorial = ref(false)
+const tutorialTab = ref('basics')
+const tutorialTabs = [
+  { key: 'basics', icon: '🐟', label: '鱼塘教程' },
+  { key: 'd20', icon: '🎲', label: 'D20系统' },
+  { key: 'commands', icon: '📋', label: '指令参考' },
+  { key: 'cheat', icon: '🎮', label: '作弊模式' },
+]
+// v1.16.5: 作弊模式
+const cheatMode = ref(false)
+async function loadCheatMode() {
+  try {
+    const settings = await getAppSettings()
+    if (!Array.isArray(settings)) return
+    const s = settings.find(s => s.key === 'pond_cheat_mode')
+    if (s) cheatMode.value = s.value === 'true'
+  } catch {}
+}
 const activeTab = ref('events')
 let _pondRefreshTimer = null
 
@@ -39,7 +57,7 @@ watch(() => pondState.value?.auto_events_enabled, (enabled) => {
 })
 onUnmounted(() => { if (_pondRefreshTimer) clearInterval(_pondRefreshTimer) })
 
-watch(() => gid.value, () => loadPond(), { immediate: true })
+watch(() => gid.value, () => { loadPond(); loadCheatMode() }, { immediate: true })
 
 async function loadPond(silent) {
   if (!gid.value) return
@@ -284,7 +302,7 @@ const weatherConfig = {
 
     <!-- Floating Chat Simulator — fixed bottom-right, always on top -->
     <Teleport to="body">
-      <ChatSimulator @pond-refresh="loadPond" />
+      <ChatSimulator v-if="cheatMode" @pond-refresh="loadPond" />
     </Teleport>
 
     <!-- ===== Fish Card Modal ===== -->
@@ -400,62 +418,111 @@ const weatherConfig = {
       </div>
     </Teleport>
 
-    <!-- ===== Tutorial Modal ===== -->
+    <!-- ===== Tutorial Modal (v1.16.5: 分栏布局) ===== -->
     <Teleport to="body">
       <div v-if="showTutorial" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
         @click.self="showTutorial = false">
-        <div class="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto animate-scale-in">
-          <div class="sticky top-0 bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between z-10">
+        <div class="bg-white rounded-2xl shadow-2xl w-[720px] max-h-[80vh] animate-scale-in flex flex-col">
+          <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
             <h2 class="font-bold text-slate-800 text-lg">🐟 群鱼塘教程</h2>
             <button @click="showTutorial = false" class="p-1 hover:bg-slate-100 rounded text-slate-400"><X :size="18" /></button>
           </div>
-          <div class="px-5 py-4 space-y-4 text-sm text-slate-600">
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-2">🎮 基本概念</h3>
-              <p>群鱼塘是基于群聊活跃度的<strong>养鱼游戏</strong>。每个群成员拥有一条水生生物，发言活跃度驱动鱼的成长。</p>
-              <p class="mt-1">鱼有 <strong>六维属性</strong>（力量/敏捷/体质/智力/感知/魅力）、<strong>成长阶段</strong>（鱼苗→幼鱼→成鱼→大鱼→传说）和 <strong>稀有度</strong>（普通/稀有/史诗/传说）。</p>
+          <div class="flex flex-1 min-h-0">
+            <!-- Left Nav -->
+            <div class="w-32 shrink-0 border-r border-slate-100 py-3 px-2 space-y-1 bg-slate-50/50">
+              <button v-for="tab in tutorialTabs" :key="tab.key"
+                @click="tutorialTab = tab.key"
+                :class="['w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition',
+                  tutorialTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+                {{ tab.icon }} {{ tab.label }}
+              </button>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-2">📋 全部指令</h3>
-              <div class="space-y-1.5">
+            <!-- Right Content -->
+            <div class="flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-600">
+              <!-- 🐟 鱼塘教程 -->
+              <div v-if="tutorialTab === 'basics'" class="space-y-4">
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">基本概念</h3>
+                  <p>基于群聊活跃度的养鱼游戏。群成员各拥有一条鱼，发言活跃度驱动成长。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">养成系统</h3>
+                  <p>鱼有六维属性（STR/DEX/CON/INT/WIS/CHA）、成长阶段（鱼苗→幼鱼→成鱼→大鱼→传说）和稀有度（普通/稀有/史诗/传说）。通过指令互动获得经验和成长值。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">互动指令</h3>
+                  <p>/领养 /喂食 /摸鱼 /探索 /晒鱼 /训练 /斗鱼 /购买 /赠予 /道具 /改名。每条指令对应一次D20检定，成功与否取决于鱼的相关属性。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">每日结算</h3>
+                  <p>每天首次触发时自动结算：自动喂食活跃成员、应用天气和季节效果、检测鲨鱼袭击。结算产生黑市道具供购买。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">鱼塘自动化</h3>
+                  <p>在设置→鱼塘设置中开启后，鱼塘将按固定间隔自动触发被动事件（鲨鱼、宝藏、竞速等），无需手动操作。</p>
+                </div>
+              </div>
+              <!-- 🎲 D20系统 -->
+              <div v-else-if="tutorialTab === 'd20'" class="space-y-4">
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">六维属性</h3>
+                  <p>💪力量(STR) 🏃敏捷(DEX) ❤️体质(CON) 🧠智力(INT) 👁️感知(WIS) 💋魅力(CHA)。每种指令使用不同属性检定。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">检定机制</h3>
+                  <p>掷D20 + 属性修正 + 熟练加值 vs DC（难度等级）。达到DC即成功。属性的正修正值越大，成功率越高。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">熟练项</h3>
+                  <p>每种鱼有专属熟练项（如运动、表演、隐匿），涉及熟练技能的检定额外加上等级对应的熟练加值。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">性格修正</h3>
+                  <p>鱼的性格标签（勇敢、好奇等22种）会在特定检定中提供优势/劣势或属性修正。例如勇敢的鱼面对鲨鱼时检定优势。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">大成功/大失败</h3>
+                  <p>掷出20为大成功，效果翻倍。掷出1为大失败，效果减半。不受修正影响，只看骰面。</p>
+                </div>
+              </div>
+              <!-- 📋 指令参考 -->
+              <div v-else-if="tutorialTab === 'commands'" class="space-y-1.5">
                 <div v-for="cmd in [
-                  {c:'/领养',d:'随机品种+稀有度+属性，创建你的第一条鱼',cl:'bg-green-50 text-green-700 border-green-200'},
-                  {c:'/喂食',d:'敏捷检定 · +成长+幸福 · 每天3次',cl:'bg-sky-50 text-sky-700 border-sky-200'},
-                  {c:'/摸鱼',d:'魅力检定 · +亲密度 · 每天5次',cl:'bg-pink-50 text-pink-700 border-pink-200'},
-                  {c:'/探索',d:'感知/智力检定 · 获得鳞币 · 每天3次',cl:'bg-amber-50 text-amber-700 border-amber-200'},
-                  {c:'/晒鱼',d:'魅力检定 · 观众打赏鳞币 · 每天3次',cl:'bg-purple-50 text-purple-700 border-purple-200'},
-                  {c:'/购买 商品名',d:'从今日黑市抢购道具（先到先得）',cl:'bg-cyan-50 text-cyan-700 border-cyan-200'},
-                  {c:'/赠予 @XX 道具',d:'把道具送给群友',cl:'bg-pink-50 text-pink-700 border-pink-200'},
-                  {c:'/道具 库存',d:'查看库存/装备/卸下/使用道具',cl:'bg-slate-100 text-slate-700 border-slate-200'},
-                  {c:'/训练 属性',d:'消耗30鳞币训练属性 · 每天1次 · 属值越高越难',cl:'bg-orange-50 text-orange-700 border-orange-200'},
-                  {c:'/斗鱼 @某人',d:'力量对抗 · 胜者+成长+鳞币 · 每天3次',cl:'bg-red-50 text-red-700 border-red-200'},
+                  {c:'/领养',d:'随机品种+稀有度+属性',cl:'bg-green-50 text-green-700 border-green-200'},
+                  {c:'/喂食',d:'DEX检定·+成长+幸福·每日3次',cl:'bg-sky-50 text-sky-700 border-sky-200'},
+                  {c:'/摸鱼',d:'CHA检定·+亲密度·每日5次',cl:'bg-pink-50 text-pink-700 border-pink-200'},
+                  {c:'/探索',d:'WIS/INT检定·获得鳞币·每日3次',cl:'bg-amber-50 text-amber-700 border-amber-200'},
+                  {c:'/晒鱼',d:'CHA检定·观众打赏·每日3次',cl:'bg-purple-50 text-purple-700 border-purple-200'},
+                  {c:'/购买 商品名',d:'从黑市抢购道具',cl:'bg-cyan-50 text-cyan-700 border-cyan-200'},
+                  {c:'/赠予 @XX 道具',d:'送道具给群友',cl:'bg-pink-50 text-pink-700 border-pink-200'},
+                  {c:'/道具 库存',d:'查看/装备/使用道具',cl:'bg-slate-100 text-slate-700 border-slate-200'},
+                  {c:'/训练 属性',d:'30鳞币训练属性·每日1次',cl:'bg-orange-50 text-orange-700 border-orange-200'},
+                  {c:'/斗鱼 @某人',d:'STR对抗·胜者+鳞币·每日3次',cl:'bg-red-50 text-red-700 border-red-200'},
                   {c:'/鱼塘',d:'查看鱼塘总览',cl:'bg-slate-100 text-slate-700 border-slate-200'},
-                  {c:'/改名 新名字',d:'给鱼改名（首次免费，之后需改名符）',cl:'bg-indigo-50 text-indigo-700 border-indigo-200'},
-                ]" :key="cmd.c" class="rounded-lg p-2.5 border" :class="cmd.cl">
-                  <span class="font-mono font-bold">{{ cmd.c }}</span>
-                  <span class="ml-2 opacity-80">{{ cmd.d }}</span>
+                  {c:'/改名 名字',d:'给鱼改名',cl:'bg-indigo-50 text-indigo-700 border-indigo-200'},
+                ]" :key="cmd.c" class="rounded-lg p-2 border" :class="cmd.cl">
+                  <span class="font-mono font-bold text-xs">{{ cmd.c }}</span>
+                  <span class="ml-2 text-xs opacity-80">{{ cmd.d }}</span>
+                </div>
+              </div>
+              <!-- 🎮 作弊模式 -->
+              <div v-else-if="tutorialTab === 'cheat'" class="space-y-4">
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">开启方式</h3>
+                  <p>设置→鱼塘设置→允许作弊，打开开关即可。鱼塘页面将出现指令模拟器和调试面板。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">调试功能</h3>
+                  <p>💰加减鳞币 · ⚡强制触发事件 · 🌤️设置天气 · 💀秒杀鱼 · ✨复活鱼。所有操作生成"被不明力量"风味事件。</p>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-800 mb-1">注意事项</h3>
+                  <p>作弊模式下成就系统暂停。关闭后恢复正常。调试操作不可撤销，请谨慎使用。</p>
                 </div>
               </div>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-2">🎲 互动判定</h3>
-              <p>所有互动通过 <strong>掷骰检定</strong>判定成败。每条鱼有六项属性（力量/敏捷/体质/智力/感知/魅力），检定结果取决于属性高低。</p>
-              <ul class="list-disc ml-5 mt-1 space-y-0.5 text-xs">
-                <li>掷出 <strong class="text-amber-600">满点</strong>：🎉 大成功！效果翻倍</li>
-                <li>掷出 <strong class="text-red-500">1点</strong>：💀 大失败！效果减半</li>
-                <li>属性越高，检定成功率越高</li>
-              </ul>
-            </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-2">🪙 鳞币</h3>
-              <p>通过 /探索 /晒鱼 /斗鱼 赚取。可在商店购买道具。鳞币绑定到 (群聊+wxid)，与鱼的生命周期无关。</p>
-            </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-2">📅 每日结算</h3>
-              <p>从<strong>仪表盘日历</strong>点击某天可触发结算。开启<strong>静默鱼塘</strong>（设置→高级选项）后鱼塘将自动运转，无需手动操作。</p>
-            </div>
           </div>
-          <div class="sticky bottom-0 bg-white px-5 py-3 border-t border-slate-100">
+          <div class="sticky bottom-0 bg-white px-5 py-3 border-t border-slate-100 shrink-0">
             <button @click="showTutorial = false"
               class="w-full px-4 py-2 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition text-sm font-medium">
               我知道了

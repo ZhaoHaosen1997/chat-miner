@@ -128,7 +128,8 @@ async function loadEnv() {
   try {
     const { getBulletin } = await import('../api/index.js')
     const b = await getBulletin(gid.value)
-    if (b?.code === 200) bulletin.value = b.data?.content || ''
+    // request() 直接返回 data.data，即 {content: "..."}
+    if (b) bulletin.value = b.content || ''
   } catch (e) { /* ignore */ }
 }
 

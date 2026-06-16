@@ -19,7 +19,7 @@ import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt,
 const router = useRouter()
 
 // ---- v1.5.4: Tab 切换 ----
-const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks' | 'creative'
+const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks' | 'pond'
 
 // v1.5.4: 折叠面板 (key → true=展开)
 const collapsedSections = ref(loadCollapsed())
@@ -118,7 +118,21 @@ async function togglePondEnabled() {
 async function savePondSetting(key, val) {
   await updateAppSetting(key, String(val))
 }
-onMounted(() => { loadPollSettings(); loadPondSettings(); loadCreativeWorkshop() })
+// v1.16.5: 作弊模式
+const cheatMode = ref(false)
+async function loadCheatMode() {
+  try {
+    const settings = await getAppSettings()
+    if (!Array.isArray(settings)) return
+    const s = settings.find(s => s.key === 'pond_cheat_mode')
+    if (s) cheatMode.value = s.value === 'true'
+  } catch {}
+}
+async function toggleCheatMode() {
+  cheatMode.value = !cheatMode.value
+  await updateAppSetting('pond_cheat_mode', String(cheatMode.value))
+}
+onMounted(() => { loadPollSettings(); loadPondSettings(); loadCreativeWorkshop(); loadCheatMode() })
 
 // ---- v1.16.4: 创意工坊 ----
 const bulletinText = ref('')
@@ -128,8 +142,7 @@ const customDailyStatus = ref('')
 
 async function loadCreativeWorkshop() {
   try {
-    const { apiGet } = await import('../api/index.js')
-    const settings = await apiGet('/api/settings/app-settings')
+    const settings = await getAppSettings()
     if (!Array.isArray(settings)) return
     for (const s of settings) {
       if (s.key === 'pond_bulletin_board') bulletinText.value = s.value || ''
@@ -148,9 +161,6 @@ async function loadCreativeWorkshop() {
 
 async function saveBulletin() {
   try {
-    const { setBulletin } = await import('../api/index.js')
-    await setBulletin(0, bulletinText.value)  // group_id 在 API 内部处理
-    // Actually use the raw API
     await updateAppSetting('pond_bulletin_board', bulletinText.value)
   } catch (e) { /* ignore */ }
 }
@@ -459,10 +469,10 @@ onMounted(async () => {
           activeTab==='tasks' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
         <ClipboardList class="w-4 h-4" />任务记录
       </button>
-      <button @click="activeTab='creative'"
+      <button @click="activeTab='pond'"
         :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
-          activeTab==='creative' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
-        🎨 创意工坊
+          activeTab==='pond' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+        🐟 鱼塘设置
       </button>
     </div>
 
@@ -471,8 +481,52 @@ onMounted(async () => {
       <TaskHistory />
     </div>
 
-    <!-- ====== v1.16.4: 创意工坊 ====== -->
-    <div v-if="activeTab==='creative'" class="space-y-6">
+    <!-- ====== 鱼塘设置 ====== -->
+    <div v-if="activeTab==='pond'" class="space-y-6">
+      <!-- v1.16.1: 鱼塘自动化 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <div class="w-1 h-5 rounded-full bg-cyan-400"></div>
+          <span class="text-sm font-semibold text-slate-700">⚙️ 鱼塘自动化</span>
+        </div>
+        <div class="p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium text-slate-700">全局开关</label>
+              <p class="text-xs text-slate-400">开启后鱼塘自动运转，不再依赖指令</p>
+            </div>
+            <button @click="togglePondEnabled"
+              :class="['w-11 h-6 rounded-full relative transition', pondEnabled ? 'bg-cyan-500' : 'bg-slate-200']">
+              <div :class="['w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition', pondEnabled ? 'right-0.5' : 'left-0.5']"></div>
+            </button>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700">事件间隔 (分钟)</label>
+            <input type="number" :value="pondInterval" @change="pondInterval = Math.max(5, Math.min(180, Number($event.target.value))); savePondSetting('pond_event_interval_minutes', pondInterval)" min="5" max="180" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.16.5: 允许作弊 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <div class="w-1 h-5 rounded-full bg-amber-400"></div>
+          <span class="text-sm font-semibold text-slate-700">🎮 允许作弊</span>
+        </div>
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium text-slate-700">作弊模式</label>
+              <p class="text-xs text-slate-400">开启后禁用成就系统，鱼塘页面显示指令模拟器和调试面板</p>
+            </div>
+            <button @click="toggleCheatMode"
+              :class="['w-11 h-6 rounded-full relative transition', cheatMode ? 'bg-amber-500' : 'bg-slate-200']">
+              <div :class="['w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition', cheatMode ? 'right-0.5' : 'left-0.5']"></div>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 公告牌 -->
       <div class="card p-5">
         <h3 class="text-sm font-semibold text-slate-600 mb-1">📢 鱼塘公告牌</h3>
@@ -896,33 +950,6 @@ onMounted(async () => {
           <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS = Math.max(10, Number($event.target.value)); savePollSetting('poll_interval_stats_s', pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div></div></div>
     </div>
 
-    <!-- v1.16.1: 静默鱼塘 -->
-    <div class="card mb-4 overflow-hidden">
-      <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100 cursor-pointer"
-        @click="pondExpanded = !pondExpanded">
-        <div class="w-1 h-5 rounded-full bg-cyan-400"></div>
-        <Fish :size="16" class="text-cyan-500" />
-        <span class="text-sm font-semibold text-slate-700">静默鱼塘</span>
-        <span class="text-xs text-slate-400 ml-auto">{{ pondExpanded ? '收起' : '展开' }}</span>
-      </div>
-      <div v-if="pondExpanded" class="p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="text-sm font-medium text-slate-700">全局开关</label>
-            <p class="text-xs text-slate-400">开启后鱼塘自动运转，不再依赖指令</p>
-          </div>
-          <button @click="togglePondEnabled"
-            :class="['w-11 h-6 rounded-full relative transition', pondEnabled ? 'bg-cyan-500' : 'bg-slate-200']">
-            <div :class="['w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition', pondEnabled ? 'right-0.5' : 'left-0.5']"></div>
-          </button>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500">事件间隔 (分钟)</label>
-          <input type="number" :value="pondInterval" @change="pondInterval = Math.max(5, Math.min(180, Number($event.target.value))); savePondSetting('pond_event_interval_minutes', pondInterval)" min="5" max="180" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" />
-          <p class="text-[10px] text-slate-400 mt-1">建议 15-60 分钟。间隔越短事件越密集</p>
-        </div>
-      </div>
-    </div>
 
     <!-- ====== 弹窗 ====== -->
     <Teleport to="body">

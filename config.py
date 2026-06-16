@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.16.4"
+    VERSION = "1.16.5"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -82,7 +82,7 @@ class Config:
     # v1.16.0: 鱼塘精力系统
     POND_ENERGY_REGEN_AMOUNT = 5       # 精力每轮恢复量
     POND_TOUCH_DAILY_LIMIT = 5       # 摸鱼每日次数上限
-    # v1.16.1: 静默鱼塘被动事件 + 金库
+    # v1.16.1: 鱼塘自动化被动事件 + 金库
     POND_AUTO_EVENTS_ENABLED = False   # 全局开关，默认关闭
     POND_EVENT_INTERVAL_MINUTES = 30   # 事件间隔(分钟)
     POND_TREASURY_TAX_RATE = 5         # 金库税率(%)
@@ -91,6 +91,9 @@ class Config:
     CUSTOM_FLAVOR_TEXTS = "[]"         # 用户自定义风味文本
     CUSTOM_LAST_WORDS = "[]"           # 用户自定义鱼遗言
     CUSTOM_DAILY_STATUS = "[]"         # 用户自定义状态语
+    # v1.16.5: 作弊模式 + 天气覆盖
+    POND_CHEAT_MODE = False            # 允许作弊开关
+    POND_CHEAT_WEATHER_OVERRIDE = ""   # 调试天气覆盖（空=不覆盖）
 
     LOG_DIR = BASE_DIR / "logs"
     LOG_LEVEL = "INFO"

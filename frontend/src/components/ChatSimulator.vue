@@ -26,6 +26,102 @@ const membersLoading = ref(false)
 
 const gid = computed(() => currentGroup.value?.id)
 
+// v1.16.5: Debug panel state
+const cheatMode = ref(false)
+const showDebug = ref(false)
+const debugWxid = ref('')
+const debugCoinAmount = ref(0)
+const debugEventGroup = ref('')
+const debugWeather = ref('')
+const debugLoading = ref(false)
+
+// Load cheat mode status
+import { getAppSettings } from '../api/index.js'
+async function loadCheatMode() {
+  try {
+    const settings = await getAppSettings()
+    if (!Array.isArray(settings)) return
+    const s = settings.find(s => s.key === 'pond_cheat_mode')
+    if (s) cheatMode.value = s.value === 'true'
+  } catch {}
+}
+loadCheatMode()
+
+function addDebugMsg(icon, text) {
+  messages.value.push({ text: `${icon} ${text}`, type: 'debug', time: new Date().toLocaleTimeString() })
+}
+async function debugCoins() {
+  if (!debugWxid.value || !debugCoinAmount.value) return
+  debugLoading.value = true
+  try {
+    const res = await fetch(`/api/groups/${gid.value}/fishpond/debug/coins`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({wxid: debugWxid.value, amount: debugCoinAmount.value})
+    })
+    const data = await res.json()
+    addDebugMsg('💰', data.message)
+    emit('pond-refresh')
+  } catch(e) { addDebugMsg('❌', e.message) }
+  finally { debugLoading.value = false }
+}
+async function debugTriggerEvent() {
+  if (!debugEventGroup.value) return
+  debugLoading.value = true
+  try {
+    const res = await fetch(`/api/groups/${gid.value}/fishpond/debug/trigger-event`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({event_group: debugEventGroup.value})
+    })
+    const data = await res.json()
+    addDebugMsg('⚡', data.message)
+    emit('pond-refresh')
+  } catch(e) { addDebugMsg('❌', e.message) }
+  finally { debugLoading.value = false }
+}
+async function debugSetWeather() {
+  if (!debugWeather.value) return
+  debugLoading.value = true
+  try {
+    const res = await fetch(`/api/groups/${gid.value}/fishpond/debug/weather`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({weather_type: debugWeather.value})
+    })
+    const data = await res.json()
+    addDebugMsg('🌤️', data.message)
+    emit('pond-refresh')
+  } catch(e) { addDebugMsg('❌', e.message) }
+  finally { debugLoading.value = false }
+}
+async function debugKill() {
+  if (!debugWxid.value) return
+  if (!confirm(`确认秒杀 ${debugWxid.value}？`)) return
+  debugLoading.value = true
+  try {
+    const res = await fetch(`/api/groups/${gid.value}/fishpond/debug/kill`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({wxid: debugWxid.value})
+    })
+    const data = await res.json()
+    addDebugMsg('💀', `${data.message} — ${data.data?.last_words || ''}`)
+    emit('pond-refresh')
+  } catch(e) { addDebugMsg('❌', e.message) }
+  finally { debugLoading.value = false }
+}
+async function debugRevive() {
+  if (!debugWxid.value) return
+  debugLoading.value = true
+  try {
+    const res = await fetch(`/api/groups/${gid.value}/fishpond/debug/revive`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({wxid: debugWxid.value})
+    })
+    const data = await res.json()
+    addDebugMsg('✨', data.message)
+    emit('pond-refresh')
+  } catch(e) { addDebugMsg('❌', e.message) }
+  finally { debugLoading.value = false }
+}
+
 // All available commands
 const COMMANDS = [
   { cmd: '/领养', desc: '随机品种+稀有度+属性，创建你的鱼', icon: '🐟', color: 'text-green-600 bg-green-50' },
@@ -296,6 +392,7 @@ function quickCommand(cmd) {
 </script>
 
 <template>
+  <div>
   <!-- Toggle Button -->
   <button
     @click="isOpen = !isOpen"
@@ -612,9 +709,59 @@ function quickCommand(cmd) {
             <kbd class="px-1 py-0.5 bg-slate-100 rounded text-[9px]">Enter</kbd> 发送
           </div>
         </div>
+
+        <!-- v1.16.5: Debug Panel -->
+        <div v-if="cheatMode" class="px-3 py-2 border-t border-slate-200 bg-slate-50 shrink-0">
+        <div class="flex items-center gap-1 mb-2 cursor-pointer" @click="showDebug = !showDebug">
+          <span class="text-[10px] text-slate-400">{{ showDebug ? '▼' : '▶' }}</span>
+          <span class="text-xs font-semibold text-slate-600">🔧 调试面板</span>
+          <span class="text-[10px] text-slate-400">— 作弊模式</span>
+        </div>
+        <div v-if="showDebug" class="space-y-1.5">
+          <!-- Coins -->
+          <div class="flex gap-1">
+            <select v-model="debugWxid" class="flex-1 px-1.5 py-1 text-[10px] border border-slate-200 rounded bg-white">
+              <option value="">选目标鱼</option>
+              <option v-for="m in members" :key="m.wxid" :value="m.wxid">{{ m.display_name || '?' }}</option>
+            </select>
+            <input v-model.number="debugCoinAmount" type="number" placeholder="±币"
+              class="w-16 px-1.5 py-1 text-[10px] border border-slate-200 rounded bg-white" />
+            <button @click="debugCoins" class="px-2 py-1 text-[10px] bg-slate-600 text-white rounded hover:bg-slate-700">鳞币</button>
+          </div>
+          <!-- Event trigger -->
+          <div class="flex gap-1">
+            <select v-model="debugEventGroup" class="flex-1 px-1.5 py-1 text-[10px] border border-slate-200 rounded bg-white">
+              <option value="">触发事件</option>
+              <option value="danger">⚠️ 危险</option><option value="lucky">🍀 机遇</option>
+              <option value="welfare">🌈 福利</option><option value="rare">💎 稀有</option>
+              <option value="flavor">📝 风味</option>
+            </select>
+            <button @click="debugTriggerEvent" class="px-2 py-1 text-[10px] bg-slate-600 text-white rounded hover:bg-slate-700">触发</button>
+          </div>
+          <!-- Weather -->
+          <div class="flex gap-1">
+            <select v-model="debugWeather" class="flex-1 px-1.5 py-1 text-[10px] border border-slate-200 rounded bg-white">
+              <option value="">设置天气</option>
+              <option value="sunny">☀️晴天</option><option value="rain">🌧️雨天</option>
+              <option value="storm">⛈️暴风雨</option><option value="rainbow">🌈彩虹</option>
+              <option value="double_rainbow">🌈🌈双彩虹</option>
+              <option value="sandstorm">🌪️沙尘暴</option><option value="meteor">🌠流星雨</option>
+            </select>
+            <button @click="debugSetWeather" class="px-2 py-1 text-[10px] bg-slate-600 text-white rounded hover:bg-slate-700">设置</button>
+          </div>
+          <!-- Kill / Revive -->
+          <div class="flex gap-1">
+            <button @click="debugKill" :disabled="!debugWxid"
+              class="flex-1 px-2 py-1 text-[10px] bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-40">💀 秒杀</button>
+            <button @click="debugRevive" :disabled="!debugWxid"
+              class="flex-1 px-2 py-1 text-[10px] bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-40">✨ 复活</button>
+          </div>
+        </div>
+      </div>
       </div>
     </Transition>
   </Teleport>
+  </div>
 </template>
 
 <style scoped>

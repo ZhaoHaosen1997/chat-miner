@@ -907,3 +907,153 @@ async def set_bulletin(group_id: int, body: BulletinBody):
         raise
     except Exception as e:
         raise HTTPException(500, f"设置公告牌失败: {e}")
+
+
+# ==================== v1.16.5: 调试 API（需作弊模式） ====================
+
+def _require_cheat():
+    """校验作弊模式是否开启，否则返回 403"""
+    from config import config as _cfg
+    if not getattr(_cfg, "POND_CHEAT_MODE", False):
+        raise HTTPException(403, '调试功能仅在作弊模式下可用，请在设置中开启「允许作弊」')
+
+
+class DebugCoinsBody(BaseModel):
+    wxid: str
+    amount: int  # 正=加币，负=扣币
+
+
+@router.post("/debug/coins")
+async def debug_coins(group_id: int, body: DebugCoinsBody):
+    """加减鳞币"""
+    _require_cheat()
+    try:
+        import random as _random
+        amount = body.amount
+        if amount > 0:
+            db.earn_coins(group_id, body.wxid, amount, "debug", "被不明力量赠与了鳞币")
+        else:
+            wallet = db.get_coin_balance(group_id, body.wxid)
+            current = wallet.get("balance", 0) if wallet else 0
+            deduct = min(current, -amount)
+            if deduct > 0:
+                db.earn_coins(group_id, body.wxid, -deduct, "debug", "被不明力量取走了鳞币")
+        db.add_fish_event(group_id, body.wxid, "flavor", {
+            "text": f"被不明力量{'赠与' if amount > 0 else '取走'}了 {abs(amount)} 鳞币"
+        })
+        return {"code": 200, "message": f"鳞币{'增加' if amount > 0 else '减少'} {abs(amount)}"}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, f"操作失败: {e}")
+
+
+class DebugEventBody(BaseModel):
+    event_group: str  # danger / lucky / welfare / rare / flavor
+
+
+@router.post("/debug/trigger-event")
+async def debug_trigger_event(group_id: int, body: DebugEventBody):
+    """强制触发被动事件"""
+    _require_cheat()
+    try:
+        from services.passive_events import trigger_passive_events, get_merged_flavor_events
+        import random as _random
+        group = body.event_group
+        db.add_fish_event(group_id, "", "flavor", {
+            "text": "一股不明力量搅动了鱼塘..."
+        })
+        if group == "flavor":
+            flavors = get_merged_flavor_events()
+            text = _random.choice(flavors) if flavors else "不明力量拂过水面..."
+            db.add_fish_event(group_id, "", "flavor", {"text": text})
+        else:
+            # 触发实际事件
+            trigger_passive_events(group_id)
+        return {"code": 200, "message": f"已触发 {group} 事件"}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, f"触发失败: {e}")
+
+
+class DebugWeatherBody(BaseModel):
+    weather_type: str  # sunny/rain/storm/rainbow/double_rainbow/sandstorm/meteor
+
+
+@router.post("/debug/weather")
+async def debug_set_weather(group_id: int, body: DebugWeatherBody):
+    """覆盖当日天气"""
+    _require_cheat()
+    try:
+        valid = {"sunny","rain","storm","rainbow","double_rainbow","sandstorm","meteor"}
+        if body.weather_type not in valid:
+            raise HTTPException(400, f"无效天气类型，可选: {', '.join(sorted(valid))}")
+        conn = db.get_conn()
+        conn.execute(
+            "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_cheat_weather_override', ?, 'string') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (body.weather_type,)
+        )
+        conn.commit()
+        conn.close()
+        from config import config as _cfg
+        _cfg.POND_CHEAT_WEATHER_OVERRIDE = body.weather_type
+        db.add_fish_event(group_id, "", "flavor", {
+            "text": f"天空异变...天气被不明力量改变为{body.weather_type}"
+        })
+        return {"code": 200, "message": f"天气已覆盖为 {body.weather_type}"}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, f"设置失败: {e}")
+
+
+class DebugKillBody(BaseModel):
+    wxid: str
+
+
+@router.post("/debug/kill")
+async def debug_kill_fish(group_id: int, body: DebugKillBody):
+    """秒杀鱼"""
+    _require_cheat()
+    try:
+        fish = db.get_fish(group_id, body.wxid)
+        if not fish or not fish.get("is_alive"):
+            raise HTTPException(400, "鱼不存在或已死亡")
+        db.update_fish_field(group_id, body.wxid, "hp", 0)
+        db.mark_fish_dead(group_id, body.wxid)
+        import random as _random
+        from services.passive_events import get_merged_last_words
+        last_words = _random.choice(get_merged_last_words())
+        db.add_fish_event(group_id, body.wxid, "flavor", {
+            "text": f"被不明力量秒杀了", "last_words": last_words
+        })
+        return {"code": 200, "message": f"{fish['fish_name']} 已被秒杀", "data": {"last_words": last_words}}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, f"操作失败: {e}")
+
+
+class DebugReviveBody(BaseModel):
+    wxid: str
+
+
+@router.post("/debug/revive")
+async def debug_revive_fish(group_id: int, body: DebugReviveBody):
+    """复活鱼"""
+    _require_cheat()
+    try:
+        fish = db.get_fish(group_id, body.wxid)
+        if not fish:
+            raise HTTPException(400, "鱼不存在")
+        if fish.get("is_alive"):
+            raise HTTPException(400, "鱼还活着，无需复活")
+        # 复活
+        conn = db.get_conn()
+        conn.execute("UPDATE fish_pond SET is_alive=1, hp=1 WHERE group_id=? AND wxid=?",
+                     (group_id, body.wxid))
+        max_energy = fish.get("max_energy", 100)
+        conn.execute("UPDATE fish_pond SET energy=? WHERE group_id=? AND wxid=?",
+                     (max_energy, group_id, body.wxid))
+        conn.commit()
+        conn.close()
+        db.add_fish_event(group_id, body.wxid, "flavor", {
+            "text": "被不明力量复活了"
+        })
+        return {"code": 200, "message": f"{fish['fish_name']} 已复活"}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, f"操作失败: {e}")
