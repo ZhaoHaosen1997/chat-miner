@@ -168,16 +168,24 @@ const onlineTestResult = ref('')
 async function loadDefaultOnlineModel() {
   try {
     const configs = await getModelConfigs()
+    // 同时更新模型列表，避免 loadConfigs 重复请求
+    configs.value = configs  // 直接赋值，跳过 loading 状态
     const online = configs.find(c => c.model_type === 'online' && c.is_default)
     if (online) {
       onlineConfigId.value = online.id
       onlineApiKey.value = online.api_key || ''
       onlineEndpoint.value = online.endpoint || 'https://api.deepseek.com/v1/chat/completions'
       onlineModelName.value = online.model_name || 'deepseek-v4-flash'
-      // 匹配 Provider
       const preset = PROVIDER_PRESETS.find(p => p.endpoint === online.endpoint)
       if (preset) onlineProvider.value = preset.label
       else onlineProvider.value = '自定义'
+      // v1.17.0: 无 API Key 时显示引导横幅
+      if (!online.api_key || !online.api_key.trim()) {
+        showFirstRunBanner.value = true
+      }
+    } else {
+      // 无在线模型 → 显示引导
+      showFirstRunBanner.value = true
     }
   } catch {}
 }
@@ -210,9 +218,10 @@ async function saveOnlineModel() {
   }
 }
 async function testOnlineConnection() {
+  if (!onlineConfigId.value) { onlineTestResult.value = '请先保存模型'; return }
   onlineTesting.value = true; onlineTestResult.value = ''
   try {
-    const res = await apiGet(`/settings/models/default-online-test`)
+    const res = await apiGet(`/settings/models/${onlineConfigId.value}/health`)
     onlineTestResult.value = res?.online ? '连接成功' : '连接失败'
   } catch {
     onlineTestResult.value = '连接失败'
@@ -316,11 +325,12 @@ async function loadConfigs() {
   loading.value = true
   error.value = ''
   try {
+    // v1.17.1: 如果 loadDefaultOnlineModel 已加载，跳过重复请求
     const [cfgs, grps] = await Promise.all([
-      getModelConfigs(),
+      configs.value.length ? Promise.resolve(configs.value) : getModelConfigs(),
       listGroups().catch(() => []),
     ])
-    configs.value = cfgs
+    if (cfgs !== configs.value) configs.value = cfgs
     groups.value = grps
   } catch (e) {
     error.value = e.message

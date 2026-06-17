@@ -357,10 +357,12 @@ async def analyze_daily_chat(
 
         duration = int((_time.time() - start) * 1000)
         is_cancelled = task and hasattr(task, '_cancelled') and task._cancelled
+        # v1.17.0: 降级阻断返回的 error dict 不应视为成功
+        is_error_dict = isinstance(data, dict) and "error" in data and not data.get("topics") and not data.get("mood")
         return {
-            "success": bool(data) or is_cancelled,  # 取消不算失败
+            "success": (bool(data) and not is_error_dict) or is_cancelled,
             "data": data,
-            "error": None if (data or is_cancelled) else "管线返回空结果",
+            "error": data.get("error") if is_error_dict else (None if (data or is_cancelled) else "管线返回空结果"),
             "model": model_config.get("model_name", config.OLLAMA_MODEL),
             "duration_ms": duration,
         }

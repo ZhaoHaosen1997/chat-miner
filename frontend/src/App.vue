@@ -1,10 +1,12 @@
 <script setup>
 import { ref, provide, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import Layout from './components/Layout.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ErrorModal from './components/ErrorModal.vue'
 import { getActiveTasks, listGroups, getModelConfigs } from './api/index.js'
 
+const router = useRouter()
 const currentGroup = ref(null)
 const refreshKey = ref(0)
 

@@ -920,7 +920,8 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
                        model: str = "", json_mode: bool = True,
                        temperature: float = 0.8, max_tokens: int = 4096,
                        thinking: bool = False,
-                       model_config: dict | None = None) -> dict:
+                       model_config: dict | None = None,
+                       task=None) -> dict:
     """AI 生成入口，支持在线/本地模型 + 降级
 
     v0.12.0: 优先使用 model_config 选择模型和端点。
@@ -934,7 +935,8 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
     try:
         return await _asyncio.wait_for(
             _do_ai_generate(system_prompt, user_prompt, model, json_mode,
-                          temperature, max_tokens, thinking, model_config),
+                          temperature, max_tokens, thinking, model_config,
+                          task),
             timeout=300  # v0.13.4: 硬兜底 5 分钟总超时
         )
     except _asyncio.TimeoutError:
@@ -949,7 +951,8 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
                            model: str, json_mode: bool,
                            temperature: float, max_tokens: int,
                            thinking: bool,
-                           model_config: dict | None) -> dict:
+                           model_config: dict | None,
+                           task=None) -> dict:
     """_ai_generate 的实际实现（由 asyncio.wait_for 包裹调用）"""
     # v0.12.0: 使用 model_config 路由
     if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
@@ -981,7 +984,8 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
         last_error = last_result.get("error", "未知错误") if last_result else "未知错误"
         if not config.LOCAL_LLM_ENABLED:
             logger.warning(f"在线模型 {max_attempts} 次尝试均失败且本地模型已禁用: {last_error}")
-            task.update("inference", "在线模型失败且本地模型已禁用")
+            if task:
+                task.update("inference", "在线模型失败且本地模型已禁用")
             return {"success": False, "data": None, "error": "在线模型不可用且本地模型已禁用"}
         logger.warning(f"在线模型 {max_attempts} 次尝试均失败，降级到本地: {last_error}")
         from services.model_config import get_effective_model

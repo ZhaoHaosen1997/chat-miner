@@ -480,6 +480,13 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
                 task.finish(success=False, error={"type": "basic_failed", "detail": str(e)})
             return
 
+    # v1.17.0: 降级阻断返回的 error dict
+    if isinstance(portrait_data, dict) and "error" in portrait_data and not portrait_data.get("personality"):
+        logger.warning(f"画像生成失败（降级阻断或模型不可用）: {portrait_data.get('error')}")
+        if task.type != "analyze_all_portraits":
+            task.finish(success=False, error={"type": "portrait_failed", "detail": portrait_data.get("error", "未知错误")})
+        return
+
     data_start = all_dates[0] if all_dates else ""
     data_end = all_dates[-1] if all_dates else ""
     portrait_data["_data_start"] = data_start
