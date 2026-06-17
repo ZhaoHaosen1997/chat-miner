@@ -218,8 +218,9 @@ async function onUploaded(data) {
 
     <!-- 主内容 -->
     <main class="max-w-6xl mx-auto px-4 py-6">
-      <!-- 未选群 -->
-      <div v-if="!currentGroup" class="flex flex-col items-center justify-center py-32">
+      <!-- 已选群 或 设置页面（v1.17.1: 无群时设置页也可渲染） -->
+      <slot v-if="currentGroup || route.path === '/settings'" />
+      <div v-else class="flex flex-col items-center justify-center py-32">
         <MessageCircle class="w-16 h-16 text-slate-300 mb-4" />
         <h2 class="text-xl font-semibold text-slate-600 mb-2">欢迎使用 Chat-Miner</h2>
         <p class="text-slate-400 mb-6">导入微信群聊记录，用 AI 生成有趣的每日报告和群友画像</p>
@@ -230,8 +231,6 @@ async function onUploaded(data) {
           导入群聊数据
         </button>
       </div>
-      <!-- 已选群 -->
-      <slot v-else />
     </main>
 
     <!-- 导入中遮罩 -->
