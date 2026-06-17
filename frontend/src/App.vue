@@ -3,7 +3,7 @@ import { ref, provide, onMounted } from 'vue'
 import Layout from './components/Layout.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ErrorModal from './components/ErrorModal.vue'
-import { getActiveTasks, listGroups } from './api/index.js'
+import { getActiveTasks, listGroups, getModelConfigs } from './api/index.js'
 
 const currentGroup = ref(null)
 const refreshKey = ref(0)
@@ -37,6 +37,16 @@ onMounted(async () => {
       if (target) {
         currentGroup.value = target
       }
+    }
+  } catch (e) { /* ignore */ }
+
+  // v1.17.0: 首次运行引导 — 无在线模型 api_key 时自动跳转设置
+  try {
+    const configs = await getModelConfigs()
+    const onlineConfigs = configs.filter(c => c.model_type === 'online')
+    const hasApiKey = onlineConfigs.some(c => c.api_key && c.api_key.trim())
+    if (!hasApiKey) {
+      router.push('/settings')
     }
   } catch (e) { /* ignore */ }
 })

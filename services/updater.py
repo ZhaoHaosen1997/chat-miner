@@ -23,8 +23,8 @@ class UpdateResult:
 
 
 def check_update(current_version: str, custom_url: str = "") -> UpdateResult:
-    """检查更新，返回 UpdateResult。先 GitHub，失败则 Gitee。"""
-    urls = [GITHUB_API, GITEE_API]
+    """检查更新，返回 UpdateResult。v1.17.0: 优先 Gitee，失败则 GitHub。"""
+    urls = [GITEE_API, GITHUB_API]
     if custom_url:
         urls.insert(0, custom_url)
 

@@ -151,12 +151,16 @@ def resolve_model_with_fallback(
                     fallback = _row_to_config(c)
                     break
     elif model_type == "online":
-        # 跨类型兜底：local 默认模型
-        try:
-            fallback = get_effective_model("local")
-        except Exception as e:
-            logger.warning("获取本地模型回退失败: %s", e, exc_info=True)
-            fallback = _build_hardcoded_fallback("local")
+        # v1.17.0: 跨类型兜底需检查本地模型全局开关
+        if not config.LOCAL_LLM_ENABLED:
+            logger.info("本地模型已禁用，跳过 online→local 跨类型降级")
+            fallback = None
+        else:
+            try:
+                fallback = get_effective_model("local")
+            except Exception as e:
+                logger.warning("获取本地模型回退失败: %s", e, exc_info=True)
+                fallback = _build_hardcoded_fallback("local")
 
     return primary, fallback
 

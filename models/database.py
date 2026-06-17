@@ -453,6 +453,8 @@ def init_db():
         _migrate_v1_16_3(conn)
         # v1.16.4: 鱼塘终章 — 关系网 + 季节 + 天气扩展 + 传奇任务 + 定制
         _migrate_v1_16_4(conn)
+        # v1.17.0: 本地大模型全局开关 — 旧用户自动开启
+        _migrate_v1_17_0(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -724,6 +726,26 @@ def _migrate_v1_16_4(conn):
     logger.info("DB migrate v1.16.4: fish_relationships table ready")
 
 
+def _migrate_v1_17_0(conn):
+    """v1.17.0: 本地大模型全局开关 — 检测旧用户已有本地模型配置，自动开启开关"""
+    # 1. 检查 model_configs 中是否有本地模型记录
+    has_local = conn.execute(
+        "SELECT COUNT(*) FROM model_configs WHERE model_type='local'"
+    ).fetchone()[0] > 0
+
+    if has_local:
+        # 旧用户已有本地模型 → 自动开启开关，确保升级后功能不受影响
+        # 使用 UPSERT：_seed_app_settings 已写入 false，需覆盖
+        conn.execute("""
+            INSERT INTO app_settings (key, value, value_type, description)
+            VALUES ('local_llm_enabled', 'true', 'bool', '启用本地大模型（Ollama），关闭后隐藏本地模型相关功能')
+            ON CONFLICT(key) DO UPDATE SET value = 'true'
+        """)
+        logger.info("DB migrate v1.17.0: 检测到已有本地模型，local_llm_enabled 自动设为 true")
+    else:
+        logger.info("DB migrate v1.17.0: 无本地模型记录，local_llm_enabled 保持默认 false")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -876,6 +898,22 @@ _SETTINGS_DEFS = [
          "允许作弊开关（开启后禁用成就，启用调试面板）"),
         ("pond_cheat_weather_override", "", "string",
          "调试天气覆盖（空=不覆盖）"),
+        # v1.17.0: 本地大模型全局开关
+        ("local_llm_enabled", str(config.LOCAL_LLM_ENABLED).lower(), "bool",
+         "启用本地大模型（Ollama），关闭后隐藏本地模型相关功能"),
+        ("local_llm_host", config.LOCAL_LLM_HOST, "string",
+         "Ollama 服务默认地址（添加本地模型时默认使用）"),
+        ("local_llm_fallback_model", config.LOCAL_LLM_FALLBACK_MODEL, "string",
+         "子任务重试降级模型名（本地模型失败时使用）"),
+        # v1.17.0: 管道执行参数
+        ("pipeline_max_retries", str(config.PIPELINE_MAX_RETRIES), "int",
+         "子任务最大重试次数"),
+        ("pipeline_step_timeout", str(config.PIPELINE_STEP_TIMEOUT), "int",
+         "单个子任务超时(秒)"),
+        ("pipeline_circuit_breaker_threshold", str(config.PIPELINE_CIRCUIT_BREAKER_THRESHOLD), "int",
+         "熔断触发阈值(连续失败N次触发)"),
+        ("pipeline_circuit_breaker_cooldown", str(config.PIPELINE_CIRCUIT_BREAKER_COOLDOWN), "int",
+         "熔断冷却时间(秒)"),
         # 日志清理
         ("log_retention_days", str(config.LOG_RETENTION_DAYS), "int",
          "分析日志保留天数"),
@@ -2277,6 +2315,14 @@ def load_app_settings_to_config():
         "deepseek_max_tokens_weekly": "DEEPSEEK_MAX_TOKENS_WEEKLY",
         "deepseek_max_tokens_monthly": "DEEPSEEK_MAX_TOKENS_MONTHLY",
         "portrait_refresh_days": "PORTRAIT_REFRESH_DAYS",
+        # v1.17.0: 本地大模型全局开关 + 管道执行参数
+        "local_llm_enabled": "LOCAL_LLM_ENABLED",
+        "local_llm_host": "LOCAL_LLM_HOST",
+        "local_llm_fallback_model": "LOCAL_LLM_FALLBACK_MODEL",
+        "pipeline_max_retries": "PIPELINE_MAX_RETRIES",
+        "pipeline_step_timeout": "PIPELINE_STEP_TIMEOUT",
+        "pipeline_circuit_breaker_threshold": "PIPELINE_CIRCUIT_BREAKER_THRESHOLD",
+        "pipeline_circuit_breaker_cooldown": "PIPELINE_CIRCUIT_BREAKER_COOLDOWN",
         # 周期报告可用性阈值
         "weekly_min_days": "WEEKLY_MIN_DAYS",
         "weekly_min_msgs": "WEEKLY_MIN_MSGS",

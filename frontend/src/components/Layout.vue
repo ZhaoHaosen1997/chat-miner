@@ -118,11 +118,11 @@ onMounted(async () => {
   } catch (e) { console.error('获取版本号失败:', e) }
 })
 
-const navItems = [
+// v1.17.0: 拆分群相关导航和全局设置
+const groupNavItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
   { path: '/portraits', label: '群友画像', icon: Users },
   { path: '/fishpond', label: '群鱼塘', icon: Fish },
-  { path: '/settings', label: '设置', icon: Settings },
 ]
 
 function navTo(path) {
@@ -177,27 +177,41 @@ async function onUploaded(data) {
             @upload-click="showUpload = true"
           />
         </div>
-        <!-- 导航 -->
-        <nav v-if="currentGroup" class="flex items-center gap-1">
+        <!-- 导航 v1.17.0: 设置按钮始终可见，群相关导航在无群时隐藏 -->
+        <nav class="flex items-center gap-1">
+          <template v-if="currentGroup">
+            <button
+              v-for="item in groupNavItems"
+              :key="item.path"
+              @click="navTo(item.path)"
+              :class="[
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
+                route.path === item.path
+                  ? 'bg-indigo-50 text-indigo-700 font-medium'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100',
+              ]"
+            >
+              <component :is="item.icon" class="w-4 h-4" />
+              {{ item.label }}
+            </button>
+            <!-- 任务进行中指示灯 -->
+            <div v-if="activeTaskId" class="flex items-center gap-1.5 px-2 py-1 text-xs text-indigo-500">
+              <Loader2 class="w-3.5 h-3.5 animate-spin" />
+              <span class="hidden sm:inline">分析中</span>
+            </div>
+          </template>
           <button
-            v-for="item in navItems"
-            :key="item.path"
-            @click="navTo(item.path)"
+            @click="navTo('/settings')"
             :class="[
               'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
-              route.path === item.path
+              route.path === '/settings'
                 ? 'bg-indigo-50 text-indigo-700 font-medium'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100',
             ]"
           >
-            <component :is="item.icon" class="w-4 h-4" />
-            {{ item.label }}
+            <Settings class="w-4 h-4" />
+            设置
           </button>
-          <!-- 任务进行中指示灯 -->
-          <div v-if="activeTaskId" class="flex items-center gap-1.5 px-2 py-1 text-xs text-indigo-500">
-            <Loader2 class="w-3.5 h-3.5 animate-spin" />
-            <span class="hidden sm:inline">分析中</span>
-          </div>
         </nav>
       </div>
     </header>

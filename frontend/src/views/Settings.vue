@@ -132,7 +132,100 @@ async function toggleCheatMode() {
   cheatMode.value = !cheatMode.value
   await updateAppSetting('pond_cheat_mode', String(cheatMode.value))
 }
-onMounted(() => { loadPollSettings(); loadPondSettings(); loadCreativeWorkshop(); loadCheatMode() })
+// v1.17.0: 本地大模型全局开关
+const localLlmEnabled = ref(false)
+const localLlmHost = ref('http://localhost:11434')
+const localLlmFallbackModel = ref('qwen3.5:9b')
+async function loadLocalLlmSettings() {
+  try {
+    const settings = await getAppSettings()
+    if (!Array.isArray(settings)) return
+    for (const s of settings) {
+      if (s.key === 'local_llm_enabled') localLlmEnabled.value = s.value === 'true'
+      if (s.key === 'local_llm_host') localLlmHost.value = s.value || 'http://localhost:11434'
+      if (s.key === 'local_llm_fallback_model') localLlmFallbackModel.value = s.value || 'qwen3.5:9b'
+    }
+  } catch {}
+}
+async function toggleLocalLlm() {
+  localLlmEnabled.value = !localLlmEnabled.value
+  await updateAppSetting('local_llm_enabled', String(localLlmEnabled.value))
+}
+
+// v1.17.0: Provider 预设
+const PROVIDER_PRESETS = [
+  { label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1/chat/completions', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
+  { label: 'SenseNova（商汤）', endpoint: 'https://token.sensenova.cn/v1/chat/completions', models: ['deepseek-v4-flash', 'sensenova-6.7-flash-lite'] },
+  { label: '自定义', endpoint: '', models: [] },
+]
+const onlineProvider = ref('DeepSeek')
+const onlineModelName = ref('deepseek-v4-flash')
+const onlineApiKey = ref('')
+const onlineEndpoint = ref('https://api.deepseek.com/v1/chat/completions')
+const onlineConfigId = ref(null)  // 当前编辑的在线模型 ID
+const onlineTesting = ref(false)
+const onlineTestResult = ref('')
+async function loadDefaultOnlineModel() {
+  try {
+    const configs = await getModelConfigs()
+    const online = configs.find(c => c.model_type === 'online' && c.is_default)
+    if (online) {
+      onlineConfigId.value = online.id
+      onlineApiKey.value = online.api_key || ''
+      onlineEndpoint.value = online.endpoint || 'https://api.deepseek.com/v1/chat/completions'
+      onlineModelName.value = online.model_name || 'deepseek-v4-flash'
+      // 匹配 Provider
+      const preset = PROVIDER_PRESETS.find(p => p.endpoint === online.endpoint)
+      if (preset) onlineProvider.value = preset.label
+      else onlineProvider.value = '自定义'
+    }
+  } catch {}
+}
+function onProviderChange(label) {
+  onlineProvider.value = label
+  const preset = PROVIDER_PRESETS.find(p => p.label === label)
+  if (preset) {
+    onlineEndpoint.value = preset.endpoint
+    onlineModelName.value = preset.models[0] || ''
+  } else {
+    onlineEndpoint.value = ''
+    onlineModelName.value = ''
+  }
+}
+async function saveOnlineModel() {
+  const payload = {
+    model_type: 'online',
+    endpoint: onlineEndpoint.value,
+    api_key: onlineApiKey.value,
+    model_name: onlineModelName.value,
+  }
+  if (onlineConfigId.value) {
+    await updateModelConfig(onlineConfigId.value, payload)
+  } else {
+    payload.name = onlineProvider.value === '自定义' ? '在线模型' : onlineProvider.value
+    payload.is_default = true
+    const created = await createModelConfig(payload)
+    onlineConfigId.value = created?.id
+    await loadConfigs()
+  }
+}
+async function testOnlineConnection() {
+  onlineTesting.value = true; onlineTestResult.value = ''
+  try {
+    const res = await apiGet(`/settings/models/default-online-test`)
+    onlineTestResult.value = res?.online ? '连接成功' : '连接失败'
+  } catch {
+    onlineTestResult.value = '连接失败'
+  } finally {
+    onlineTesting.value = false
+    setTimeout(() => { onlineTestResult.value = '' }, 3000)
+  }
+}
+
+// v1.17.0: 首次运行引导
+const showFirstRunBanner = ref(false)
+
+onMounted(() => { loadPollSettings(); loadPondSettings(); loadCreativeWorkshop(); loadCheatMode(); loadLocalLlmSettings(); loadDefaultOnlineModel() })
 
 // ---- v1.16.4: 创意工坊 ----
 const bulletinText = ref('')
@@ -263,7 +356,24 @@ function savePortraitModel() {
 function openCreateForm() {
   editingId.value = null
   form.value = {
-    name: '', model_type: 'local', endpoint: '',
+    name: '', model_type: 'online', endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    api_key: '', model_name: 'deepseek-v4-flash', is_default: false, extra_params: '',
+  }
+  showForm.value = true
+}
+// v1.17.0: 高级选项中按类型创建模型
+function openCreateOnlineForm() {
+  editingId.value = null
+  form.value = {
+    name: '', model_type: 'online', endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    api_key: '', model_name: 'deepseek-v4-flash', is_default: false, extra_params: '',
+  }
+  showForm.value = true
+}
+function openCreateLocalForm() {
+  editingId.value = null
+  form.value = {
+    name: '', model_type: 'local', endpoint: localLlmHost.value,
     api_key: '', model_name: '', is_default: false, extra_params: '',
   }
   showForm.value = true
@@ -594,11 +704,10 @@ onMounted(async () => {
 
     <!-- ====== 基础设置 ====== -->
     <div v-if="activeTab==='basic'" class="space-y-6">
-      <div class="flex items-center justify-between">
-        <p class="text-sm text-slate-500">管理 AI 模型配置和默认群组</p>
-        <button @click="openCreateForm" class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
-          <Plus :size="16" />添加模型
-        </button>
+      <!-- v1.17.0: 首次运行引导 -->
+      <div v-if="showFirstRunBanner" class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-2">
+        <span class="text-indigo-500 text-lg">💡</span>
+        <span class="text-sm text-indigo-700">欢迎使用 Chat-Miner！请先配置在线 AI 模型，选择服务商并填入 API Key 即可开始分析群聊。</span>
       </div>
 
       <!-- 默认群组 -->
@@ -618,206 +727,224 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- AI 模型分配 -->
+      <!-- 在线模型（默认，直接编辑 is_default=1 的 online 模型） -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-          <div class="w-1 h-5 rounded-full bg-violet-400"></div>
-          <Sparkles :size="16" class="text-slate-500" />
-          <span class="text-sm font-semibold text-slate-700">AI 模型分配</span>
+          <div class="w-1 h-5 rounded-full bg-sky-400"></div>
+          <Globe :size="16" class="text-slate-500" />
+          <span class="text-sm font-semibold text-slate-700">在线模型</span>
+          <span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">默认</span>
         </div>
         <div class="p-5 space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-slate-500">服务商</label>
+              <select :value="onlineProvider" @change="onProviderChange($event.target.value)"
+                class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1">
+                <option v-for="p in PROVIDER_PRESETS" :key="p.label" :value="p.label">{{ p.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">模型名</label>
+              <template v-if="onlineProvider !== '自定义'">
+                <select :value="onlineModelName" @change="onlineModelName = $event.target.value"
+                  class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1">
+                  <option v-for="m in (PROVIDER_PRESETS.find(p=>p.label===onlineProvider)?.models||[])" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </template>
+              <input v-else :value="onlineModelName" @change="onlineModelName = $event.target.value"
+                class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" placeholder="输入模型名" />
+            </div>
+          </div>
           <div>
-            <label class="text-sm font-medium text-slate-700">每日分析</label>
-            <p class="text-xs text-slate-400 mb-2">在线模型单次调用更快，本地模型分步管线更稳定</p>
-            <select :value="dailyModelId" @change="dailyModelId = $event.target.value; saveDailyModel()"
-                    class="w-full max-w-xs px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
-              <option value="">本地默认 (Ollama)</option>
-              <optgroup label="本地模型">
-                <option v-for="m in localConfigs" :key="'dl-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }})</option>
-              </optgroup>
-              <optgroup label="在线模型">
-                <option v-for="m in onlineConfigs" :key="'do-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }})</option>
-              </optgroup>
-            </select>
+            <label class="text-xs text-slate-500">端点 URL</label>
+            <input :value="onlineEndpoint" @change="onlineEndpoint = $event.target.value"
+              class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1 font-mono"
+              :disabled="onlineProvider !== '自定义'" />
           </div>
-          <div class="border-t border-slate-100 pt-4">
-            <label class="text-sm font-medium text-slate-700">画像分析</label>
-            <p class="text-xs text-slate-400 mb-2">在线模型一次生成完整画像（含深度洞察），质量更高</p>
-            <select :value="portraitModelId" @change="portraitModelId = $event.target.value; savePortraitModel()"
-                    class="w-full max-w-xs px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
-              <option value="">本地默认 (Ollama)</option>
-              <optgroup label="本地模型">
-                <option v-for="m in localConfigs" :key="'pl-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }})</option>
-              </optgroup>
-              <optgroup label="在线模型">
-                <option v-for="m in onlineConfigs" :key="'po-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }})</option>
-              </optgroup>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- 加载/错误 -->
-      <div v-if="loading" class="flex items-center justify-center py-16 text-slate-400">
-        <Loader2 :size="24" class="animate-spin mr-2" /> 加载中...
-      </div>
-      <div v-else-if="error" class="bg-white rounded-2xl border border-red-200 p-8 text-center">
-        <X :size="32" class="mx-auto mb-2 text-red-400" />
-        <p class="text-red-500">{{ error }}</p>
-        <button @click="loadConfigs" class="mt-3 text-indigo-600 text-sm hover:underline">重试</button>
-      </div>
-
-      <!-- 模型列表 -->
-      <template v-else>
-        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-            <div class="w-1 h-5 rounded-full bg-emerald-400"></div>
-            <Monitor :size="16" class="text-slate-500" />
-            <span class="text-sm font-semibold text-slate-700">本地模型</span>
-            <span class="text-xs text-slate-400">{{ localConfigs.length }} 个</span>
-          </div>
-          <div class="p-5">
-            <div v-if="localConfigs.length === 0" class="text-center py-8 text-sm text-slate-400">暂无本地模型</div>
-            <div v-else class="space-y-2">
-              <div v-for="cfg in localConfigs" :key="cfg.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors group">
-                <div class="flex items-center gap-3 min-w-0">
-                  <div class="w-9 h-9 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Monitor :size="16" class="text-emerald-600" />
-                  </div>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-slate-800 text-sm truncate">{{ cfg.name }}</span>
-                      <span v-if="cfg.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">默认</span>
-                    </div>
-                    <div class="text-xs text-slate-400 truncate">{{ cfg.model_name }} · {{ cfg.endpoint }}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-                  <button @click="doHealthCheck(cfg.id)" :disabled="healthChecking[cfg.id]" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="测试连接">
-                    <Loader2 v-if="healthChecking[cfg.id]" :size="14" class="animate-spin" />
-                    <Wifi v-else :size="14" />
-                  </button>
-                  <span v-if="healthResults[cfg.id]" :class="['text-[11px] flex-shrink-0', healthResults[cfg.id].includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ healthResults[cfg.id] }}</span>
-                  <button v-if="!cfg.is_default" @click="doSetDefault(cfg.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
-                  <button @click="openEditForm(cfg)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
-                  <button @click="deleteConfirm = cfg.id" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button>
-                </div>
-              </div>
+          <div>
+            <label class="text-xs text-slate-500">API Key</label>
+            <div class="flex gap-2 mt-1">
+              <input :value="onlineApiKey" @change="onlineApiKey = $event.target.value"
+                class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 font-mono"
+                placeholder="sk-..." />
+              <button @click="saveOnlineModel" class="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">保存</button>
+              <button @click="testOnlineConnection" :disabled="onlineTesting" class="px-4 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-slate-50 transition disabled:opacity-50">
+                <Loader2 v-if="onlineTesting" :size="14" class="animate-spin inline" />
+                <span v-else>测试连接</span>
+              </button>
             </div>
+            <span v-if="onlineTestResult" :class="['text-xs mt-1', onlineTestResult.includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ onlineTestResult }}</span>
           </div>
         </div>
-
-        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-            <div class="w-1 h-5 rounded-full bg-sky-400"></div>
-            <Cloud :size="16" class="text-slate-500" />
-            <span class="text-sm font-semibold text-slate-700">在线模型</span>
-            <span class="text-xs text-slate-400">{{ onlineConfigs.length }} 个</span>
-          </div>
-          <div class="p-5">
-            <div v-if="onlineConfigs.length === 0" class="text-center py-8 text-sm text-slate-400">暂无在线模型</div>
-            <div v-else class="space-y-2">
-              <div v-for="cfg in onlineConfigs" :key="cfg.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors group">
-                <div class="flex items-center gap-3 min-w-0">
-                  <div class="w-9 h-9 bg-sky-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Globe :size="16" class="text-sky-600" />
-                  </div>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-slate-800 text-sm truncate">{{ cfg.name }}</span>
-                      <span v-if="cfg.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">默认</span>
-                    </div>
-                    <div class="text-xs text-slate-400 truncate">{{ cfg.model_name }} · {{ maskKey(cfg.api_key) }}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-                  <button @click="doHealthCheck(cfg.id)" :disabled="healthChecking[cfg.id]" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="测试连接">
-                    <Loader2 v-if="healthChecking[cfg.id]" :size="14" class="animate-spin" /><Wifi v-else :size="14" />
-                  </button>
-                  <span v-if="healthResults[cfg.id]" :class="['text-[11px] flex-shrink-0', healthResults[cfg.id].includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ healthResults[cfg.id] }}</span>
-                  <button v-if="!cfg.is_default" @click="doSetDefault(cfg.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
-                  <button @click="openEditForm(cfg)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
-                  <button @click="deleteConfirm = cfg.id" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
+      </div>
     </div>
 
     <!-- ====== 高级选项 ====== -->
     <div v-if="activeTab==='advanced'" class="space-y-6">
-      <!-- 停用词 -->
+      <!-- v1.17.0: 谨慎修改警告 -->
+      <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2">
+        <span class="text-amber-500 text-lg">⚠️</span>
+        <span class="text-sm text-amber-700">以下为高级配置，请谨慎修改。不正确的设置可能导致分析失败。</span>
+      </div>
+
+      <!-- 在线模型配置 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-          <div class="w-1 h-5 rounded-full bg-rose-400"></div>
-          <Filter :size="16" class="text-slate-500" />
-          <span class="text-sm font-semibold text-slate-700">过滤词管理</span>
+          <div class="w-1 h-5 rounded-full bg-sky-400"></div>
+          <Globe :size="16" class="text-slate-500" />
+          <span class="text-sm font-semibold text-slate-700">在线模型配置</span>
+          <span class="text-xs text-slate-400">{{ onlineConfigs.length }} 个</span>
+          <div class="flex-1"></div>
+          <button @click="openCreateOnlineForm()" class="inline-flex items-center gap-1 px-3 py-1.5 bg-sky-600 text-white text-xs font-medium rounded-lg hover:bg-sky-700 transition-colors"><Plus :size="14" />添加</button>
         </div>
         <div class="p-5">
-          <p class="text-xs text-slate-400 mb-3">以 <code class="text-[11px] bg-slate-100 px-1 rounded">#</code> 开头的行视为注释。修改后下次分析时自动生效。</p>
-          <textarea v-model="stopwordsText" rows="12"
-                    class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none resize-y"
-                    :disabled="stopwordsLoading"></textarea>
-          <div class="flex items-center justify-between mt-3">
-            <span v-if="stopwordsSaved" class="text-xs text-emerald-600 flex items-center gap-1"><Check :size="14" /> 已保存</span>
-            <span v-else class="text-xs text-slate-400">修改后即时生效，无需重启</span>
-            <button @click="saveStopwords" :disabled="stopwordsLoading" class="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">{{ stopwordsLoading ? '加载中...' : '保存' }}</button>
+          <div v-if="onlineConfigs.length === 0" class="text-center py-8 text-sm text-slate-400">暂无在线模型</div>
+          <div v-else class="space-y-2">
+            <div v-for="cfg in onlineConfigs" :key="cfg.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors group">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-9 h-9 bg-sky-50 rounded-lg flex items-center justify-center flex-shrink-0"><Globe :size="16" class="text-sky-600" /></div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-slate-800 text-sm truncate">{{ cfg.name }}</span>
+                    <span v-if="cfg.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">默认</span>
+                  </div>
+                  <div class="text-xs text-slate-400 truncate">{{ cfg.model_name }} · {{ maskKey(cfg.api_key) }}</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                <button @click="doHealthCheck(cfg.id)" :disabled="healthChecking[cfg.id]" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="测试连接"><Loader2 v-if="healthChecking[cfg.id]" :size="14" class="animate-spin" /><Wifi v-else :size="14" /></button>
+                <span v-if="healthResults[cfg.id]" :class="['text-[11px] flex-shrink-0', healthResults[cfg.id].includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ healthResults[cfg.id] }}</span>
+                <button v-if="!cfg.is_default" @click="doSetDefault(cfg.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
+                <button @click="openEditForm(cfg)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
+                <button @click="deleteConfirm = cfg.id" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 超时 & 重试 -->
+      <!-- 本地模型配置 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <div class="w-1 h-5 rounded-full bg-emerald-400"></div>
+          <Monitor :size="16" class="text-slate-500" />
+          <span class="text-sm font-semibold text-slate-700">本地模型配置</span>
+          <span class="text-xs text-slate-400">{{ localConfigs.length }} 个</span>
+          <div class="flex-1"></div>
+          <button @click="openCreateLocalForm()" class="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors"><Plus :size="14" />添加</button>
+        </div>
+        <div class="px-5 pb-3 grid grid-cols-2 gap-3">
+          <div><label class="text-[11px] text-slate-400">Ollama 服务地址（添加模型时默认使用）</label>
+            <input :value="localLlmHost" @change="localLlmHost = $event.target.value; updateAppSetting('local_llm_host', $event.target.value)"
+              class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs font-mono outline-none mt-0.5" /></div>
+          <div><label class="text-[11px] text-slate-400">降级模型名（子任务重试用）</label>
+            <input :value="localLlmFallbackModel" @change="localLlmFallbackModel = $event.target.value; updateAppSetting('local_llm_fallback_model', $event.target.value)"
+              class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs outline-none mt-0.5" /></div>
+        </div>
+        <div class="p-5 pt-0">
+          <div v-if="localConfigs.length === 0" class="text-center py-8 text-sm text-slate-400">暂无本地模型</div>
+          <div v-else class="space-y-2">
+            <div v-for="cfg in localConfigs" :key="cfg.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors group">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-9 h-9 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0"><Monitor :size="16" class="text-emerald-600" /></div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-slate-800 text-sm truncate">{{ cfg.name }}</span>
+                    <span v-if="cfg.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">默认</span>
+                  </div>
+                  <div class="text-xs text-slate-400 truncate">{{ cfg.model_name }} · {{ cfg.endpoint }}</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                <button @click="doHealthCheck(cfg.id)" :disabled="healthChecking[cfg.id]" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="测试连接"><Loader2 v-if="healthChecking[cfg.id]" :size="14" class="animate-spin" /><Wifi v-else :size="14" /></button>
+                <span v-if="healthResults[cfg.id]" :class="['text-[11px] flex-shrink-0', healthResults[cfg.id].includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ healthResults[cfg.id] }}</span>
+                <button v-if="!cfg.is_default" @click="doSetDefault(cfg.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
+                <button @click="openEditForm(cfg)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
+                <button @click="deleteConfirm = cfg.id" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 模型分配 & 降级 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-1 h-5 rounded-full bg-violet-400"></div>
+            <Sparkles :size="16" class="text-slate-500" />
+            <span class="text-sm font-semibold text-slate-700">AI 模型分配 & 降级</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">在线模型不可用时自动降级到本地默认</span>
+            <button @click="toggleLocalLlm()"
+              :class="['w-11 h-6 rounded-full relative transition flex-shrink-0', localLlmEnabled ? 'bg-emerald-500' : 'bg-slate-300']">
+              <div :class="['w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition', localLlmEnabled ? 'right-0.5' : 'left-0.5']"></div>
+            </button>
+          </div>
+        </div>
+        <div class="p-5 space-y-4">
+          <div>
+            <label class="text-sm font-medium text-slate-700">每日分析</label>
+            <p class="text-xs text-slate-400 mb-2">未选择时使用在线默认模型</p>
+            <select :value="dailyModelId" @change="dailyModelId = $event.target.value; saveDailyModel()"
+              class="w-full max-w-xs px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none">
+              <option value="">在线默认</option>
+              <optgroup label="在线模型"><option v-for="m in onlineConfigs" :key="'do-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }}){{ m.is_default ? ' [默认]' : '' }}</option></optgroup>
+              <optgroup label="本地模型"><option v-for="m in localConfigs" :key="'dl-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }}){{ m.is_default ? ' [默认]' : '' }}</option></optgroup>
+            </select>
+          </div>
+          <div class="border-t border-slate-100 pt-4">
+            <label class="text-sm font-medium text-slate-700">画像分析</label>
+            <p class="text-xs text-slate-400 mb-2">未选择时使用在线默认模型</p>
+            <select :value="portraitModelId" @change="portraitModelId = $event.target.value; savePortraitModel()"
+              class="w-full max-w-xs px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none">
+              <option value="">在线默认</option>
+              <optgroup label="在线模型"><option v-for="m in onlineConfigs" :key="'po-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }}){{ m.is_default ? ' [默认]' : '' }}</option></optgroup>
+              <optgroup label="本地模型"><option v-for="m in localConfigs" :key="'pl-'+m.id" :value="m.id">{{ m.name }} ({{ m.model_name }}){{ m.is_default ? ' [默认]' : '' }}</option></optgroup>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 管道执行参数 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <div class="w-1 h-5 rounded-full bg-teal-400"></div>
+          <Zap :size="16" class="text-slate-500" />
+          <span class="text-sm font-semibold text-slate-700">管道执行参数</span>
+        </div>
+        <div class="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div><label class="text-xs text-slate-500">重试次数</label>
+            <input type="number" :value="appSettings.pipeline_max_retries?.value || 3" @change="saveAdvancedSetting('pipeline_max_retries', Math.max(1, Number($event.target.value)))" min="1" max="20" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">单步超时 (秒)</label>
+            <input type="number" :value="appSettings.pipeline_step_timeout?.value || 90" @change="saveAdvancedSetting('pipeline_step_timeout', Math.max(10, Number($event.target.value)))" min="10" max="600" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">熔断阈值 (次)</label>
+            <input type="number" :value="appSettings.pipeline_circuit_breaker_threshold?.value || 5" @change="saveAdvancedSetting('pipeline_circuit_breaker_threshold', Math.max(1, Number($event.target.value)))" min="1" max="50" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">熔断冷却 (秒)</label>
+            <input type="number" :value="appSettings.pipeline_circuit_breaker_cooldown?.value || 30" @change="saveAdvancedSetting('pipeline_circuit_breaker_cooldown', Math.max(5, Number($event.target.value)))" min="5" max="600" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+        </div>
+      </div>
+
+      <!-- 在线模型超时 & 重试 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
           <div class="w-1 h-5 rounded-full bg-indigo-400"></div>
           <Clock :size="16" class="text-slate-500" />
-          <span class="text-sm font-semibold text-slate-700">模型超时 & 重试</span>
+          <span class="text-sm font-semibold text-slate-700">在线模型超时 & 重试</span>
         </div>
         <div class="p-5 grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div><label class="text-xs text-slate-500">Ollama 超时 (秒)</label>
-            <input type="number" :value="appSettings.ollama_timeout?.value || 120" @change="saveAdvancedSetting('ollama_timeout', $event.target.value)" min="10" max="600"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+            <input type="number" :value="appSettings.ollama_timeout?.value || 120" @change="saveAdvancedSetting('ollama_timeout', $event.target.value)" min="10" max="600" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">DeepSeek 超时 (秒)</label>
-            <input type="number" :value="appSettings.deepseek_timeout?.value || 120" @change="saveAdvancedSetting('deepseek_timeout', $event.target.value)" min="10" max="600"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+            <input type="number" :value="appSettings.deepseek_timeout?.value || 120" @change="saveAdvancedSetting('deepseek_timeout', $event.target.value)" min="10" max="600" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">在线模型重试次数</label>
-            <input type="number" :value="appSettings.online_retry_count?.value || 2" @change="saveAdvancedSetting('online_retry_count', $event.target.value)" min="0" max="10"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+            <input type="number" :value="appSettings.online_retry_count?.value || 2" @change="saveAdvancedSetting('online_retry_count', $event.target.value)" min="0" max="10" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
         </div>
       </div>
 
-      <!-- GPU 锁 -->
-      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <div class="flex items-center gap-2">
-            <div class="w-1 h-5 rounded-full bg-amber-400"></div>
-            <Shield :size="16" class="text-slate-500" />
-            <span class="text-sm font-semibold text-slate-700">GPU 分布式锁</span>
-          </div>
-          <button @click="saveAdvancedSetting('gpu_lock_enabled', appSettings.gpu_lock_enabled?.value === 'true' ? 'false' : 'true')"
-                  :class="['w-10 h-5 rounded-full transition-colors', appSettings.gpu_lock_enabled?.value === 'true' ? 'bg-emerald-500' : 'bg-slate-300']">
-            <div :class="['w-4 h-4 rounded-full bg-white shadow transition-transform', appSettings.gpu_lock_enabled?.value === 'true' ? 'translate-x-5' : 'translate-x-0.5']"></div>
-          </button>
-        </div>
-        <div class="p-5 grid grid-cols-2 gap-4">
-          <div><label class="text-xs text-slate-500">服务地址</label>
-            <input type="text" :value="appSettings.gpu_lock_url?.value" @change="saveAdvancedSetting('gpu_lock_url', $event.target.value)"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">标识名</label>
-            <input type="text" :value="appSettings.gpu_lock_who?.value" @change="saveAdvancedSetting('gpu_lock_who', $event.target.value)"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">重试间隔 (秒)</label>
-            <input type="number" :value="appSettings.gpu_lock_retry_interval?.value || 5" @change="saveAdvancedSetting('gpu_lock_retry_interval', $event.target.value)" min="1" max="60"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">最大重试次数</label>
-            <input type="number" :value="appSettings.gpu_lock_max_retries?.value || 24" @change="saveAdvancedSetting('gpu_lock_max_retries', $event.target.value)" min="1" max="120"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-        </div>
-      </div>
-
-      <!-- 报告参数 -->
+      <!-- 报告生成参数 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
           <div class="w-1 h-5 rounded-full bg-purple-400"></div>
@@ -825,18 +952,10 @@ onMounted(async () => {
           <span class="text-sm font-semibold text-slate-700">报告生成参数</span>
         </div>
         <div class="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div><label class="text-xs text-slate-500">周报 Temp</label>
-            <input type="number" :value="appSettings.weekly_temperature?.value || 0.8" @change="saveAdvancedSetting('weekly_temperature', $event.target.value)" min="0" max="2" step="0.1"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">月报 Temp</label>
-            <input type="number" :value="appSettings.monthly_temperature?.value || 0.6" @change="saveAdvancedSetting('monthly_temperature', $event.target.value)" min="0" max="2" step="0.1"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">周报 Max Tokens</label>
-            <input type="number" :value="appSettings.deepseek_max_tokens_weekly?.value || 4096" @change="saveAdvancedSetting('deepseek_max_tokens_weekly', $event.target.value)" min="256" max="32768"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">月报 Max Tokens</label>
-            <input type="number" :value="appSettings.deepseek_max_tokens_monthly?.value || 8192" @change="saveAdvancedSetting('deepseek_max_tokens_monthly', $event.target.value)" min="256" max="32768"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">周报 Temp</label><input type="number" :value="appSettings.weekly_temperature?.value || 0.8" @change="saveAdvancedSetting('weekly_temperature', $event.target.value)" min="0" max="2" step="0.1" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">月报 Temp</label><input type="number" :value="appSettings.monthly_temperature?.value || 0.6" @change="saveAdvancedSetting('monthly_temperature', $event.target.value)" min="0" max="2" step="0.1" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">周报 Max Tokens</label><input type="number" :value="appSettings.deepseek_max_tokens_weekly?.value || 4096" @change="saveAdvancedSetting('deepseek_max_tokens_weekly', $event.target.value)" min="256" max="32768" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">月报 Max Tokens</label><input type="number" :value="appSettings.deepseek_max_tokens_monthly?.value || 8192" @change="saveAdvancedSetting('deepseek_max_tokens_monthly', $event.target.value)" min="256" max="32768" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
         </div>
       </div>
 
@@ -848,106 +967,71 @@ onMounted(async () => {
           <span class="text-sm font-semibold text-slate-700">周期报告可用性阈值</span>
         </div>
         <div class="p-5 grid grid-cols-3 gap-4">
-          <div class="p-3 bg-indigo-50/40 rounded-xl space-y-2">
-            <span class="text-xs font-semibold text-indigo-600">周报</span>
-            <div><label class="text-[11px] text-slate-400">最低天数</label>
-              <input type="number" :value="appSettings.weekly_min_days?.value || 3" @change="saveAdvancedSetting('weekly_min_days', $event.target.value)" min="1" max="7"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-            <div><label class="text-[11px] text-slate-400">最低消息</label>
-              <input type="number" :value="appSettings.weekly_min_msgs?.value || 50" @change="saveAdvancedSetting('weekly_min_msgs', $event.target.value)" min="0" max="99999"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-          </div>
-          <div class="p-3 bg-purple-50/40 rounded-xl space-y-2">
-            <span class="text-xs font-semibold text-purple-600">月报</span>
-            <div><label class="text-[11px] text-slate-400">最低天数</label>
-              <input type="number" :value="appSettings.monthly_min_days?.value || 5" @change="saveAdvancedSetting('monthly_min_days', $event.target.value)" min="1" max="31"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-            <div><label class="text-[11px] text-slate-400">最低消息</label>
-              <input type="number" :value="appSettings.monthly_min_msgs?.value || 100" @change="saveAdvancedSetting('monthly_min_msgs', $event.target.value)" min="0" max="99999"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-          </div>
-          <div class="p-3 bg-amber-50/40 rounded-xl space-y-2">
-            <span class="text-xs font-semibold text-amber-600">年报</span>
-            <div><label class="text-[11px] text-slate-400">最低天数</label>
-              <input type="number" :value="appSettings.annual_min_days?.value || 30" @change="saveAdvancedSetting('annual_min_days', $event.target.value)" min="1" max="366"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-            <div><label class="text-[11px] text-slate-400">最低消息</label>
-              <input type="number" :value="appSettings.annual_min_msgs?.value || 300" @change="saveAdvancedSetting('annual_min_msgs', $event.target.value)" min="0" max="99999"
-                     class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-0.5" /></div>
-          </div>
+          <div class="p-3 bg-indigo-50/40 rounded-xl space-y-2"><span class="text-xs font-semibold text-indigo-600">周报</span>
+            <div><label class="text-[11px] text-slate-400">最低天数</label><input type="number" :value="appSettings.weekly_min_days?.value || 3" @change="saveAdvancedSetting('weekly_min_days', $event.target.value)" min="1" max="7" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div>
+            <div><label class="text-[11px] text-slate-400">最低消息</label><input type="number" :value="appSettings.weekly_min_msgs?.value || 50" @change="saveAdvancedSetting('weekly_min_msgs', $event.target.value)" min="0" max="99999" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div></div>
+          <div class="p-3 bg-purple-50/40 rounded-xl space-y-2"><span class="text-xs font-semibold text-purple-600">月报</span>
+            <div><label class="text-[11px] text-slate-400">最低天数</label><input type="number" :value="appSettings.monthly_min_days?.value || 5" @change="saveAdvancedSetting('monthly_min_days', $event.target.value)" min="1" max="31" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div>
+            <div><label class="text-[11px] text-slate-400">最低消息</label><input type="number" :value="appSettings.monthly_min_msgs?.value || 100" @change="saveAdvancedSetting('monthly_min_msgs', $event.target.value)" min="0" max="99999" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div></div>
+          <div class="p-3 bg-amber-50/40 rounded-xl space-y-2"><span class="text-xs font-semibold text-amber-600">年报</span>
+            <div><label class="text-[11px] text-slate-400">最低天数</label><input type="number" :value="appSettings.annual_min_days?.value || 30" @change="saveAdvancedSetting('annual_min_days', $event.target.value)" min="1" max="366" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div>
+            <div><label class="text-[11px] text-slate-400">最低消息</label><input type="number" :value="appSettings.annual_min_msgs?.value || 300" @change="saveAdvancedSetting('annual_min_msgs', $event.target.value)" min="0" max="99999" class="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-sm outline-none mt-0.5" /></div></div>
         </div>
       </div>
 
-      <!-- 画像刷新 -->
+      <!-- GPU 分布式锁 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-          <div class="w-1 h-5 rounded-full bg-pink-400"></div>
-          <RefreshCw :size="16" class="text-slate-500" />
-          <span class="text-sm font-semibold text-slate-700">画像刷新</span>
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div class="flex items-center gap-2"><div class="w-1 h-5 rounded-full bg-amber-400"></div><Shield :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">GPU 分布式锁</span></div>
+          <button @click="saveAdvancedSetting('gpu_lock_enabled', appSettings.gpu_lock_enabled?.value === 'true' ? 'false' : 'true')" :class="['w-10 h-5 rounded-full transition-colors', appSettings.gpu_lock_enabled?.value === 'true' ? 'bg-emerald-500' : 'bg-slate-300']"><div :class="['w-4 h-4 rounded-full bg-white shadow transition-transform', appSettings.gpu_lock_enabled?.value === 'true' ? 'translate-x-5' : 'translate-x-0.5']"></div></button>
         </div>
-        <div class="p-5">
-          <div class="flex items-center gap-4">
-            <label class="text-xs text-slate-500">刷新阈值 (天)</label>
-            <input type="number" :value="appSettings.portrait_refresh_days?.value || 7" @change="saveAdvancedSetting('portrait_refresh_days', $event.target.value)" min="1" max="365"
-                   class="w-28 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
-            <span class="text-xs text-slate-400">累积新消息超过该天数后触发刷新</span>
-          </div>
+        <div class="p-5 grid grid-cols-2 gap-4">
+          <div><label class="text-xs text-slate-500">服务地址</label><input type="text" :value="appSettings.gpu_lock_url?.value" @change="saveAdvancedSetting('gpu_lock_url', $event.target.value)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">标识名</label><input type="text" :value="appSettings.gpu_lock_who?.value" @change="saveAdvancedSetting('gpu_lock_who', $event.target.value)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">重试间隔 (秒)</label><input type="number" :value="appSettings.gpu_lock_retry_interval?.value || 5" @change="saveAdvancedSetting('gpu_lock_retry_interval', $event.target.value)" min="1" max="60" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">最大重试次数</label><input type="number" :value="appSettings.gpu_lock_max_retries?.value || 24" @change="saveAdvancedSetting('gpu_lock_max_retries', $event.target.value)" min="1" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+        </div>
+      </div>
+
+      <!-- 过滤词管理 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-rose-400"></div><Filter :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">过滤词管理</span></div>
+        <div class="p-5"><p class="text-xs text-slate-400 mb-3">以 <code class="text-[11px] bg-slate-100 px-1 rounded">#</code> 开头的行视为注释。修改后下次分析时自动生效。</p>
+          <textarea v-model="stopwordsText" rows="12" class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono outline-none resize-y" :disabled="stopwordsLoading"></textarea>
+          <div class="flex items-center justify-between mt-3"><span v-if="stopwordsSaved" class="text-xs text-emerald-600 flex items-center gap-1"><Check :size="14" />已保存</span><span v-else class="text-xs text-slate-400">修改后即时生效，无需重启</span>
+            <button @click="saveStopwords" :disabled="stopwordsLoading" class="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition">{{ stopwordsLoading ? '加载中...' : '保存' }}</button></div></div></div>
+
+      <!-- 其他设置 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-slate-400"></div><Settings2 :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">其他设置</span></div>
+        <div class="p-5 grid grid-cols-3 gap-4">
+          <div><label class="text-xs text-slate-500">画像刷新 (天)</label><input type="number" :value="appSettings.portrait_refresh_days?.value || 7" @change="saveAdvancedSetting('portrait_refresh_days', $event.target.value)" min="1" max="365" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">日志保留 (天)</label><input type="number" :value="appSettings.log_retention_days?.value || 90" @change="saveAdvancedSetting('log_retention_days', $event.target.value)" min="1" max="365" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">任务记录上限</label><input type="number" :value="appSettings.log_max_records?.value || 500" @change="saveAdvancedSetting('log_max_records', $event.target.value)" min="10" max="99999" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
         </div>
       </div>
 
       <!-- WeFlow 同步 -->
-      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <div class="flex items-center gap-2">
-            <div class="w-1 h-5 rounded-full bg-emerald-400"></div>
-            <Radio :size="16" class="text-slate-500" />
-            <span class="text-sm font-semibold text-slate-700">WeFlow 同步</span>
-          </div>
-          <button @click="saveWeFlowSetting('weflow_enabled', (!weflowSettings.weflow_enabled).toString())"
-                  :class="['w-10 h-5 rounded-full transition-colors', weflowSettings.weflow_enabled ? 'bg-emerald-500' : 'bg-slate-300']">
-            <div :class="['w-4 h-4 rounded-full bg-white shadow transition-transform', weflowSettings.weflow_enabled ? 'translate-x-5' : 'translate-x-0.5']"></div>
-          </button>
-        </div>
-        <div class="p-5 space-y-4">
-          <p class="text-xs text-slate-400">配置 WeFlow 本地 API 连接，实现定时自动拉取微信新消息</p>
-          <div><label class="text-xs text-slate-500">API 地址</label>
-            <input :value="weflowSettings.weflow_base_url" @change="saveWeFlowSetting('weflow_base_url', $event.target.value)"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">Access Token</label>
-            <input :value="weflowSettings.weflow_access_token" type="password" @change="saveWeFlowSetting('weflow_access_token', $event.target.value)"
-                   class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">同步间隔 (小时)</label>
-            <input :value="weflowSettings.weflow_sync_interval_hours" type="number" min="1" max="168" @change="saveWeFlowSetting('weflow_sync_interval_hours', $event.target.value)"
-                   class="w-28 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-        </div>
-      </div>
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden" v-if="false"></div>
 
-      <!-- v1.5.4: 提示词风格 -->
+      <!-- 提示词风格 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-          <div class="w-1 h-5 rounded-full bg-indigo-400"></div><Sparkles :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">提示词风格</span></div>
-        <div class="p-5 space-y-4">
-          <p class="text-xs text-slate-400">自定义 AI 的角色和语气，仅修改 system prompt（不影响 JSON 输出格式）</p>
-          <div class="flex items-center gap-2">
-            <select v-model="promptType" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"><option v-for="(label, key) in promptTypeLabel" :key="key" :value="key">{{ label }}</option></select>
-            <button @click="openPromptCreate" class="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"><Plus :size="14" />添加</button></div>
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-indigo-400"></div><Sparkles :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">提示词风格</span></div>
+        <div class="p-5 space-y-4"><p class="text-xs text-slate-400">自定义 AI 的角色和语气</p>
+          <div class="flex items-center gap-2"><select v-model="promptType" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none"><option v-for="(label, key) in promptTypeLabel" :key="key" :value="key">{{ label }}</option></select>
+            <button @click="openPromptCreate" class="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition"><Plus :size="14" />添加</button></div>
           <div v-if="promptsLoading" class="text-center py-4 text-sm text-slate-400"><Loader2 :size="16" class="animate-spin inline mr-1" />加载中</div>
-          <div v-else-if="!prompts.length" class="text-center py-4 text-sm text-slate-400">暂无自定义提示词，使用默认风格</div>
-          <div v-else class="space-y-2">
-            <div v-for="p in prompts" :key="p.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors">
-              <div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="text-sm font-medium text-slate-700">{{ p.name }}</span><span v-if="p.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">默认</span></div><div class="text-xs text-slate-400 truncate mt-0.5">{{ p.system_prompt?.slice(0, 80) }}{{ (p.system_prompt || '').length > 80 ? '...' : '' }}</div></div>
-              <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-                <button v-if="!p.is_default" @click="doSetDefaultPrompt(p.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="设为默认"><Star :size="14" /></button>
-                <button @click="openPromptEdit(p)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="编辑"><Pencil :size="14" /></button>
-                <button v-if="!p.is_default" @click="doDeletePrompt(p.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 :size="14" /></button></div></div></div></div></div>
+          <div v-else-if="!prompts.length" class="text-center py-4 text-sm text-slate-400">暂无自定义提示词</div>
+          <div v-else class="space-y-2"><div v-for="p in prompts" :key="p.id" class="flex items-center justify-between p-3 rounded-xl bg-slate-50/80"><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="text-sm font-medium text-slate-700">{{ p.name }}</span><span v-if="p.is_default" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">默认</span></div><div class="text-xs text-slate-400 truncate mt-0.5">{{ (p.system_prompt||'').slice(0,80) }}{{ (p.system_prompt||'').length>80?'...':'' }}</div></div>
+            <div class="flex items-center gap-1 flex-shrink-0 ml-2"><button v-if="!p.is_default" @click="doSetDefaultPrompt(p.id)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition" title="设为默认"><Star :size="14" /></button><button @click="openPromptEdit(p)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition" title="编辑"><Pencil :size="14" /></button><button v-if="!p.is_default" @click="doDeletePrompt(p.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="删除"><Trash2 :size="14" /></button></div></div></div></div></div>
 
-      <!-- v1.5.4: 轮询间隔 -->
+      <!-- 轮询间隔 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-slate-400"></div><Clock :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">轮询间隔</span></div>
         <div class="p-5 grid grid-cols-3 gap-4">
-          <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS = Math.max(5, Number($event.target.value)); savePollSetting('poll_interval_dashboard_ms', pollDashboardS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS = Math.max(5, Number($event.target.value)); savePollSetting('poll_interval_portraits_ms', pollPortraitsS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div>
-          <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS = Math.max(10, Number($event.target.value)); savePollSetting('poll_interval_stats_s', pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none mt-1" /></div></div></div>
+          <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS=Math.max(5,Number($event.target.value));savePollSetting('poll_interval_dashboard_ms',pollDashboardS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS=Math.max(5,Number($event.target.value));savePollSetting('poll_interval_portraits_ms',pollPortraitsS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS=Math.max(10,Number($event.target.value));savePollSetting('poll_interval_stats_s',pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div></div></div>
     </div>
 
 
@@ -959,10 +1043,11 @@ onMounted(async () => {
           <div><label class="block text-xs font-medium text-slate-600 mb-1">名称</label>
             <input v-model="form.name" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" placeholder="如：我的 Qwen 14B" /></div>
           <div><label class="block text-xs font-medium text-slate-600 mb-1">类型</label>
-            <div class="flex gap-2">
-              <button @click="form.model_type = 'local'; onTypeChange()" :class="['flex-1 py-2 text-sm rounded-lg border transition-colors', form.model_type === 'local' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50']"><Monitor :size="14" class="inline mr-1" />本地</button>
-              <button @click="form.model_type = 'online'; onTypeChange()" :class="['flex-1 py-2 text-sm rounded-lg border transition-colors', form.model_type === 'online' ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50']"><Globe :size="14" class="inline mr-1" />在线</button>
-            </div>
+            <span :class="['inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium',
+              form.model_type === 'local' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700']">
+              <template v-if="form.model_type === 'local'"><Monitor :size="14" />本地</template>
+              <template v-else><Globe :size="14" />在线</template>
+            </span>
           </div>
           <div><label class="block text-xs font-medium text-slate-600 mb-1">端点 URL</label>
             <input v-model="form.endpoint" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" :placeholder="form.model_type === 'local' ? 'http://localhost:11434' : 'https://api.openai.com/v1'" /></div>

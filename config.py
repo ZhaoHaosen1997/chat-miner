@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.16.6"
+    VERSION = "1.17.0"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -71,6 +71,17 @@ class Config:
 
     # ==================== 画像刷新阈值 ====================
     PORTRAIT_REFRESH_DAYS = 7
+
+    # ==================== 本地大模型全局开关（v1.17.0） ====================
+    LOCAL_LLM_ENABLED = False
+    LOCAL_LLM_HOST = "http://localhost:11434"
+    LOCAL_LLM_FALLBACK_MODEL = "qwen3.5:9b"
+
+    # ==================== 管道执行参数（v1.17.0） ====================
+    PIPELINE_MAX_RETRIES = 3
+    PIPELINE_STEP_TIMEOUT = 90
+    PIPELINE_CIRCUIT_BREAKER_THRESHOLD = 5
+    PIPELINE_CIRCUIT_BREAKER_COOLDOWN = 30
 
     # ==================== WeFlow 增量同步 ====================
     WEFLOW_ENABLED = False

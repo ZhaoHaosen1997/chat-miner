@@ -120,11 +120,11 @@ PORTRAIT_PROMPTS = {
 
 
 # ---- 管道执行 ----
-
-MAX_RETRIES = 3
-STEP_TIMEOUT = 90  # 单个子任务（含重试）总超时秒数
-CIRCUIT_BREAKER_THRESHOLD = 5  # 连续失败 N 次触发熔断
-CIRCUIT_BREAKER_COOLDOWN = 30  # 熔断冷却时间（秒）
+# v1.17.0: 以下常量已迁移到 config.py + DB app_settings，通过 config.XXX 读取
+# MAX_RETRIES       → config.PIPELINE_MAX_RETRIES (默认 3)
+# STEP_TIMEOUT      → config.PIPELINE_STEP_TIMEOUT (默认 90)
+# CIRCUIT_BREAKER_THRESHOLD → config.PIPELINE_CIRCUIT_BREAKER_THRESHOLD (默认 5)
+# CIRCUIT_BREAKER_COOLDOWN   → config.PIPELINE_CIRCUIT_BREAKER_COOLDOWN (默认 30)
 
 # 全局熔断器状态
 _circuit_state = {
@@ -143,7 +143,7 @@ async def _check_circuit() -> bool:
         if not _circuit_state["tripped"]:
             return True
         # 检查冷却时间是否到了
-        if time.time() - _circuit_state["last_failure_time"] > CIRCUIT_BREAKER_COOLDOWN:
+        if time.time() - _circuit_state["last_failure_time"] > config.PIPELINE_CIRCUIT_BREAKER_COOLDOWN:
             logger.info("熔断器冷却完毕，恢复调用")
             _circuit_state["tripped"] = False
             _circuit_state["consecutive_failures"] = 0
@@ -156,11 +156,11 @@ async def _report_failure():
     async with _circuit_lock:
         _circuit_state["consecutive_failures"] += 1
         _circuit_state["last_failure_time"] = time.time()
-        if _circuit_state["consecutive_failures"] >= CIRCUIT_BREAKER_THRESHOLD:
+        if _circuit_state["consecutive_failures"] >= config.PIPELINE_CIRCUIT_BREAKER_THRESHOLD:
             _circuit_state["tripped"] = True
             logger.warning(
                 f"熔断器触发！连续 {_circuit_state['consecutive_failures']} 次失败，"
-                f"冷却 {CIRCUIT_BREAKER_COOLDOWN}s"
+                f"冷却 {config.PIPELINE_CIRCUIT_BREAKER_COOLDOWN}s"
             )
 
 
@@ -400,7 +400,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
     total_start = time.time()
     circuit_waits = 0  # v1.2.11: 熔断器等待计数，防止无限循环
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt in range(1, config.PIPELINE_MAX_RETRIES + 1):
         result2 = None  # 每轮重置，避免跨迭代污染
 
         # 取消检查
@@ -415,18 +415,18 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
                 last_error = f"熔断器等待超时（{circuit_waits * 5}s），放弃重试"
                 logger.error(f"{step_name}: {last_error}")
                 break
-            last_error = f"熔断器触发，冷却中（还需 {CIRCUIT_BREAKER_COOLDOWN - int(time.time() - _circuit_state['last_failure_time'])}s）"
+            last_error = f"熔断器触发，冷却中（还需 {config.PIPELINE_CIRCUIT_BREAKER_COOLDOWN - int(time.time() - _circuit_state['last_failure_time'])}s）"
             logger.warning(f"{step_name}: {last_error}")
             await asyncio.sleep(5)
             continue
         circuit_waits = 0  # 熔断器恢复，重置计数
         # 总超时检查
-        if time.time() - total_start > STEP_TIMEOUT:
-            last_error = f"子任务总超时 ({STEP_TIMEOUT}s)"
+        if time.time() - total_start > config.PIPELINE_STEP_TIMEOUT:
+            last_error = f"子任务总超时 ({config.PIPELINE_STEP_TIMEOUT}s)"
             logger.warning(f"{step_name}: {last_error}")
             break
 
-        label = f"({step_idx}/{total}) {step_name}" if attempt == 1 else f"({step_idx}/{total}) {step_name} 重试{attempt}/{MAX_RETRIES}"
+        label = f"({step_idx}/{total}) {step_name}" if attempt == 1 else f"({step_idx}/{total}) {step_name} 重试{attempt}/{config.PIPELINE_MAX_RETRIES}"
         if task:
             task.update("inference", f"{label}...")
         logger.debug(f"{step_name} 第{attempt}次尝试, 模型={model or config.OLLAMA_MODEL}")
@@ -472,7 +472,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
         # 3. 都失败了
         last_error = result.get("error", "") or (result2.get("error", "") if result2 else "")
-        if attempt < MAX_RETRIES:
+        if attempt < config.PIPELINE_MAX_RETRIES:
             logger.warning(f"{step_name}: 第{attempt}次失败，2s后重试")
             if task:
                 task.update("inference", f"({step_idx}/{total}) {step_name} 失败，2s后重试...")
@@ -480,7 +480,7 @@ async def _run_sub(task, step_name: str, step_idx: int, total: int,
 
     # 所有重试都失败
     await _report_failure()
-    logger.error(f"{step_name}: 全部{MAX_RETRIES}次重试失败: {last_error}")
+    logger.error(f"{step_name}: 全部{config.PIPELINE_MAX_RETRIES}次重试失败: {last_error}")
     if task:
         task.add_step(name=step_name, status="failed",
                      duration_ms=int((time.time() - total_start) * 1000),
@@ -729,6 +729,12 @@ async def run_daily_pipeline_online(
         logger.error(f"在线模型日报异常: {e}，降级到本地管线")
 
     # 降级：使用本地 8 子任务管线
+    if not config.LOCAL_LLM_ENABLED:
+        logger.warning(f"在线模型日报失败但本地模型已禁用，跳过降级: {group_name} {date}")
+        if task:
+            task.finish(success=False, error={"type": "no_fallback",
+                "detail": "在线模型不可用且本地模型已禁用，请在高级设置中开启本地大模型"})
+        return {"error": "在线模型不可用且本地模型已禁用"}
     logger.warning(f"降级到本地管线为 {group_name} {date} 生成日报")
     if task:
         task.update("inference", "⚠️ 在线模型未能响应，切换本地模型接力...", fallback=True)
@@ -1108,6 +1114,12 @@ async def run_portrait_pipeline_online(
         logger.error(f"在线模型画像异常: {e}，降级到本地管线")
 
     # 降级：使用本地 4 步子任务管线
+    if not config.LOCAL_LLM_ENABLED:
+        logger.warning(f"在线模型画像失败但本地模型已禁用，跳过降级: {sender_name}")
+        if task:
+            task.finish(success=False, error={"type": "no_fallback",
+                "detail": "在线模型不可用且本地模型已禁用，请在高级设置中开启本地大模型"})
+        return {"error": "在线模型不可用且本地模型已禁用"}
     logger.warning(f"降级到本地管线为 {sender_name} 生成画像")
     if task:
         task.update("inference", f"⚠️ 在线模型未能响应，切换本地模型继续描绘 {sender_name}...", fallback=True)

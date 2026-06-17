@@ -979,6 +979,10 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
 
         # 全部重试失败 → 降级到本地
         last_error = last_result.get("error", "未知错误") if last_result else "未知错误"
+        if not config.LOCAL_LLM_ENABLED:
+            logger.warning(f"在线模型 {max_attempts} 次尝试均失败且本地模型已禁用: {last_error}")
+            task.update("inference", "在线模型失败且本地模型已禁用")
+            return {"success": False, "data": None, "error": "在线模型不可用且本地模型已禁用"}
         logger.warning(f"在线模型 {max_attempts} 次尝试均失败，降级到本地: {last_error}")
         from services.model_config import get_effective_model
         try:
@@ -1062,6 +1066,9 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
         return result
 
     # 降级：本地 Ollama
+    if not config.LOCAL_LLM_ENABLED:
+        logger.warning(f"DeepSeek 不可用且本地模型已禁用: {result.get('error')}")
+        return {"success": False, "data": None, "error": "DeepSeek 不可用且本地模型已禁用"}
     logger.warning(f"DeepSeek 不可用，降级到本地模型: {result.get('error')}")
     from services.analyzer import call_ollama_chat
     # v1.0.6: 与新版路径一致的截断和超时保护
