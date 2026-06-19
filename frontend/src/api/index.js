@@ -433,8 +433,9 @@ export const setDefaultPrompt = (id) =>
 export const getDefaultPrompt = (analysisType) =>
   request(`/settings/prompts/default?analysis_type=${encodeURIComponent(analysisType)}`)
 
-// ==================== 事件探测 v1.18.0 ====================
+// ==================== 事件探测 v1.18.1 ====================
 
+// Phase 1: Python 检测（返回窗口列表，不再返回 task_id）
 export async function detectEvents(gid, dateStart, dateEnd) {
   const res = await fetch(`${BASE}/groups/${gid}/events/detect`, {
     method: 'POST',
@@ -443,7 +444,37 @@ export async function detectEvents(gid, dateStart, dateEnd) {
   })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
-  return data.data  // { task_id, status, date_start, date_end }
+  return data.data  // { windows: [...], count: N }
+}
+
+// Phase 2: 事件窗口 API
+export function getEventWindows(gid, status = '') {
+  const qs = status ? `?status=${status}` : ''
+  return request(`/groups/${gid}/events/windows${qs}`)
+}
+
+export function getEventWindow(gid, windowId) {
+  return request(`/groups/${gid}/events/windows/${windowId}`)
+}
+
+export async function analyzeWindow(gid, windowId) {
+  const res = await fetch(`${BASE}/groups/${gid}/events/windows/${windowId}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data  // { window_id, status, event_id, event }
+}
+
+export async function analyzeAllWindows(gid) {
+  const res = await fetch(`${BASE}/groups/${gid}/events/windows/analyze-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data  // { task_id, total }
 }
 
 export function getEvents(gid, params = {}) {

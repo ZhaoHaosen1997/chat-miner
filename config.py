@@ -70,12 +70,17 @@ class Config:
     ANNUAL_MIN_MSGS = 300
 
     # ==================== 事件探测 (v1.18.0) ====================
-    EVENT_WINDOW_SIZE = 200
-    EVENT_WINDOW_OVERLAP = 20
+    # v1.18.1: EVENT_WINDOW_SIZE/OVERLAP 已废弃，替换为自适应切分配置
+    EVENT_WINDOW_SIZE = 200          # deprecated — 不再使用
+    EVENT_WINDOW_OVERLAP = 20        # deprecated — 不再使用
     EVENT_AI_CONCURRENCY = 3
     EVENT_ACTIVE_GROUP_THRESHOLD = 30
     EVENT_ACTIVE_PEAK_ABSOLUTE = 80
     EVENT_QUIET_PEAK_MULTIPLIER = 3
+    # v1.18.1 自适应切分
+    EVENT_MIN_GAP_MINUTES = 15       # 事件组最小时间间隙(分钟)
+    EVENT_MIN_GROUP_SIZE = 10        # 事件组最小消息数
+    EVENT_MAX_GROUP_SIZE = 500       # 事件组最大消息数
 
     # ==================== 画像刷新阈值 ====================
     PORTRAIT_REFRESH_DAYS = 7

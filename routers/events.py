@@ -1,14 +1,18 @@
 """
-事件探测 API 路由 v1.18.0
+事件探测 API 路由 v1.18.1
+Phase 1: Python 检测（尖峰 + 自适应切分）— 纯 Python，不调 AI，不删数据
+Phase 2: AI 分析 — 已移至 event_windows.py
 """
 import json
 import logging
 
 from fastapi import APIRouter, HTTPException
 
-from models.database import get_group, get_events, get_event, delete_events_in_range, get_events_by_member
+from models.database import (
+    get_group, get_events, get_event, get_events_by_member,
+    insert_windows, delete_windows_by_group,
+)
 from routers.groups import get_chat_cache
-from services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +21,11 @@ router = APIRouter(prefix="/api/groups/{group_id}/events", tags=["事件探测"]
 
 @router.post("/detect")
 async def api_detect_events(group_id: int, body: dict):
-    """触发事件探测（异步任务）。
+    """Phase 1: Python 事件检测（纯 Python，不调 AI，不删旧数据）。
 
     Body: {"date_start": "2025-03-01", "date_end": "2025-06-19"}
+
+    Returns: {"windows": [...], "count": N}
     """
     group = get_group(group_id)
     if not group:
@@ -41,95 +47,53 @@ async def api_detect_events(group_id: int, body: dict):
         else:
             raise HTTPException(400, detail="群内无聊天数据")
 
-    if task_manager.has_active("event_detection", group_id):
-        raise HTTPException(409, detail="该群已有正在执行的事件分析任务")
+    # Phase 1: Python 尖峰检测 + 自适应切分 + 摘要提取
+    from services.event_detector import find_candidate_windows
 
-    task = task_manager.create("event_detection", group_id,
-                                {"date_start": date_start, "date_end": date_end})
-    task.update("inference", f"Phase 1/2: 正在扫描消息量尖峰...")
+    windows = find_candidate_windows(chat, date_start, date_end)
+    if not windows:
+        return {
+            "code": 200,
+            "message": "未发现候选事件时段",
+            "data": {"windows": [], "count": 0},
+        }
 
-    async def _run():
-        from services.event_detector import (
-            find_candidate_windows, is_window_analyzed,
-            analyze_single_window, insert_events_incremental,
-        )
-        total_events = 0
-        try:
-            # Phase 1: 找候选窗口
-            windows = find_candidate_windows(chat, date_start, date_end)
-            if not windows:
-                task.update("done", "未发现候选事件窗口")
-                task.finish(success=True)
-                return
+    # 清理旧的未分析窗口（重新检测时替换）
+    delete_windows_by_group(group_id)
 
-            # 清除旧事件（重新分析时替换而非跳过）
-            from models.database import delete_events_in_range
-            deleted = delete_events_in_range(group_id, date_start, date_end)
-            if deleted:
-                logger.info("事件探测: 清除旧事件 %d 条", deleted)
+    # 持久化窗口
+    window_records = []
+    for w in windows:
+        window_records.append({
+            "start_time": w["start_time"],
+            "end_time": w["end_time"],
+            "message_count": w["message_count"],
+            "summary_json": json.dumps(w.get("summary", {}), ensure_ascii=False),
+        })
 
-            total = len(windows)
-            task.update("inference", f"发现 {total} 个候选窗口，开始逐个分析...")
-            logger.info("事件探测: Phase 1 完成，%d 个候选窗口", total)
+    ids = insert_windows(window_records, group_id)
 
-            # Phase 2: 逐个窗口分析
-            for i, window in enumerate(windows):
-                # 支持取消
-                if task_manager.is_cancelled(task.task_id):
-                    task.update("cancelled",
-                                f"已取消（完成 {i}/{total}，发现 {total_events} 个事件）")
-                    task.finish(success=False,
-                                error={"type": "cancelled", "detail": "用户取消"})
-                    return
+    # 构建响应 — 含 window id 和 summary
+    result_windows = []
+    for i, w in enumerate(windows):
+        result_windows.append({
+            "id": ids[i],
+            "start_time": w["start_time"],
+            "end_time": w["end_time"],
+            "message_count": w["message_count"],
+            "status": "pending",
+            "summary": w.get("summary", {}),
+        })
 
-                # 跳过已有事件的窗口
-                if is_window_analyzed(group_id, window):
-                    task.update("inference",
-                                f"窗口 {i+1}/{total}: 跳过（已分析），"
-                                f"已发现 {total_events} 个事件")
-                    continue
-
-                # 分析单个窗口
-                events = await analyze_single_window(chat, group_id, window)
-                if events:
-                    # AI 返回的 time_span 只有 HH:MM，从窗口消息中匹配日期
-                    for e in events:
-                        ts = e.get("time_span_start", "")
-                        te = e.get("time_span_end", "")
-                        date_for_ts = _find_date_for_time(window, ts) if len(ts) == 5 else ""
-                        date_for_te = _find_date_for_time(window, te) if len(te) == 5 else ""
-                        if date_for_ts:
-                            e["time_span_start"] = f"{date_for_ts} {ts}:00"
-                        if date_for_te:
-                            e["time_span_end"] = f"{date_for_te} {ts if not date_for_te else te}:00"
-                        # 计算事件的消息数
-                        e["message_count"] = _count_msgs_in_span(
-                            window, e.get("time_span_start", ""), e.get("time_span_end", "")
-                        )
-                    inserted = insert_events_incremental(events, group_id)
-                    total_events += inserted
-
-                task.update("inference",
-                            f"窗口 {i+1}/{total}: {'发现' if events else '未发现'}事件，"
-                            f"已累计 {total_events} 个事件")
-
-            task.update("done", f"事件探测完成: 发现 {total_events} 个事件 ({total} 个窗口)")
-            task.finish(success=True)
-            logger.info("事件探测完成: %d 个窗口 → %d 个事件", total, total_events)
-
-        except Exception as e:
-            logger.error("事件探测失败: %s", e, exc_info=True)
-            task.finish(success=False,
-                        error={"type": "event_detection_error", "detail": str(e)})
-
-    import asyncio
-    asyncio.create_task(_run())
+    logger.info("事件检测完成: group=%d, %d 个事件组", group_id, len(ids))
 
     return {
         "code": 200,
-        "message": "任务已创建",
-        "data": {"task_id": task.task_id, "status": "pending",
-                 "date_start": date_start, "date_end": date_end},
+        "message": f"检测完成，发现 {len(ids)} 个候选事件组",
+        "data": {
+            "windows": result_windows,
+            "count": len(ids),
+        },
     }
 
 

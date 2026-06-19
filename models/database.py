@@ -424,6 +424,26 @@ def init_db():
                 ON events(group_id, start_time);
             CREATE INDEX IF NOT EXISTS idx_events_type
                 ON events(group_id, event_type);
+
+            CREATE TABLE IF NOT EXISTS event_windows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                message_count INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','analyzing','analyzed','empty')),
+                event_count INTEGER DEFAULT 0,
+                summary_json TEXT DEFAULT '{}',
+                event_id INTEGER,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                analyzed_at TEXT,
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_event_windows_group_time
+                ON event_windows(group_id, start_time);
+            CREATE INDEX IF NOT EXISTS idx_event_windows_group_status
+                ON event_windows(group_id, status);
         """)
         # 向后兼容：为已有数据库添加新列
         _migrate_db(conn)
@@ -479,6 +499,8 @@ def init_db():
         _migrate_v1_17_0(conn)
         # v1.18.0: 事件探测
         _migrate_v1_18_0(conn)
+        # v1.18.1: 事件两步拆分 — event_windows 表 + events.window_id
+        _migrate_v1_18_1(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -831,6 +853,35 @@ def _migrate_v1_18_0(conn):
         logger.info("DB migrate v1.18.0: event_detection prompt profile already exists")
 
 
+def _migrate_v1_18_1(conn):
+    """v1.18.1: 事件两步拆分 — events.window_id + event_windows 配置迁移
+
+    1. event_windows 表由 init_db 的 CREATE TABLE IF NOT EXISTS 自动创建
+    2. 仅处理增量：ALTER TABLE events ADD COLUMN window_id
+    3. 替换旧 event_* 配置为新的自适应切分配置
+    """
+    # 1. events.window_id 列
+    cur = conn.execute("PRAGMA table_info(events)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "window_id" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN window_id INTEGER")
+        logger.info("DB migrate v1.18.1: added events.window_id")
+
+    # 2. 替换旧配置：EVENT_WINDOW_SIZE/OVERLAP → 新自适应切分配置
+    new_settings = [
+        ("event_min_gap_minutes", "15", "int", "事件组最小时间间隙(分钟)"),
+        ("event_min_group_size", "10", "int", "事件组最小消息数"),
+        ("event_max_group_size", "500", "int", "事件组最大消息数"),
+    ]
+    for key, value, value_type, description in new_settings:
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value, value_type, description) "
+            "VALUES (?, ?, ?, ?)",
+            (key, value, value_type, description)
+        )
+    logger.info("DB migrate v1.18.1: added adaptive segmentation settings")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -1017,6 +1068,13 @@ _SETTINGS_DEFS = [
          "活跃群尖峰绝对阈值(条/30分钟)"),
         ("event_quiet_peak_multiplier", str(config.EVENT_QUIET_PEAK_MULTIPLIER), "int",
          "安静群尖峰相对倍数"),
+        # v1.18.1: 自适应事件组切分
+        ("event_min_gap_minutes", str(config.EVENT_MIN_GAP_MINUTES), "int",
+         "事件组最小时间间隙(分钟)"),
+        ("event_min_group_size", str(config.EVENT_MIN_GROUP_SIZE), "int",
+         "事件组最小消息数"),
+        ("event_max_group_size", str(config.EVENT_MAX_GROUP_SIZE), "int",
+         "事件组最大消息数"),
     ]
     # _seed_app_settings 使用 _SETTINGS_DEFS + _get_settings_registry() 统一处理
 
@@ -2458,6 +2516,10 @@ def load_app_settings_to_config():
         "event_active_group_threshold": "EVENT_ACTIVE_GROUP_THRESHOLD",
         "event_active_peak_absolute": "EVENT_ACTIVE_PEAK_ABSOLUTE",
         "event_quiet_peak_multiplier": "EVENT_QUIET_PEAK_MULTIPLIER",
+        # v1.18.1: 自适应事件组切分
+        "event_min_gap_minutes": "EVENT_MIN_GAP_MINUTES",
+        "event_min_group_size": "EVENT_MIN_GROUP_SIZE",
+        "event_max_group_size": "EVENT_MAX_GROUP_SIZE",
     }
 
     for row in rows:
@@ -2904,4 +2966,83 @@ def get_events_by_member(group_id: int, member_id: int) -> list[dict]:
         except (json.JSONDecodeError, KeyError):
             continue
     return result
+
+
+# ==================== Event Windows v1.18.1 ====================
+
+def insert_windows(windows: list[dict], group_id: int) -> list[int]:
+    """批量插入事件窗口，返回新插入的窗口 ID 列表"""
+    ids = []
+    with db() as conn:
+        for w in windows:
+            cur = conn.execute("""
+                INSERT INTO event_windows (group_id, start_time, end_time,
+                    message_count, status, summary_json)
+                VALUES (?, ?, ?, ?, 'pending', ?)
+            """, (
+                group_id,
+                w["start_time"],
+                w["end_time"],
+                w.get("message_count", 0),
+                w.get("summary_json", "{}"),
+            ))
+            ids.append(cur.lastrowid)
+    return ids
+
+
+def get_windows(group_id: int, status: str = "") -> list[dict]:
+    """获取事件窗口列表，支持按状态筛选，按 start_time 倒序"""
+    with db() as conn:
+        sql = "SELECT * FROM event_windows WHERE group_id=?"
+        params = [group_id]
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        sql += " ORDER BY start_time DESC"
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_window(window_id: int) -> dict | None:
+    """获取单个事件窗口"""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM event_windows WHERE id=?", (window_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_window_status(window_id: int, status: str,
+                         event_count: int = 0, event_id: int = None):
+    """更新事件窗口状态。analyzed 时自动设置 analyzed_at 时间戳。"""
+    with db() as conn:
+        if status in ("analyzed", "empty"):
+            conn.execute("""
+                UPDATE event_windows SET status=?, event_count=?,
+                    event_id=?, analyzed_at=datetime('now','localtime')
+                WHERE id=?
+            """, (status, event_count, event_id, window_id))
+        else:
+            conn.execute("""
+                UPDATE event_windows SET status=?, event_count=?, event_id=?
+                WHERE id=?
+            """, (status, event_count, event_id, window_id))
+    return True
+
+
+def get_pending_windows_count(group_id: int) -> int:
+    """获取待处理窗口数量"""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM event_windows "
+            "WHERE group_id=? AND status='pending'",
+            (group_id,)
+        ).fetchone()
+    return row["cnt"] if row else 0
+
+
+def delete_windows_by_group(group_id: int):
+    """删除群的所有事件窗口"""
+    with db() as conn:
+        conn.execute("DELETE FROM event_windows WHERE group_id=?", (group_id,))
 

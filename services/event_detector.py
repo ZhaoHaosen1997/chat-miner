@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import statistics
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -19,19 +20,6 @@ from models.database import (
 )
 
 logger = logging.getLogger(__name__)
-
-# ── AI 调用信号量（懒初始化） ───────────────────────────────────────────
-_ai_semaphore: asyncio.Semaphore | None = None
-
-
-def _get_semaphore() -> asyncio.Semaphore:
-    global _ai_semaphore
-    if _ai_semaphore is None:
-        concurrency = getattr(config, "EVENT_AI_CONCURRENCY", 3)
-        _ai_semaphore = asyncio.Semaphore(concurrency)
-    return _ai_semaphore
-
-
 
 # ── 硬编码默认 System Prompt（无 DB 配置时 fallback） ────────────────
 _EVENT_DEFAULT_SYSTEM_PROMPT = """你是一个群聊历史学家+八卦记者+脱口秀段子手的混合体。
@@ -54,132 +42,22 @@ _EVENT_DEFAULT_SYSTEM_PROMPT = """你是一个群聊历史学家+八卦记者+�
 # ── 入口函数 ──────────────────────────────────────────────────────────
 
 
-def find_candidate_windows(chat, date_start: str, date_end: str) -> list[list[dict]]:
-    """Phase 1: 扫描消息量尖峰，返回候选消息窗口列表。纯 Python，不调 AI。
+def find_candidate_windows(chat, date_start: str, date_end: str) -> list[dict]:
+    """Phase 1: 扫描消息量尖峰 → 自适应切分为事件组 → 提取摘要。纯 Python，不调 AI。
 
     Returns:
-        list of windows, each window is a list of message dicts (max ~200 msgs each)
+        list of dicts, each with keys:
+        - messages: list of message dicts (the event group)
+        - start_time: str, window start time
+        - end_time: str, window end time
+        - message_count: int
+        - summary: dict (time_start, time_end, duration_minutes, message_count,
+                         top_speakers, preview, hourly_distribution)
     """
     return _detect_peaks_and_split(chat, date_start, date_end)
 
 
-def is_window_analyzed(group_id: int, window: list[dict]) -> bool:
-    """检查窗口时间范围是否已有事件（用于重新分析时跳过）。"""
-    if not window:
-        return False
-    from models.database import get_events
-    start = window[0].get("formattedTime", "")
-    end = window[-1].get("formattedTime", "")
-    if not start or not end:
-        return False
-    existing = get_events(group_id, date_from=start[:10], date_to=end[:10])
-    if not existing:
-        return False
-    # 检查是否有事件与窗口时间重叠
-    for e in existing:
-        e_start = e.get("start_time", "")
-        e_end = e.get("end_time", "")
-        if e_start <= end and e_end >= start:
-            return True
-    return False
-
-
-async def analyze_single_window(chat, group_id: int, window: list[dict]) -> list[dict]:
-    """分析单个消息窗口，返回事件列表（0-N 个）。"""
-    sem = _get_semaphore()
-    group_name = ""
-    try:
-        g = get_group(group_id)
-        if g:
-            group_name = g.get("display_name") or g.get("name", "")
-    except Exception:
-        pass
-
-    async with sem:
-        try:
-            system_prompt, user_prompt = _build_event_prompt(chat, window, group_name)
-            result = await _call_ai_for_events(system_prompt, user_prompt)
-            return result
-        except Exception as e:
-            logger.warning("窗口分析失败: %s", e)
-            return []
-
-
-def insert_events_incremental(events: list[dict], group_id: int) -> int:
-    """增量插入事件，逐条检查与已有事件的重复。
-
-    事件 dict 字段（来自 _parse_ai_response）：
-    - title, description, event_type, participants, key_quotes
-    - time_span_start, time_span_end (HH:MM 格式)
-
-    Returns:
-        实际插入的事件数
-    """
-    if not events:
-        return 0
-
-    from models.database import get_events, insert_events as db_insert
-
-    # 批量获取相关日期范围内已有事件（避免 N+1）
-    all_dates = set()
-    for e in events:
-        ts = e.get("time_span_start", "")
-        if len(ts) >= 10:
-            all_dates.add(ts[:10])
-    existing_map = {}
-    if all_dates:
-        for d in all_dates:
-            existing_map[d] = get_events(group_id, date_from=d, date_to=d)
-
-    # 批量获取成员列表（一次 DB 调用）
-    member_name_cache = _build_member_name_cache(group_id)
-
-    to_insert = []
-    for e in events:
-        ts_start = e.get("time_span_start", "")
-        ts_end = e.get("time_span_end", "")
-        participant_names = e.get("participants", [])
-
-        # 检查重复
-        date_key = ts_start[:10] if len(ts_start) >= 10 else ""
-        existing = existing_map.get(date_key, [])
-
-        is_dup = False
-        for ex in existing:
-            if _title_similarity(e.get("title", ""), ex.get("title", "")) >= 0.6:
-                is_dup = True
-                break
-        if is_dup:
-            continue
-
-        db_event = {
-            "group_id": group_id,
-            "title": e.get("title", ""),
-            "description": e.get("description", ""),
-            "event_type": e.get("event_type", "discussion"),
-            "participant_ids": json.dumps(
-                _resolve_participant_ids_cached(participant_names, member_name_cache),
-                ensure_ascii=False,
-            ),
-            "key_quotes": json.dumps(
-                (e.get("key_quotes") or [])[:3],
-                ensure_ascii=False,
-            ),
-            "start_time": ts_start,
-            "end_time": ts_end,
-            "message_count": e.get("message_count", 0),
-        }
-        to_insert.append(db_event)
-
-    if to_insert:
-        db_insert(to_insert)
-        logger.info("增量插入 %d 个事件（%d 个去重跳过）",
-                    len(to_insert), len(events) - len(to_insert))
-
-    return len(to_insert)
-
-
-# ── Phase 1: 尖峰检测 + 窗口切分 ───────────────────────────────────────
+# ── Phase 1: 尖峰检测 + 自适应切分 (v1.18.1) ──────────────────────────
 
 
 def _classify_group_activity(chat) -> str:
@@ -205,21 +83,17 @@ def _classify_group_activity(chat) -> str:
     return "active" if avg_hourly >= threshold else "quiet"
 
 
-def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[list[dict]]:
-    """Phase 1: 检测消息量尖峰 → 切分为固定大小窗口。
+def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[dict]:
+    """Phase 1: 检测消息量尖峰 → 自适应切分为事件组 → 提取摘要。
 
     Returns:
-        list of windows, each window is a list of message dicts
+        list of dicts, each with: messages, start_time, end_time,
+        message_count, summary
     """
     activity = _classify_group_activity(chat)
-    message_map = _build_message_map(chat)
-
-    # 按小时统计消息量
     hourly = _count_hourly_messages(chat, date_start, date_end)
 
     # 检测尖峰
-    window_size = getattr(config, "EVENT_WINDOW_SIZE", 200)
-    window_overlap = getattr(config, "EVENT_WINDOW_OVERLAP", 20)
     active_threshold = getattr(config, "EVENT_ACTIVE_PEAK_ABSOLUTE", 80)
     quiet_multiplier = getattr(config, "EVENT_QUIET_PEAK_MULTIPLIER", 3)
 
@@ -232,9 +106,36 @@ def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[list[d
     if not segments:
         return []
 
-    # 切分为固定大小窗口
-    windows = _split_into_windows(segments, chat, window_size, window_overlap)
-    return windows
+    # v1.18.1: 自适应切分替换固定窗口
+    result = []
+    for seg in segments:
+        # 获取时段内所有消息
+        msgs = [m for m in chat.messages
+                if seg["start_time"] <= m.get("formattedTime", "") <= seg["end_time"]]
+        if not msgs:
+            continue
+
+        # 自适应切分
+        groups = _segment_by_time_gaps(msgs)
+        groups = _post_process_groups(groups)
+
+        min_size = getattr(config, "EVENT_MIN_GROUP_SIZE", 10)
+        for g in groups:
+            if not g or len(g) < min_size:
+                continue
+            start_t = g[0].get("formattedTime", "")
+            end_t = g[-1].get("formattedTime", "")
+            summary = _extract_group_summary(g)
+            result.append({
+                "messages": g,
+                "start_time": start_t,
+                "end_time": end_t,
+                "message_count": len(g),
+                "summary": summary,
+            })
+
+    logger.info("自适应切分完成: %d 个时段 → %d 个事件组", len(segments), len(result))
+    return result
 
 
 def _build_message_map(chat) -> dict:
@@ -324,11 +225,11 @@ def _merge_adjacent_peaks(peaks: list[str], chat) -> list[dict]:
 
     segments.append({"start_hour": current_start, "end_hour": current_end})
 
-    # 添加 context padding（前后各 1 小时）
+    # 添加 context padding（前 30min / 后 1h，提供上下文但不过度拉入边缘噪声）
     padded = []
     for seg in segments:
-        start_dt = _parse_hour_key(seg["start_hour"]) - timedelta(hours=1)
-        end_dt = _parse_hour_key(seg["end_hour"]) + timedelta(hours=2)
+        start_dt = _parse_hour_key(seg["start_hour"]) - timedelta(minutes=30)
+        end_dt = _parse_hour_key(seg["end_hour"]) + timedelta(hours=1)
         padded.append({
             "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
             "end_time": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -342,44 +243,267 @@ def _parse_hour_key(key: str) -> datetime:
     return datetime.strptime(key, "%Y-%m-%d %H")
 
 
-def _split_into_windows(segments: list[dict], chat,
-                        max_size: int, overlap: int) -> list[list[dict]]:
-    """将候选时段切分为固定大小的消息窗口。
+# ── v1.18.1 自适应事件组切分 ────────────────────────────────────────
 
-    每个窗口最多 max_size 条消息，相邻窗口重叠 overlap 条。
+def _parse_msg_time(msg: dict) -> datetime | None:
+    """解析消息的 formattedTime 为 datetime"""
+    ft = msg.get("formattedTime", "")
+    if len(ft) >= 16:
+        try:
+            return datetime.strptime(ft[:16], "%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
+    return None
+
+
+def _segment_by_time_gaps(msgs: list[dict]) -> list[list[dict]]:
+    """基于时间间隙自适应切分消息流。
+
+    算法：
+    1. 计算相邻消息的时间间隙（分钟）
+    2. 动态阈值 = max(15min, min(P75 × 1.5, 60min))
+    3. 在 gap ≥ threshold 处切分
     """
-    windows = []
-    step = max_size - overlap
-    if step <= 0:
-        step = max_size  # safeguard
+    if len(msgs) <= 1:
+        return [msgs] if msgs else []
 
-    for seg in segments:
-        # 获取时段内所有消息
-        msgs = [m for m in chat.messages
-                if seg["start_time"] <= m.get("formattedTime", "") <= seg["end_time"]]
-        if not msgs:
+    min_gap = getattr(config, "EVENT_MIN_GAP_MINUTES", 15)
+
+    # 计算间隙
+    gaps = []
+    for i in range(1, len(msgs)):
+        t1 = _parse_msg_time(msgs[i - 1])
+        t2 = _parse_msg_time(msgs[i])
+        if t1 and t2:
+            gap = (t2 - t1).total_seconds() / 60.0
+            gaps.append(max(gap, 0))
+        else:
+            gaps.append(0)
+
+    if not gaps:
+        return [msgs]
+
+    # 动态阈值
+    try:
+        p75 = statistics.quantiles(gaps, n=4)[2]  # 75th percentile
+        threshold = max(min_gap, min(p75 * 1.5, 60))
+    except (statistics.StatisticsError, IndexError):
+        threshold = min_gap
+
+    logger.debug("自适应切分: %d 条消息, threshold=%.1fmin, gaps range=[%.1f, %.1f]",
+                 len(msgs), threshold, min(gaps), max(gaps))
+
+    # 切分
+    groups = []
+    current = [msgs[0]]
+    for i in range(1, len(msgs)):
+        if gaps[i - 1] >= threshold:
+            if current:
+                groups.append(current)
+            current = [msgs[i]]
+        else:
+            current.append(msgs[i])
+    if current:
+        groups.append(current)
+
+    return groups
+
+
+def _post_process_groups(groups: list[list[dict]]) -> list[list[dict]]:
+    """后处理事件组：迭代合并过小组、切分过大组、丢弃孤立微小段。
+
+    算法：反复扫描直到没有微小段可合并，然后切分过大组。
+    """
+    min_size = getattr(config, "EVENT_MIN_GROUP_SIZE", 10)
+    max_size = getattr(config, "EVENT_MAX_GROUP_SIZE", 500)
+
+    if not groups:
+        return []
+
+    # ── 迭代合并微小段 ──
+    # 每轮扫描：左→右合并（小→大邻居），右→左合并（小→前邻居）
+    # 重复直到稳定
+    merged = [list(g) for g in groups]  # 浅拷贝，避免修改原数据
+    changed = True
+    max_iterations = 10  # 安全上限
+
+    while changed and max_iterations > 0:
+        changed = False
+        max_iterations -= 1
+
+        # Scan 1: 左→右，合并到下一个（更近的邻居）
+        i = 0
+        while i < len(merged):
+            if len(merged[i]) < min_size:
+                if i + 1 < len(merged):
+                    # 合并到右边
+                    merged[i + 1] = merged[i] + merged[i + 1]
+                    merged.pop(i)
+                    changed = True
+                    continue  # 不递增 i，新 merged[i] 需要重新检查
+            i += 1
+
+        # Scan 2: 右→左，合并到前一个
+        i = len(merged) - 1
+        while i >= 1:
+            if len(merged[i]) < min_size:
+                merged[i - 1].extend(merged[i])
+                merged.pop(i)
+                changed = True
+            i -= 1
+
+        # Scan 3: 如果只剩 1 个且太小 → 丢弃
+        if len(merged) == 1 and len(merged[0]) < min_size:
+            logger.debug("丢弃孤立微小段 (%d 条消息)", len(merged[0]))
+            return []
+
+    # ── 最终检查：丢弃残留的孤立微小段 ──
+    merged = [g for g in merged if len(g) >= min_size]
+    if not merged:
+        return []
+
+    # ── 切分过大组 ──
+    result = []
+    for g in merged:
+        if len(g) > max_size:
+            sub_groups = _split_oversized_group(g, max_size)
+            result.extend(sub_groups)
+        else:
+            result.append(g)
+
+    return result
+
+
+def _split_oversized_group(msgs: list[dict], max_size: int) -> list[list[dict]]:
+    """在超大组内部找次优间隙切分，确保每段至少 50 条"""
+    min_segment = 50
+    if len(msgs) <= max_size:
+        return [msgs]
+
+    # 计算内部间隙
+    gaps = []
+    for i in range(1, len(msgs)):
+        t1 = _parse_msg_time(msgs[i - 1])
+        t2 = _parse_msg_time(msgs[i])
+        if t1 and t2:
+            gap = (t2 - t1).total_seconds() / 60.0
+            gaps.append((i, max(gap, 0)))
+        else:
+            gaps.append((i, 0))
+
+    if not gaps:
+        return [msgs]
+
+    # 按间隙降序排列，在满足 min_segment 约束的最佳位置切分
+    gaps.sort(key=lambda x: -x[1])
+
+    cut_points = []
+    occupied = set()
+    for idx, gap_val in gaps:
+        if gap_val < 5:  # 间隙太小不切
             continue
-
-        # 按消息量切分
-        total = len(msgs)
-        start = 0
-        while start < total:
-            end = min(start + max_size, total)
-            window = msgs[start:end]
-            if window:
-                windows.append(window)
-            if end >= total:
+        # 检查该切分点前后是否满足最小段约束
+        too_close = False
+        for cp in cut_points:
+            if abs(idx - cp) < min_segment:
+                too_close = True
                 break
-            start += step
+        if too_close:
+            continue
+        cut_points.append(idx)
+        if len(cut_points) >= 3:  # 最多切 3 刀
+            break
 
-    return windows
+    if not cut_points:
+        # 找不到合适切点，强制均匀切分
+        return _force_split_evenly(msgs, max_size)
+
+    cut_points.sort()
+    result = []
+    prev = 0
+    for cp in cut_points:
+        result.append(msgs[prev:cp])
+        prev = cp
+    result.append(msgs[prev:])
+    return result
 
 
-# ── Phase 2: AI 分析 ───────────────────────────────────────────────────
+def _force_split_evenly(msgs: list[dict], max_size: int) -> list[list[dict]]:
+    """无法找自然间隙时，按 max_size 均匀切分"""
+    result = []
+    for i in range(0, len(msgs), max_size):
+        result.append(msgs[i:i + max_size])
+    return result
+
+
+def _extract_group_summary(window_msgs: list[dict]) -> dict:
+    """Python 提取事件组摘要（不调 AI）。
+
+    Returns:
+        JSON-serializable dict with: time_start, time_end, duration_minutes,
+        message_count, top_speakers, preview, hourly_distribution
+    """
+    if not window_msgs:
+        return {}
+
+    times = []
+    senders = defaultdict(int)
+    preview = []
+    hourly = defaultdict(int)
+
+    for m in window_msgs:
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 16:
+            times.append(ft[:16])
+            hourly[ft[:13]] += 1  # "2025-03-15 14"
+        sender = (m.get("senderID") or "").strip()
+        if sender:
+            senders[sender] += 1
+        if len(preview) < 5:
+            content = (m.get("content") or "").strip()
+            if content:
+                preview.append({
+                    "time": ft[11:16] if len(ft) >= 16 else ft,
+                    "sender": sender,
+                    "content": content[:80],
+                })
+
+    time_start = times[0] if times else ""
+    time_end = times[-1] if times else ""
+
+    # 计算持续时长（分钟）
+    duration = 0
+    if time_start and time_end:
+        try:
+            ts = datetime.strptime(time_start, "%Y-%m-%d %H:%M")
+            te = datetime.strptime(time_end, "%Y-%m-%d %H:%M")
+            duration = int((te - ts).total_seconds() / 60)
+        except ValueError:
+            pass
+
+    # Top 发言者
+    top_speakers = sorted(senders.items(), key=lambda x: -x[1])[:5]
+    top_speakers_list = [{"name": name, "count": cnt} for name, cnt in top_speakers]
+
+    text_count = sum(1 for m in window_msgs if (m.get("content") or "").strip())
+
+    return {
+        "time_start": time_start,
+        "time_end": time_end,
+        "duration_minutes": duration,
+        "message_count": len(window_msgs),
+        "text_message_count": text_count,
+        "top_speakers": top_speakers_list,
+        "preview": preview[:3],  # 只保留前 3 条
+        "hourly_distribution": dict(hourly),
+    }
+
+
+# ── Phase 2: AI 分析 (v1.18.1) ──────────────────────────────────────────
 
 
 def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple[str, str]:
-    """构建事件分析 Prompt。
+    """构建事件分析 Prompt（v1.18.1: 单事件输出）。
 
     Returns:
         (system_prompt, user_prompt)
@@ -390,7 +514,7 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
     # User Prompt：对话原文
     lines = []
     group_label = f'群聊"{group_name}"中' if group_name else "群聊"
-    lines.append(f"以下是{group_label}的一段连续对话。请识别其中的有意义事件。\n")
+    lines.append(f"以下是{group_label}的一段连续对话。请判断它是否构成一个值得记录的事件。\n")
 
     for m in window:
         ct = m.get("formattedTime", "")
@@ -404,10 +528,10 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
     return system_prompt, user_prompt
 
 
-async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> list[dict]:
-    """调用在线 AI 分析单个窗口，返回事件列表。
+async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | None:
+    """调用在线 AI 分析单个窗口，返回单个事件 dict 或 None。
 
-    使用 json_mode 强制 AI 返回结构化 JSON。
+    v1.18.1: 一个事件组 = 一个 AI 调用 = 一个事件或空。
     """
     from services.model_config import resolve_model_with_fallback
     from services.online_model import call_online_chat
@@ -416,22 +540,22 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> list[dict
     if not primary:
         raise RuntimeError("没有可用的在线模型")
 
-    # 构建 json_mode prompt
+    # v1.18.1: 单事件输出格式
     json_instruction = """
-请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）：
+请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）。
+
+如果这段对话构成了一个值得记录的事件：
 {
-  "events": [
-    {
-      "title": "一句话标题",
-      "description": "2-3句话描述发生了什么",
-      "event_type": "decision|discussion|social|announcement|meme",
-      "participants": ["成员A", "成员B"],
-      "key_quotes": ["关键原话1", "关键原话2"],
-      "time_span": {"start": "HH:MM", "end": "HH:MM"}
-    }
-  ]
+  "title": "一句话标题",
+  "description": "2-3句话描述发生了什么",
+  "event_type": "decision|discussion|social|announcement|meme",
+  "participants": ["成员A", "成员B"],
+  "key_quotes": ["关键原话1", "关键原话2"],
+  "time_span": {"start": "HH:MM", "end": "HH:MM"}
 }
-如果这段对话中没有明显事件，返回 {"events": []}。"""
+
+如果这段对话只是日常闲聊，不构成事件，返回：
+null"""
 
     full_system = system_prompt + "\n\n" + json_instruction
 
@@ -466,65 +590,85 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> list[dict
     response_text = result.get("data", "") if isinstance(result, dict) else str(result)
     if not response_text:
         logger.warning("AI 返回空内容: %s", result.get("error", "unknown"))
+        return None
     return _parse_ai_response(response_text)
 
 
-def _parse_ai_response(result: str) -> list[dict]:
-    """解析 AI 返回的 JSON，提取 events 数组。"""
+def _parse_ai_response(result: str) -> dict | None:
+    """解析 AI 返回的 JSON，提取单个事件或 null。
+
+    v1.18.1: 新格式 — 单个事件对象或 null。
+    向后兼容：也支持旧格式 {"events": [...]} 取第一个。
+    """
     if not result:
-        return []
+        return None
 
     text = result.strip()
 
+    # null 直接返回
+    if text.lower() == "null":
+        return None
+
     # 尝试去掉 markdown 代码块
     if text.startswith("```"):
-        lines = text.split("\n")
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
+        lines_ = text.split("\n")
+        if lines_[0].startswith("```"):
+            lines_ = lines_[1:]
+        if lines_ and lines_[-1].strip() == "```":
+            lines_ = lines_[:-1]
+        text = "\n".join(lines_)
 
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         # 尝试用正则提取 JSON 对象
-        match = re.search(r'\{.*"events".*\}', text, re.DOTALL)
+        match = re.search(r'\{[^{}]*"title"[^{}]*\}', text, re.DOTALL)
         if match:
             try:
                 data = json.loads(match.group())
             except json.JSONDecodeError:
-                logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
-                return []
+                # 向后兼容：尝试旧 events 数组格式
+                match2 = re.search(r'\{.*"events".*\}', text, re.DOTALL)
+                if match2:
+                    try:
+                        data = json.loads(match2.group())
+                    except json.JSONDecodeError:
+                        logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
+                        return None
+                else:
+                    logger.warning("AI 返回中未找到事件 JSON: %s...", text[:200])
+                    return None
         else:
-            logger.warning("AI 返回中未找到 events JSON: %s...", text[:200])
-            return []
+            logger.warning("AI 返回中未找到事件 JSON: %s...", text[:200])
+            return None
 
-    events = data.get("events", [])
-    if not isinstance(events, list):
-        return []
+    # 如果 data 是 null
+    if data is None:
+        return None
 
-    # 标准化字段
-    result_events = []
-    for e in events:
-        if not isinstance(e, dict):
-            continue
-        title = (e.get("title") or "").strip()
-        if not title:
-            continue
+    # 向后兼容：旧格式 {"events": [...]}
+    if "events" in data:
+        events = data.get("events", [])
+        if isinstance(events, list) and events:
+            data = events[0]  # 取第一个事件
+        else:
+            return None
 
-        ts = e.get("time_span", {}) or {}
-        result_events.append({
-            "title": title,
-            "description": (e.get("description") or "").strip(),
-            "event_type": _normalize_event_type(e.get("event_type", "")),
-            "participants": e.get("participants", []),
-            "key_quotes": e.get("key_quotes", []),
-            "time_span_start": ts.get("start", ""),
-            "time_span_end": ts.get("end", ""),
-        })
+    # 提取事件字段
+    title = (data.get("title") or "").strip()
+    if not title:
+        return None
 
-    return result_events
+    ts = data.get("time_span", {}) or {}
+    return {
+        "title": title,
+        "description": (data.get("description") or "").strip(),
+        "event_type": _normalize_event_type(data.get("event_type", "")),
+        "participants": data.get("participants", []),
+        "key_quotes": data.get("key_quotes", []),
+        "time_span_start": ts.get("start", ""),
+        "time_span_end": ts.get("end", ""),
+    }
 
 
 def _normalize_event_type(t: str) -> str:
@@ -544,50 +688,6 @@ def _normalize_event_type(t: str) -> str:
     return mapping.get(t, "discussion")  # 默认 discussion
 
 
-
-
-def _title_similarity(a: str, b: str) -> float:
-    """简单字符集相似度。"""
-    if a == b:
-        return 1.0
-    sa, sb = set(a), set(b)
-    if not sa or not sb:
-        return 0.0
-    return len(sa & sb) / len(sa | sb)
-
-
-
-def _build_member_name_cache(group_id: int) -> dict:
-    """构建 {name: member_id} 映射缓存。"""
-    cache = {}
-    try:
-        from models.database import get_members
-        members = get_members(group_id)
-        for m in members:
-            mid = m.get("id")
-            if mid:
-                for field in ("display_name", "nickname", "wxid"):
-                    val = m.get(field, "")
-                    if val:
-                        cache[val] = mid
-    except Exception:
-        pass
-    return cache
-
-
-def _resolve_participant_ids_cached(names: list[str], cache: dict) -> list[int]:
-    """从缓存解析成员名 → ID。"""
-    ids = []
-    seen = set()
-    for name in names:
-        name = name.strip()
-        if not name:
-            continue
-        mid = cache.get(name)
-        if mid and mid not in seen:
-            ids.append(mid)
-            seen.add(mid)
-    return ids
 
 
 def _resolve_participant_ids(names: list[str], chat_or_group_id) -> list[int]:
