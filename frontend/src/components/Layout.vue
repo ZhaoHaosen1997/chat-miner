@@ -3,7 +3,7 @@ import { ref, inject, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import GroupSelector from './GroupSelector.vue'
 import UploadModal from './UploadModal.vue'
-import { MessageCircle, Users, LayoutDashboard, Loader2, Fish, Settings, Clock } from 'lucide-vue-next'
+import { MessageCircle, Users, LayoutDashboard, Loader2, Fish, Settings } from 'lucide-vue-next'
 import { listGroups, apiGet } from '../api/index.js'
 
 const props = defineProps({ currentGroup: Object })
@@ -49,25 +49,26 @@ function reportTypeSwitch(direction) {
   const p = route.path
   const up = direction === 'up'
 
-  // Daily → Weekly
+  // Daily → Event (up) or stay (down)
   const dailyMatch = p.match(/^\/report\/(\d{4}-\d{2}-\d{2})$/)
   if (dailyMatch) {
-    if (up) { router.push(`/weekly/${dateToWeek(dailyMatch[1])}`); return }
-    return // daily is lowest, can't go down
+    if (up) { tryNavigateToEvent(dailyMatch[1]); return }
+    return
   }
 
-  // Weekly → Monthly (up) or Daily (down)
+  // Event → Weekly (up) or Daily (down)
+  const eventMatch = p.match(/^\/event\/(\d+)$/)
+  if (eventMatch) {
+    if (up) { tryNavigateFromEventToWeekly(); return }
+    tryNavigateFromEventToDaily()
+    return
+  }
+
+  // Weekly → Monthly (up) or Event (down)
   const weeklyMatch = p.match(/^\/weekly\/(\d{4}-W\d{2})$/)
   if (weeklyMatch) {
     if (up) { router.push(`/monthly/${weekToMonth(weeklyMatch[1])}`); return }
-    // Down: go to the Monday of this week
-    const [y, w] = weeklyMatch[1].split('-W')
-    const jan4 = new Date(Date.UTC(+y, 0, 4))
-    const firstMonday = new Date(jan4)
-    firstMonday.setUTCDate(jan4.getUTCDate() - (jan4.getUTCDay() || 7) + 1)
-    const monday = new Date(firstMonday)
-    monday.setUTCDate(firstMonday.getUTCDate() + (+w - 1) * 7)
-    router.push(`/report/${monday.toISOString().slice(0, 10)}`)
+    tryNavigateFromWeeklyToEvent(weeklyMatch[1])
     return
   }
 
@@ -75,7 +76,6 @@ function reportTypeSwitch(direction) {
   const monthlyMatch = p.match(/^\/monthly\/(\d{4}-\d{2})$/)
   if (monthlyMatch) {
     if (up) { router.push(`/annual/${monthToYear(monthlyMatch[1])}`); return }
-    // Down: go to first week of this month
     const [y, m] = monthlyMatch[1].split('-')
     const firstDay = new Date(+y, +m - 1, 1)
     router.push(`/weekly/${dateToWeek(firstDay.toISOString().slice(0, 10))}`)
@@ -86,8 +86,71 @@ function reportTypeSwitch(direction) {
   const annualMatch = p.match(/^\/annual\/(\d{4})$/)
   if (annualMatch) {
     if (!up) { router.push(`/monthly/${annualMatch[1]}-01`); return }
-    return // annual is highest, can't go up
+    return
   }
+}
+
+async function tryNavigateToEvent(dateStr) {
+  try {
+    const { getEvents } = await import('../api/index.js')
+    const gid = props.currentGroup?.id
+    if (!gid) return
+    const events = await getEvents(gid, { date_from: dateStr, date_to: dateStr })
+    if (events && events.length > 0) {
+      router.push(`/event/${events[0].id}`)
+    } else {
+      router.push(`/weekly/${dateToWeek(dateStr)}`)  // fallback to weekly
+    }
+  } catch { router.push(`/weekly/${dateToWeek(dateStr)}`) }
+}
+
+async function tryNavigateFromEventToDaily() {
+  try {
+    const { getEventDetail } = await import('../api/index.js')
+    const gid = props.currentGroup?.id
+    if (!gid) return
+    const evtId = parseInt(route.path.split('/event/')[1])
+    const evt = await getEventDetail(gid, evtId)
+    if (evt?.start_time) {
+      router.push(`/report/${evt.start_time.slice(0, 10)}`)
+    }
+  } catch { /* ignore */ }
+}
+
+async function tryNavigateFromEventToWeekly() {
+  try {
+    const { getEventDetail } = await import('../api/index.js')
+    const gid = props.currentGroup?.id
+    if (!gid) return
+    const evtId = parseInt(route.path.split('/event/')[1])
+    const evt = await getEventDetail(gid, evtId)
+    if (evt?.start_time) {
+      router.push(`/weekly/${dateToWeek(evt.start_time.slice(0, 10))}`)
+    }
+  } catch { /* ignore */ }
+}
+
+async function tryNavigateFromWeeklyToEvent(weekStr) {
+  try {
+    const { getEvents } = await import('../api/index.js')
+    const gid = props.currentGroup?.id
+    if (!gid) return
+    const [y, w] = weekStr.split('-W')
+    const jan4 = new Date(Date.UTC(+y, 0, 4))
+    const firstMonday = new Date(jan4)
+    firstMonday.setUTCDate(jan4.getUTCDate() - (jan4.getUTCDay() || 7) + 1)
+    const monday = new Date(firstMonday)
+    monday.setUTCDate(firstMonday.getUTCDate() + (+w - 1) * 7)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    const fmt = d => d.toISOString().slice(0, 10)
+    const events = await getEvents(gid, { date_from: fmt(monday), date_to: fmt(sunday) })
+    if (events && events.length > 0) {
+      router.push(`/event/${events[0].id}`)
+    } else {
+      router.push(`/report/${fmt(monday)}`)  // fallback to daily
+    }
+  } catch { /* ignore */ }
 }
 
 function onReportTypeKey(e) {
@@ -122,7 +185,6 @@ onMounted(async () => {
 const groupNavItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
   { path: '/portraits', label: '群友画像', icon: Users },
-  { path: '/events', label: '事件', icon: Clock },
   { path: '/fishpond', label: '群鱼塘', icon: Fish },
 ]
 

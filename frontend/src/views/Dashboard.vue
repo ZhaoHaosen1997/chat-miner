@@ -5,8 +5,9 @@ import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
   generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
+  getEvents, getEventWindows, detectEvents, analyzeWindow,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 import WeFlowImportModal from '../components/WeFlowImportModal.vue'
 
@@ -52,6 +53,22 @@ const dayPopup = ref(null)
 const dayPopupLoading = ref('')
 const dayPopupError = ref('')
 const monthOffset = ref(0)
+
+// v1.18.2: Dashboard 事件区域
+const dashboardEvents = ref([])
+const dashboardWindows = ref([])
+const eventsLoading = ref(false)
+const eventsScanning = ref(false)
+const eventShowCount = ref(8)
+const analyzingWindowId = ref(null)
+const showRescanConfirm = ref(false)
+const expandedEventMonths = ref(new Set())
+
+function toggleEventMonth(month) {
+  const s = new Set(expandedEventMonths.value)
+  if (s.has(month)) { s.delete(month) } else { s.add(month) }
+  expandedEventMonths.value = s
+}
 
 let _loadVersion = 0
 
@@ -149,7 +166,7 @@ async function loadAll(silent = false) {
   }
 }
 
-watch(currentGroup, () => { monthOffset.value = 0; loadAll(); loadPeriods() }, { immediate: true })
+watch(currentGroup, () => { monthOffset.value = 0; loadAll(); loadPeriods(); loadDashboardEvents() }, { immediate: true })
 
 const latestUnanalyzed = ref(null)
 const skippedDates = ref(new Set())
@@ -348,6 +365,106 @@ async function loadPeriods() {
   finally { periodsLoading.value = false }
 }
 
+// v1.18.2: 加载 Dashboard 事件数据
+async function loadDashboardEvents() {
+  if (!gid.value) return
+  eventsLoading.value = true
+  try {
+    const [evts, wins] = await Promise.all([
+      getEvents(gid.value, {}).catch(() => []),
+      getEventWindows(gid.value).catch(() => []),
+    ])
+    dashboardEvents.value = Array.isArray(evts) ? evts : []
+    dashboardWindows.value = Array.isArray(wins) ? wins : []
+  } catch (e) { /* ignore */ }
+  finally { eventsLoading.value = false }
+}
+
+async function handleScanEvents(force = false) {
+  if (!gid.value || eventsScanning.value) return
+  eventsScanning.value = true
+  try {
+    await detectEvents(gid.value, '', '', force)
+    eventShowCount.value = 8
+    await loadDashboardEvents()
+  } catch (e) { /* ignore */ }
+  finally { eventsScanning.value = false }
+}
+
+function handleRescanConfirm() { showRescanConfirm.value = true }
+
+async function handleRescanExecute() {
+  showRescanConfirm.value = false
+  await handleScanEvents(true)
+}
+
+async function handleReanalyzeEvent(event) {
+  if (!gid.value || !event.window_id) return
+  analyzingWindowId.value = event.window_id
+  try {
+    await analyzeWindow(gid.value, event.window_id)
+    await loadDashboardEvents()
+  } catch (e) { /* ignore */ }
+  finally { analyzingWindowId.value = null }
+}
+
+async function handleAnalyzeAllEvents() {
+  if (!gid.value || activeTaskId.value) return
+  try {
+    const { analyzeAllWindows: analyzeAll } = await import('../api/index.js')
+    const result = await analyzeAll(gid.value)
+    if (result?.task_id) activeTaskId.value = result.task_id
+  } catch (e) { /* ignore */ }
+}
+
+async function handleAnalyzeWindow(windowId) {
+  if (!gid.value) return
+  analyzingWindowId.value = windowId
+  try {
+    const result = await analyzeWindow(gid.value, windowId)
+    if (result?.event_id) {
+      router.push(`/event/${result.event_id}`)
+    } else {
+      await loadDashboardEvents()
+    }
+  } catch (e) { /* ignore */ }
+  finally { analyzingWindowId.value = null }
+}
+
+const groupedDashboardEvents = computed(() => {
+  const groups = {}
+  for (const e of dashboardEvents.value) {
+    const m = (e.start_time || '').slice(0, 7)
+    if (!m) continue
+    if (!groups[m]) groups[m] = { events: [], windows: [] }
+    groups[m].events.push(e)
+  }
+  for (const w of dashboardWindows.value) {
+    if (w.status !== 'pending') continue
+    const m = (w.start_time || '').slice(0, 7)
+    if (!m) continue
+    if (!groups[m]) groups[m] = { events: [], windows: [] }
+    groups[m].windows.push(w)
+  }
+  const entries = Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  return entries
+})
+
+// 初始化：只展开当前月
+watch(groupedDashboardEvents, (val) => {
+  if (val.length > 0 && expandedEventMonths.value.size === 0) {
+    expandedEventMonths.value = new Set([val[0][0]])
+  }
+}, { immediate: true })
+
+const hasDashboardEvents = computed(() =>
+  dashboardEvents.value.length > 0 || dashboardWindows.value.some(w => w.status === 'pending'))
+
+function formatEventType(e) {
+  const icons = { decision: '🎯', discussion: '💬', social: '🎉', announcement: '📢', meme: '🤣' }
+  return icons[e.event_type] || '📌'
+}
+
 async function loadLatestReportPreviews() {
   const gid = currentGroup.value?.id
   if (!gid) return
@@ -534,6 +651,106 @@ async function _executeAnnualGenerate(periodKey, force = false) {
       <!-- 主体：左(周期报告主舞台) 右(日历+排行) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 space-y-5">
+          <!-- v1.18.2: 事件时间轴 -->
+          <div class="card p-5 mb-5">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                <span class="w-7 h-7 rounded-lg bg-rose-100 flex items-center justify-center"><PartyPopper class="w-3.5 h-3.5 text-rose-600" /></span>
+                事件时间轴
+                <span class="text-xs text-slate-400 font-normal">{{ dashboardEvents.length + dashboardWindows.filter(w=>w.status==='pending').length }}</span>
+              </h3>
+              <div class="flex items-center gap-1.5">
+                <button @click="handleScanEvents(false)" :disabled="eventsScanning"
+                  class="text-[10px] bg-emerald-500 text-white px-2 py-1 rounded-full hover:bg-emerald-600 disabled:opacity-40 flex items-center gap-0.5">
+                  <Search :size="10" />扫描新事件
+                </button>
+                <button @click="handleRescanConfirm" :disabled="eventsScanning"
+                  class="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full hover:bg-red-600 disabled:opacity-40 flex items-center gap-0.5"
+                  title="删除全部窗口后重新检测">
+                  <RefreshCw :size="10" />重新扫描
+                </button>
+                <button v-if="dashboardWindows.some(w=>w.status==='pending')" @click="handleAnalyzeAllEvents"
+                  :disabled="!!activeTaskId || eventsScanning"
+                  class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5">
+                  <Zap :size="10" />一键分析
+                </button>
+              </div>
+            </div>
+
+            <!-- 列表（限高 + 月份折叠） -->
+            <div v-if="groupedDashboardEvents.length > 0" class="max-h-72 overflow-y-auto space-y-0.5">
+              <div v-for="[month, group] in groupedDashboardEvents.slice(0, eventShowCount)" :key="month">
+                <button @click="toggleEventMonth(month)"
+                  class="flex items-center gap-1.5 w-full text-left py-1 px-1 hover:text-slate-600 transition-colors group">
+                  <span class="text-[10px] text-slate-300 group-hover:text-slate-500 w-3 text-center">
+                    {{ expandedEventMonths.has(month) ? '▼' : '▶' }}
+                  </span>
+                  <span class="text-[11px] font-semibold text-slate-400">{{ month }}</span>
+                  <span class="text-[10px] text-slate-300">({{ group.events.length + group.windows.length }})</span>
+                </button>
+
+                <template v-if="expandedEventMonths.has(month)">
+                  <!-- 候选窗口 -->
+                  <div v-for="w in group.windows" :key="'w'+w.id"
+                       class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg border border-amber-100/50 bg-amber-50/30">
+                    <span class="text-slate-300 w-4 text-center">○</span>
+                    <span class="text-slate-400 w-16 flex-shrink-0">{{ (w.start_time||'').slice(5,10) }}</span>
+                    <span class="flex-1 text-slate-500 truncate">{{ (w.summary?.preview||[])[0]?.content || '候选事件' }}</span>
+                    <button @click.stop="handleAnalyzeWindow(w.id)"
+                      :disabled="analyzingWindowId === w.id"
+                      class="bg-indigo-500 text-white px-2 py-0.5 rounded-full text-[10px] hover:bg-indigo-600 disabled:opacity-40 flex-shrink-0">
+                      {{ analyzingWindowId === w.id ? '...' : '分析' }}
+                    </button>
+                  </div>
+                  <!-- 已分析事件 -->
+                  <div v-for="e in group.events" :key="'e'+e.id"
+                       @click="router.push(`/event/${e.id}`)"
+                       class="flex items-center gap-2.5 text-xs py-1.5 px-2.5 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-100 transition-colors">
+                    <span class="w-4 text-center flex-shrink-0">{{ formatEventType(e) }}</span>
+                    <span class="text-slate-400 w-16 flex-shrink-0 font-mono">{{ (e.start_time||'').slice(5,10) }}</span>
+                    <span class="flex-1 text-slate-700 font-medium truncate">{{ e.title }}</span>
+                    <span class="text-slate-400 text-[10px] flex-shrink-0">{{ e.message_count || 0 }}条</span>
+                    <span class="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0">已分析</span>
+                    <button @click.stop="handleReanalyzeEvent(e)"
+                      :disabled="analyzingWindowId === e.window_id"
+                      class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full text-[10px] hover:bg-amber-100 disabled:opacity-40 flex-shrink-0">
+                      ↻
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- 展开/收起 -->
+            <button v-if="eventShowCount < groupedDashboardEvents.length" @click="eventShowCount = Math.min(eventShowCount + 10, groupedDashboardEvents.length)"
+              class="w-full text-[10px] text-slate-400 hover:text-rose-500 py-1 mt-1 transition-colors">
+              展开更多 ({{ eventShowCount }}/{{ groupedDashboardEvents.length }}) ▼
+            </button>
+            <button v-if="eventShowCount >= groupedDashboardEvents.length && groupedDashboardEvents.length > 8" @click="eventShowCount = 8"
+              class="w-full text-[10px] text-slate-400 hover:text-rose-500 py-1 transition-colors">
+              收起 ▲
+            </button>
+
+            <!-- 空状态 -->
+            <div v-if="!eventsLoading && dashboardEvents.length === 0 && dashboardWindows.length === 0"
+                 class="text-center py-6 text-xs text-slate-400">
+              点击"扫描新事件"让 AI 从群聊中发现事件
+            </div>
+            <div v-if="eventsLoading" class="text-center py-4 text-slate-400"><Loader2 class="w-4 h-4 animate-spin inline" /></div>
+          </div>
+
+          <!-- 重新扫描确认弹窗 -->
+          <div v-if="showRescanConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-sm mx-4">
+              <p class="text-sm font-semibold text-slate-800 mb-2">⚠️ 确认重新扫描</p>
+              <p class="text-xs text-slate-500 leading-relaxed mb-5">将删除所有事件窗口（含已分析）并重新检测。已生成的事件不会被删除，但与窗口的关联将丢失。确定继续？</p>
+              <div class="flex gap-2 justify-end">
+                <button @click="showRescanConfirm = false" class="px-4 py-2 text-xs rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">取消</button>
+                <button @click="handleRescanExecute" class="px-4 py-2 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors">确认重新扫描</button>
+              </div>
+            </div>
+          </div>
+
           <!-- 加载时段 -->
           <template v-if="!periodsLoaded && !periodsLoading">
             <button @click="loadPeriods" class="card p-6 w-full text-center hover:border-indigo-200 transition-colors group">

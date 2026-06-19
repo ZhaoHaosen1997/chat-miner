@@ -547,19 +547,34 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | No
     if not primary:
         raise RuntimeError("没有可用的在线模型")
 
-    # v1.18.1: 单事件输出格式
+    # v1.18.2: 丰富化事件输出格式
     json_instruction = """
 请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）。
 
 如果这段对话构成了一个值得记录的事件：
 {
-  "title": "一句话标题",
-  "description": "2-3句话描述发生了什么",
+  "headline": "一句话抓人眼球的标题",
+  "narrative": "2-3段故事化叙述，用轻松诙谐的口吻把事件的起因、经过、高潮讲清楚。像在给朋友讲八卦一样自然。",
   "event_type": "decision|discussion|social|announcement|meme",
-  "participants": ["成员A", "成员B"],
-  "key_quotes": ["关键原话1", "关键原话2"],
+  "mood": "欢乐|热闹|沙雕|温馨|吐槽|吃瓜|摸鱼|破防|离谱|平淡",
+  "mood_emoji": "🔥",
+  "participants": [
+    {"name": "成员A", "role": "主角"},
+    {"name": "成员B", "role": "反对者"}
+  ],
+  "key_moments": [
+    {"time": "HH:MM", "description": "发生了什么", "quote": "关键原话（可选）"}
+  ],
+  "key_quotes": ["最精彩的原话1 — 发言人", "最精彩的原话2 — 发言人"],
+  "aftermath": "事件结束后的余波、影响，或群里后来怎么样了（1-2句即可）",
   "time_span": {"start": "HH:MM", "end": "HH:MM"}
 }
+
+注意：
+- mood/mood_emoji/key_moments/aftermath 为可选字段，根据实际内容决定是否提供
+- participants 中 role 可选值：主角/反对者/催化剂/和事佬/围观群众/气氛组/总结者
+- key_moments 最多列 5 个关键时刻
+- key_quotes 最多 3 条，格式为 "原话 — 发言人"
 
 如果这段对话只是日常闲聊，不构成事件，返回：
 null"""
@@ -634,36 +649,45 @@ def _parse_ai_response(result: str) -> dict | None:
             logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
             return None
 
-    # ... continue with data parsing below
-            return None
-
-    # 如果 data 是 null
-    if data is None:
-        return None
-
     # 向后兼容：旧格式 {"events": [...]}
     if "events" in data:
         events = data.get("events", [])
         if isinstance(events, list) and events:
-            data = events[0]  # 取第一个事件
+            data = events[0]
         else:
             return None
 
-    # 提取事件字段
-    title = (data.get("title") or "").strip()
-    if not title:
+    # v1.18.2: headline 替代 title（向后兼容 title 字段）
+    headline = (data.get("headline") or data.get("title") or "").strip()
+    if not headline:
         return None
 
     ts = data.get("time_span", {}) or {}
-    return {
-        "title": title,
-        "description": (data.get("description") or "").strip(),
+
+    # 构建返回 dict：基础字段 + enriched 字段
+    result = {
+        "title": headline,
+        "description": (data.get("narrative") or data.get("description") or "").strip(),
         "event_type": _normalize_event_type(data.get("event_type", "")),
         "participants": data.get("participants", []),
         "key_quotes": data.get("key_quotes", []),
         "time_span_start": ts.get("start", ""),
         "time_span_end": ts.get("end", ""),
+        # v1.18.2 enriched fields
+        "report_json": {
+            "headline": headline,
+            "narrative": (data.get("narrative") or data.get("description") or "").strip(),
+            "event_type": _normalize_event_type(data.get("event_type", "")),
+            "mood": data.get("mood", ""),
+            "mood_emoji": data.get("mood_emoji", ""),
+            "participants": data.get("participants", []),
+            "key_moments": data.get("key_moments", []),
+            "key_quotes": data.get("key_quotes", []),
+            "aftermath": data.get("aftermath", ""),
+            "time_span": ts,
+        },
     }
+    return result
 
 
 def _extract_json_object(text: str) -> dict | None:

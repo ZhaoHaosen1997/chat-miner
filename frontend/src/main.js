@@ -15,7 +15,7 @@ import AnnualReport from './views/AnnualReport.vue'
 import Settings from './views/Settings.vue'
 import TaskHistory from './views/TaskHistory.vue'
 import ComprehensivePortrait from './views/ComprehensivePortrait.vue'
-import Events from './views/Events.vue'
+import EventDetail from './views/EventDetail.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -29,7 +29,8 @@ const routes = [
   { path: '/annual/:yearId', component: AnnualReport, props: true },
   { path: '/settings', component: Settings },
   { path: '/tasks', component: TaskHistory },
-  { path: '/events', component: Events },
+  { path: '/event/:eventId', component: EventDetail, props: true },
+  { path: '/events', redirect: '/' },
   { path: '/comprehensive/:personaId', component: ComprehensivePortrait, props: true },
 ]
 

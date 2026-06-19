@@ -21,9 +21,10 @@ router = APIRouter(prefix="/api/groups/{group_id}/events", tags=["事件探测"]
 
 @router.post("/detect")
 async def api_detect_events(group_id: int, body: dict):
-    """Phase 1: Python 事件检测（纯 Python，不调 AI，不删旧数据）。
+    """Phase 1: Python 事件检测（纯 Python，不调 AI）。
 
-    Body: {"date_start": "2025-03-01", "date_end": "2025-06-19"}
+    Body: {"date_start": "2025-03-01", "date_end": "2025-06-19", "force": false}
+    force=true 时删除全部窗口后全量重检测（含已分析），默认仅替换待处理窗口。
 
     Returns: {"windows": [...], "count": N}
     """
@@ -58,8 +59,9 @@ async def api_detect_events(group_id: int, body: dict):
             "data": {"windows": [], "count": 0},
         }
 
-    # 清理旧的未分析窗口（重新检测时替换）
-    delete_windows_by_group(group_id, only_pending=True)
+    # force=true → 全量重检测（含已分析窗口）；默认增量（仅替换 pending/empty）
+    force = body.get("force", False)
+    delete_windows_by_group(group_id, only_pending=not force)
 
     # 持久化窗口
     window_records = []

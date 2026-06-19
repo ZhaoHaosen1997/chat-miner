@@ -436,11 +436,11 @@ export const getDefaultPrompt = (analysisType) =>
 // ==================== 事件探测 v1.18.1 ====================
 
 // Phase 1: Python 检测（返回窗口列表，不再返回 task_id）
-export async function detectEvents(gid, dateStart, dateEnd) {
+export async function detectEvents(gid, dateStart, dateEnd, force = false) {
   const res = await fetch(`${BASE}/groups/${gid}/events/detect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date_start: dateStart, date_end: dateEnd }),
+    body: JSON.stringify({ date_start: dateStart, date_end: dateEnd, force }),
   })
   const data = await res.json()
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')

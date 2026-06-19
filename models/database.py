@@ -501,6 +501,8 @@ def init_db():
         _migrate_v1_18_0(conn)
         # v1.18.1: 事件两步拆分 — event_windows 表 + events.window_id
         _migrate_v1_18_1(conn)
+        # v1.18.2: 事件丰富化 — report_json 列
+        _migrate_v1_18_2(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -880,6 +882,15 @@ def _migrate_v1_18_1(conn):
             (key, value, value_type, description)
         )
     logger.info("DB migrate v1.18.1: added adaptive segmentation settings")
+
+
+def _migrate_v1_18_2(conn):
+    """v1.18.2: 事件丰富化 — events.report_json 列"""
+    cur = conn.execute("PRAGMA table_info(events)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "report_json" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN report_json TEXT DEFAULT ''")
+        logger.info("DB migrate v1.18.2: added events.report_json")
 
 
 def _seed_default_model_configs(conn):
@@ -2883,8 +2894,8 @@ def insert_events(events: list[dict]) -> list[int]:
                 INSERT INTO events (group_id, title, description, event_type,
                     participant_ids, key_quotes, start_time, end_time,
                     message_start_idx, message_end_idx, message_count,
-                    ai_model_used, window_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ai_model_used, window_id, report_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 e["group_id"],
                 e["title"],
@@ -2899,6 +2910,7 @@ def insert_events(events: list[dict]) -> list[int]:
                 e.get("message_count", 0),
                 e.get("ai_model_used", ""),
                 e.get("window_id", None),
+                e.get("report_json", ""),
             ))
             ids.append(cur.lastrowid)
     return ids

@@ -281,8 +281,14 @@ def _save_event_result(event_data: dict, group_id: int,
     ts_end = event_data.get("time_span_end", "")
     event_data["start_time"] = _resolve_event_time(window, ts_start)
     event_data["end_time"] = _resolve_event_time(window, ts_end, ts_start)
+    # v1.18.2: participants 可能是 [{name, role}] 或旧格式 ["name"]
+    raw_participants = event_data.get("participants", [])
+    if raw_participants and isinstance(raw_participants[0], dict):
+        participant_names = [p.get("name", "") for p in raw_participants]
+    else:
+        participant_names = raw_participants
     event_data["participant_ids"] = json.dumps(
-        _resolve_participant_names(group_id, event_data.get("participants", [])),
+        _resolve_participant_names(group_id, participant_names),
         ensure_ascii=False)
     event_data["key_quotes"] = json.dumps(
         (event_data.get("key_quotes") or [])[:3], ensure_ascii=False)
@@ -290,6 +296,8 @@ def _save_event_result(event_data: dict, group_id: int,
     event_data.setdefault("message_end_idx", 0)
     event_data.setdefault("message_count", window.get("message_count", 0))
     event_data.setdefault("ai_model_used", "")
+    event_data["report_json"] = json.dumps(
+        event_data.get("report_json", {}), ensure_ascii=False)
     eids = insert_events([event_data])
     return eids[0] if eids else None
 
