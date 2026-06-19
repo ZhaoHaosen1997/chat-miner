@@ -7,8 +7,9 @@ Usage:
     if result["success"]:
         text = result["data"]
 """
-import time
+import json
 import logging
+import time
 import httpx
 
 from config import config
@@ -154,7 +155,15 @@ async def call_online_chat(
 
         resp.raise_for_status()
         result = resp.json()
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        msg = result.get("choices", [{}])[0].get("message", {})
+        content = msg.get("content", "")
+        if not content:
+            # SenseNova deepseek-v4-flash 可能把回复放 reasoning_content
+            content = msg.get("reasoning_content", "")
+        if not content:
+            content = result.get("choices", [{}])[0].get("text", "")
+        if not content:
+            logger.warning(f"在线模型返回空内容，原始响应: {json.dumps(result, ensure_ascii=False)[:500]}")
         logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
 
         if content.strip():
@@ -286,7 +295,7 @@ async def check_online_model_health(model_config: dict) -> dict:
             user_prompt="OK",
             model_config=model_config,
             temperature=0.0,
-            max_tokens=5,
+            max_tokens=10,
         )
         return {
             "configured": True,

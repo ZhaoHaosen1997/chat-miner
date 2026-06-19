@@ -3,6 +3,7 @@ import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWeeklyReport, generateWeekly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, TrendingUp, Calendar, MessageSquare, Users, Flame, Trophy, BookOpen, Hash, Zap } from 'lucide-vue-next'
+import RelatedEvents from '../components/RelatedEvents.vue'
 import FloatingNav from '../components/FloatingNav.vue'
 
 const props = defineProps({ weekId: String })
@@ -481,5 +482,12 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
     </template>
     </div>
     </Transition>
+    <RelatedEvents
+      v-if="report?.date_start && report?.date_end"
+      :group-id="currentGroup?.id"
+      :date-from="report.date_start"
+      :date-to="report.date_end"
+      label="📅 本周事件"
+    />
   </div>
 </template>

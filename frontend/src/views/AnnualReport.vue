@@ -5,6 +5,7 @@ import { getAnnualReport, generateAnnual, getPeriods } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Trophy, Star, Calendar, MessageSquare, Users, TrendingUp } from 'lucide-vue-next'
 import FloatingNav from '../components/FloatingNav.vue'
 import WordCloud from '../components/WordCloud.vue'
+import RelatedEvents from '../components/RelatedEvents.vue'
 
 const props = defineProps({ yearId: String })
 const router = useRouter()
@@ -361,6 +362,15 @@ watch(report, (r) => {
         </div>
       </div>
     </Teleport>
+    <RelatedEvents
+      v-if="yearId"
+      :group-id="currentGroup?.id"
+      :date-from="`${yearId}-01-01`"
+      :date-to="`${yearId}-12-31`"
+      :limit="10"
+      sort-by="msg_count"
+      label="📅 年度事件"
+    />
   </div>
 </template>
 

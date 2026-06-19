@@ -3,6 +3,7 @@ import { ref, inject, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMonthlyReport, generateMonthly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, TrendingUp, Calendar, MessageSquare, Users, Brain, GitBranch, Telescope, Activity, Film, Hash } from 'lucide-vue-next'
+import RelatedEvents from '../components/RelatedEvents.vue'
 import FloatingNav from '../components/FloatingNav.vue'
 
 const props = defineProps({ monthId: String })
@@ -408,5 +409,12 @@ const healthItems = [
     </template>
     </div>
     </Transition>
+    <RelatedEvents
+      v-if="report?.date_start && report?.date_end"
+      :group-id="currentGroup?.id"
+      :date-from="report.date_start"
+      :date-to="report.date_end"
+      label="📅 本月事件回顾"
+    />
   </div>
 </template>

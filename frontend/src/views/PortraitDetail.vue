@@ -11,6 +11,7 @@ import {
   ChevronRight, Hash, Smile, BarChart3, Users2,
   Search, MessageCircle, Activity, Zap, Quote, Trophy, Link2,
 } from 'lucide-vue-next'
+import RelatedEvents from '../components/RelatedEvents.vue'
 
 const props = defineProps({ memberId: String })
 const router = useRouter()
@@ -837,5 +838,13 @@ const currentVersion = computed(() => {
         </div>
       </div>
     </template>
+    <RelatedEvents
+      v-if="memberId && portrait?.data_start_date"
+      :group-id="currentGroup?.id"
+      :member-id="memberId"
+      :date-from="portrait.data_start_date"
+      :date-to="portrait.data_end_date"
+      label="参与的关键事件"
+    />
   </div>
 </template>

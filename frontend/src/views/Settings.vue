@@ -39,7 +39,7 @@ function isExpanded(key) {
 
 // v1.5.4: 提示词管理
 const promptType = ref('daily')
-const promptTypeLabel = { daily:'日报', portrait:'画像', weekly:'周报', monthly:'月报', annual:'年报', comprehensive:'全面画像' }
+const promptTypeLabel = { daily:'日报', portrait:'画像', weekly:'周报', monthly:'月报', annual:'年报', comprehensive:'全面画像', event_detection:'事件探测' }
 const prompts = ref([])
 const promptsLoading = ref(false)
 const showPromptForm = ref(false)
@@ -160,11 +160,13 @@ const PROVIDER_PRESETS = [
 ]
 const onlineProvider = ref('DeepSeek')
 const onlineModelName = ref('deepseek-v4-flash')
-const onlineApiKey = ref('')
+const onlineApiKey = ref('')         // 用户新输入的 Key（已有 Key 时为空）
 const onlineEndpoint = ref('https://api.deepseek.com/v1/chat/completions')
 const onlineConfigId = ref(null)  // 当前编辑的在线模型 ID
 const onlineTesting = ref(false)
 const onlineTestResult = ref('')
+const onlineSavedMsg = ref('')       // v1.18.0: 保存反馈
+const hasExistingKey = ref(false)    // v1.18.0: 是否已有真实 Key
 async function loadDefaultOnlineModel() {
   try {
     const configs = await getModelConfigs()
@@ -173,14 +175,27 @@ async function loadDefaultOnlineModel() {
     const online = configs.find(c => c.model_type === 'online' && c.is_default)
     if (online) {
       onlineConfigId.value = online.id
-      onlineApiKey.value = online.api_key || ''
+      // v1.18.0: 不加载脱敏 Key，避免保存时覆盖真实 Key
+      const key = online.api_key || ''
+      if (key && key.includes('***')) {
+        // 已脱敏 → 说明有真实 Key
+        hasExistingKey.value = true
+        onlineApiKey.value = ''
+      } else if (key.trim()) {
+        // 未脱敏的原始 Key
+        hasExistingKey.value = false
+        onlineApiKey.value = key
+      } else {
+        hasExistingKey.value = false
+        onlineApiKey.value = ''
+      }
       onlineEndpoint.value = online.endpoint || 'https://api.deepseek.com/v1/chat/completions'
       onlineModelName.value = online.model_name || 'deepseek-v4-flash'
       const preset = PROVIDER_PRESETS.find(p => p.endpoint === online.endpoint)
       if (preset) onlineProvider.value = preset.label
       else onlineProvider.value = '自定义'
-      // v1.17.0: 无 API Key 时显示引导横幅
-      if (!online.api_key || !online.api_key.trim()) {
+      // 无有效 Key 时显示引导横幅
+      if (!hasExistingKey.value && !key.trim()) {
         showFirstRunBanner.value = true
       }
     } else {
@@ -201,20 +216,41 @@ function onProviderChange(label) {
   }
 }
 async function saveOnlineModel() {
+  onlineSavedMsg.value = ''
+  const key = onlineApiKey.value.trim()
+  // v1.18.0: 脱敏 Key 不发送 — 留空表示不修改已有 Key
+  const isMasked = key.includes('***')
+  const keyToSave = (isMasked || !key) ? '' : key
   const payload = {
     model_type: 'online',
     endpoint: onlineEndpoint.value,
-    api_key: onlineApiKey.value,
+    api_key: keyToSave,
     model_name: onlineModelName.value,
   }
-  if (onlineConfigId.value) {
-    await updateModelConfig(onlineConfigId.value, payload)
-  } else {
-    payload.name = onlineProvider.value === '自定义' ? '在线模型' : onlineProvider.value
-    payload.is_default = true
-    const created = await createModelConfig(payload)
-    onlineConfigId.value = created?.id
-    await loadConfigs()
+  try {
+    if (onlineConfigId.value) {
+      // 更新已有模型：key 为空时不传 key（保留原值）
+      if (!keyToSave) delete payload.api_key
+      await updateModelConfig(onlineConfigId.value, payload)
+    } else {
+      if (!keyToSave) {
+        onlineSavedMsg.value = '请先填写 API Key'
+        setTimeout(() => { onlineSavedMsg.value = '' }, 3000)
+        return
+      }
+      payload.name = onlineProvider.value === '自定义' ? '在线模型' : onlineProvider.value
+      payload.is_default = true
+      const created = await createModelConfig(payload)
+      onlineConfigId.value = created?.id
+      await loadConfigs()
+    }
+    hasExistingKey.value = !!keyToSave || hasExistingKey.value
+    onlineApiKey.value = ''  // 清空输入框
+    onlineSavedMsg.value = '已保存'
+    setTimeout(() => { onlineSavedMsg.value = '' }, 3000)
+  } catch (e) {
+    onlineSavedMsg.value = '保存失败: ' + (e.message || '未知错误')
+    setTimeout(() => { onlineSavedMsg.value = '' }, 5000)
   }
 }
 async function testOnlineConnection() {
@@ -775,16 +811,19 @@ onMounted(async () => {
           <div>
             <label class="text-xs text-slate-500">API Key</label>
             <div class="flex gap-2 mt-1">
-              <input :value="onlineApiKey" @change="onlineApiKey = $event.target.value"
+              <input
+                v-model="onlineApiKey"
+                type="password"
                 class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 font-mono"
-                placeholder="sk-..." />
+                :placeholder="hasExistingKey ? '已有 Key，留空则不修改' : 'sk-...'" />
               <button @click="saveOnlineModel" class="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">保存</button>
               <button @click="testOnlineConnection" :disabled="onlineTesting" class="px-4 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-slate-50 transition disabled:opacity-50">
                 <Loader2 v-if="onlineTesting" :size="14" class="animate-spin inline" />
-                <span v-else>测试连接</span>
+                <span v-else>测试</span>
               </button>
             </div>
-            <span v-if="onlineTestResult" :class="['text-xs mt-1', onlineTestResult.includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ onlineTestResult }}</span>
+            <span v-if="onlineSavedMsg" :class="['text-xs mt-1', onlineSavedMsg.startsWith('已保存') ? 'text-emerald-600' : 'text-red-500']">{{ onlineSavedMsg }}</span>
+            <span v-else-if="onlineTestResult" :class="['text-xs mt-1', onlineTestResult.includes('成功') ? 'text-emerald-600' : 'text-red-500']">{{ onlineTestResult }}</span>
           </div>
         </div>
       </div>
@@ -1042,6 +1081,19 @@ onMounted(async () => {
           <div><label class="text-xs text-slate-500">仪表盘 (秒)</label><input type="number" :value="pollDashboardS" @change="pollDashboardS=Math.max(5,Number($event.target.value));savePollSetting('poll_interval_dashboard_ms',pollDashboardS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">画像页 (秒)</label><input type="number" :value="pollPortraitsS" @change="pollPortraitsS=Math.max(5,Number($event.target.value));savePollSetting('poll_interval_portraits_ms',pollPortraitsS)" min="5" max="120" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">GUI窗口 (秒)</label><input type="number" :value="pollStatsS" @change="pollStatsS=Math.max(10,Number($event.target.value));savePollSetting('poll_interval_stats_s',pollStatsS)" min="10" max="300" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div></div></div>
+
+      <!-- 事件探测 v1.18.0 -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-orange-400"></div><Clock :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">事件探测</span></div>
+        <div class="p-5 grid grid-cols-3 gap-4">
+          <div><label class="text-xs text-slate-500">AI 并发数</label><input type="number" :value="appSettings.event_ai_concurrency?.value || 3" @change="saveAdvancedSetting('event_ai_concurrency', $event.target.value)" min="1" max="10" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">窗口消息数</label><input type="number" :value="appSettings.event_window_size?.value || 200" @change="saveAdvancedSetting('event_window_size', $event.target.value)" min="50" max="500" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">窗口重叠数</label><input type="number" :value="appSettings.event_window_overlap?.value || 20" @change="saveAdvancedSetting('event_window_overlap', $event.target.value)" min="0" max="100" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">活跃群阈值 (条/小时)</label><input type="number" :value="appSettings.event_active_group_threshold?.value || 30" @change="saveAdvancedSetting('event_active_group_threshold', $event.target.value)" min="5" max="100" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">活跃群尖峰阈值 (条/30分)</label><input type="number" :value="appSettings.event_active_peak_absolute?.value || 80" @change="saveAdvancedSetting('event_active_peak_absolute', $event.target.value)" min="20" max="500" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">安静群相对倍数</label><input type="number" :value="appSettings.event_quiet_peak_multiplier?.value || 3" @change="saveAdvancedSetting('event_quiet_peak_multiplier', $event.target.value)" min="1.5" max="10" step="0.5" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+        </div>
+      </div>
     </div>
 
 

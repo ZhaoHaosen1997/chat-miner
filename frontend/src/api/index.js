@@ -432,3 +432,29 @@ export const setDefaultPrompt = (id) =>
   request(`/settings/prompts/${id}/default`, { method: 'PUT', body: '{}' })
 export const getDefaultPrompt = (analysisType) =>
   request(`/settings/prompts/default?analysis_type=${encodeURIComponent(analysisType)}`)
+
+// ==================== 事件探测 v1.18.0 ====================
+
+export async function detectEvents(gid, dateStart, dateEnd) {
+  const res = await fetch(`${BASE}/groups/${gid}/events/detect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date_start: dateStart, date_end: dateEnd }),
+  })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data  // { task_id, status, date_start, date_end }
+}
+
+export function getEvents(gid, params = {}) {
+  const qs = new URLSearchParams()
+  if (params.type) qs.set('type', params.type)
+  if (params.date_from) qs.set('date_from', params.date_from)
+  if (params.date_to) qs.set('date_to', params.date_to)
+  const query = qs.toString() ? `?${qs.toString()}` : ''
+  return request(`/groups/${gid}/events${query}`)
+}
+
+export function getEventDetail(gid, eventId) {
+  return request(`/groups/${gid}/events/${eventId}`)
+}

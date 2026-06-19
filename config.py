@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.17.2"
+    VERSION = "1.18.0"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -68,6 +68,14 @@ class Config:
     MONTHLY_MIN_MSGS = 100
     ANNUAL_MIN_DAYS = 30
     ANNUAL_MIN_MSGS = 300
+
+    # ==================== 事件探测 (v1.18.0) ====================
+    EVENT_WINDOW_SIZE = 200
+    EVENT_WINDOW_OVERLAP = 20
+    EVENT_AI_CONCURRENCY = 3
+    EVENT_ACTIVE_GROUP_THRESHOLD = 30
+    EVENT_ACTIVE_PEAK_ABSOLUTE = 80
+    EVENT_QUIET_PEAK_MULTIPLIER = 3
 
     # ==================== 画像刷新阈值 ====================
     PORTRAIT_REFRESH_DAYS = 7

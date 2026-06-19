@@ -402,6 +402,28 @@ def init_db():
                 ON annual_awards(group_id, year);
             CREATE INDEX IF NOT EXISTS idx_annual_awards_member
                 ON annual_awards(member_id);
+
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                event_type TEXT NOT NULL CHECK(event_type IN ('decision','discussion','social','announcement','meme')),
+                participant_ids TEXT DEFAULT '[]',
+                key_quotes TEXT DEFAULT '[]',
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                message_start_idx INTEGER DEFAULT 0,
+                message_end_idx INTEGER DEFAULT 0,
+                message_count INTEGER DEFAULT 0,
+                ai_model_used TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_group_time
+                ON events(group_id, start_time);
+            CREATE INDEX IF NOT EXISTS idx_events_type
+                ON events(group_id, event_type);
         """)
         # 向后兼容：为已有数据库添加新列
         _migrate_db(conn)
@@ -455,6 +477,8 @@ def init_db():
         _migrate_v1_16_4(conn)
         # v1.17.0: 本地大模型全局开关 — 旧用户自动开启
         _migrate_v1_17_0(conn)
+        # v1.18.0: 事件探测
+        _migrate_v1_18_0(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -746,6 +770,67 @@ def _migrate_v1_17_0(conn):
         logger.info("DB migrate v1.17.0: 无本地模型记录，local_llm_enabled 保持默认 false")
 
 
+def _migrate_v1_18_0(conn):
+    """v1.18.0: 事件探测 — 插入默认 prompt_profiles + 补种事件探测 app_settings。
+
+    纯增量：仅 INSERT 缺失数据，不修改已有数据。
+    """
+    # 1. 补种事件探测 app_settings（不覆盖已有值）
+    existing_settings = {
+        row[0] for row in
+        conn.execute("SELECT key FROM app_settings WHERE key LIKE 'event_%'").fetchall()
+    }
+    event_settings = [
+        ("event_window_size", "200", "int", "事件探测窗口消息数"),
+        ("event_window_overlap", "20", "int", "事件探测窗口重叠消息数"),
+        ("event_ai_concurrency", "3", "int", "事件探测 AI 并发数"),
+        ("event_active_group_threshold", "30", "int", "活跃群判定阈值(条/小时)"),
+        ("event_active_peak_absolute", "80", "int", "活跃群尖峰绝对阈值(条/30分钟)"),
+        ("event_quiet_peak_multiplier", "3", "int", "安静群尖峰相对倍数"),
+    ]
+    added = 0
+    for key, value, value_type, description in event_settings:
+        if key not in existing_settings:
+            conn.execute(
+                "INSERT OR IGNORE INTO app_settings (key, value, value_type, description) "
+                "VALUES (?, ?, ?, ?)",
+                (key, value, value_type, description)
+            )
+            added += 1
+    if added:
+        logger.info("DB migrate v1.18.0: added %d event detection settings", added)
+
+    # 2. 插入默认事件探测 System Prompt（不覆盖已有 profile）
+    import logging as _logging
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM prompt_profiles WHERE analysis_type='event_detection'"
+    ).fetchone()[0]
+    if existing == 0:
+        default_prompt = (
+            "你是一个群聊历史学家+八卦记者+脱口秀段子手的混合体。\n"
+            "你的任务是从群聊对话中发掘那些值得被记住的事件——\n"
+            "无论是重要决定、欢乐瞬间、名场面诞生，还是群友之间的默契互动。\n\n"
+            "你像一个坐在群里的隐形观察员，把精华时刻记录下来，\n"
+            "用轻松诙谐的口吻写成事件卡片。读者看完应该会心一笑：\n"
+            "“对对对，那天就是这样！”\n\n"
+            "事件类型：\n"
+            "- decision：群内做出了某个决定（讨论→收敛→结论）\n"
+            "- discussion：围绕某个话题的深度讨论\n"
+            "- social：社交互动（庆祝、欢迎、告别、起哄等）\n"
+            "- announcement：某人宣布了重要消息\n"
+            "- meme：梗/文化的诞生和传播\n\n"
+            "如果这段对话中没有明显事件（就是日常闲聊），返回空 events 数组。"
+        )
+        conn.execute(
+            "INSERT INTO prompt_profiles (name, analysis_type, system_prompt, is_default) "
+            "VALUES (?, 'event_detection', ?, 1)",
+            ("默认事件分析风格", default_prompt)
+        )
+        logger.info("DB migrate v1.18.0: added default event_detection prompt profile")
+    else:
+        logger.info("DB migrate v1.18.0: event_detection prompt profile already exists")
+
+
 def _seed_default_model_configs(conn):
     """v1.0: 首次启动时预置默认模型配置。在线模型 api_key 为空，用户自行填写。"""
     count = conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()[0]
@@ -919,6 +1004,19 @@ _SETTINGS_DEFS = [
          "分析日志保留天数"),
         ("log_max_records", str(config.LOG_MAX_RECORDS), "int",
          "任务记录最多保留条数"),
+        # v1.18.0: 事件探测
+        ("event_window_size", str(config.EVENT_WINDOW_SIZE), "int",
+         "事件探测窗口消息数"),
+        ("event_window_overlap", str(config.EVENT_WINDOW_OVERLAP), "int",
+         "事件探测窗口重叠消息数"),
+        ("event_ai_concurrency", str(config.EVENT_AI_CONCURRENCY), "int",
+         "事件探测 AI 并发数"),
+        ("event_active_group_threshold", str(config.EVENT_ACTIVE_GROUP_THRESHOLD), "int",
+         "活跃群判定阈值(条/小时)"),
+        ("event_active_peak_absolute", str(config.EVENT_ACTIVE_PEAK_ABSOLUTE), "int",
+         "活跃群尖峰绝对阈值(条/30分钟)"),
+        ("event_quiet_peak_multiplier", str(config.EVENT_QUIET_PEAK_MULTIPLIER), "int",
+         "安静群尖峰相对倍数"),
     ]
     # _seed_app_settings 使用 _SETTINGS_DEFS + _get_settings_registry() 统一处理
 
@@ -2353,6 +2451,13 @@ def load_app_settings_to_config():
         # 日志清理
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",
+        # v1.18.0: 事件探测
+        "event_window_size": "EVENT_WINDOW_SIZE",
+        "event_window_overlap": "EVENT_WINDOW_OVERLAP",
+        "event_ai_concurrency": "EVENT_AI_CONCURRENCY",
+        "event_active_group_threshold": "EVENT_ACTIVE_GROUP_THRESHOLD",
+        "event_active_peak_absolute": "EVENT_ACTIVE_PEAK_ABSOLUTE",
+        "event_quiet_peak_multiplier": "EVENT_QUIET_PEAK_MULTIPLIER",
     }
 
     for row in rows:
@@ -2711,4 +2816,92 @@ def get_default_prompt(analysis_type: str) -> str | None:
             (analysis_type,)
         ).fetchone()
     return row["system_prompt"] if row and row["system_prompt"] else None
+
+
+# ==================== Event Detection v1.18.0 ====================
+
+def insert_events(events: list[dict]) -> list[int]:
+    """批量插入事件，返回新插入的事件 ID 列表"""
+    ids = []
+    with db() as conn:
+        for e in events:
+            cur = conn.execute("""
+                INSERT INTO events (group_id, title, description, event_type,
+                    participant_ids, key_quotes, start_time, end_time,
+                    message_start_idx, message_end_idx, message_count, ai_model_used)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                e["group_id"],
+                e["title"],
+                e.get("description", ""),
+                e["event_type"],
+                e.get("participant_ids", "[]"),
+                e.get("key_quotes", "[]"),
+                e["start_time"],
+                e["end_time"],
+                e.get("message_start_idx", 0),
+                e.get("message_end_idx", 0),
+                e.get("message_count", 0),
+                e.get("ai_model_used", ""),
+            ))
+            ids.append(cur.lastrowid)
+    return ids
+
+
+def get_events(group_id: int, event_type: str = "",
+               date_from: str = "", date_to: str = "") -> list[dict]:
+    """查询事件列表，支持类型和时间范围筛选"""
+    with db() as conn:
+        sql = "SELECT * FROM events WHERE group_id=?"
+        params = [group_id]
+        if event_type:
+            sql += " AND event_type=?"
+            params.append(event_type)
+        if date_from:
+            sql += " AND start_time >= ?"
+            params.append(date_from)
+        if date_to:
+            sql += " AND end_time <= ?"
+            params.append(date_to + "T23:59:59")
+        sql += " ORDER BY start_time DESC"
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_event(event_id: int) -> dict | None:
+    """获取单个事件详情"""
+    with db() as conn:
+        row = conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_events_in_range(group_id: int, date_start: str, date_end: str) -> int:
+    """删除指定时间范围内的所有事件，返回删除数量。分析时先删旧再写新。"""
+    with db() as conn:
+        cur = conn.execute(
+            "DELETE FROM events WHERE group_id=? AND start_time >= ? AND end_time <= ?",
+            (group_id, date_start, date_end + "T23:59:59")
+        )
+        return cur.rowcount
+
+
+def get_events_by_member(group_id: int, member_id: int) -> list[dict]:
+    """获取某成员参与的所有事件（participant_ids JSON 数组包含该 member_id）"""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE group_id=? AND participant_ids LIKE ? ORDER BY start_time DESC",
+            (group_id, f'%{member_id}%')
+        ).fetchall()
+    # 二次过滤：确保 member_id 在 JSON 数组中（避免 LIKE 误匹配）
+    import json
+    result = []
+    for row in rows:
+        d = dict(row)
+        try:
+            pids = json.loads(d["participant_ids"])
+            if member_id in pids:
+                result.append(d)
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return result
 
