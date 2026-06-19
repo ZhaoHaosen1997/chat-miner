@@ -158,6 +158,15 @@ class TaskManager:
     def get(self, task_id: str) -> Optional[TaskInfo]:
         return self._tasks.get(task_id)
 
+    def has_active(self, task_type: str, group_id: int) -> bool:
+        """检查指定群是否已有同类型任务正在执行。"""
+        active_statuses = ("pending", "waiting_gpu", "inference")
+        for t in self._tasks.values():
+            if (t.type == task_type and t.group_id == group_id
+                    and t.status in active_statuses):
+                return True
+        return False
+
     def cancel(self, task_id: str) -> bool:
         task = self._tasks.get(task_id)
         if task and task.status in ("pending", "waiting_gpu", "inference"):

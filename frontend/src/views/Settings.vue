@@ -245,6 +245,7 @@ async function saveOnlineModel() {
       await loadConfigs()
     }
     hasExistingKey.value = !!keyToSave || hasExistingKey.value
+    showFirstRunBanner.value = false  // 隐藏首次使用引导
     onlineApiKey.value = ''  // 清空输入框
     onlineSavedMsg.value = '已保存'
     setTimeout(() => { onlineSavedMsg.value = '' }, 3000)

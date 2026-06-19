@@ -121,15 +121,6 @@ watch(() => currentGroup.value?.id, (newId, oldId) => {
   }
 })
 
-// Watch: 群切换
-watch(() => currentGroup.value?.id, (newId, oldId) => {
-  if (newId && newId !== oldId) {
-    events.value = []
-    dateRange.value = { start: '', end: '' }
-    initDateRange().then(() => loadEvents())
-  }
-})
-
 onMounted(async () => {
   await initDateRange()
   if (currentGroup.value) {

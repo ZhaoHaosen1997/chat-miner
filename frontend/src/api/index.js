@@ -451,6 +451,7 @@ export function getEvents(gid, params = {}) {
   if (params.type) qs.set('type', params.type)
   if (params.date_from) qs.set('date_from', params.date_from)
   if (params.date_to) qs.set('date_to', params.date_to)
+  if (params.member_id) qs.set('member_id', params.member_id)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return request(`/groups/${gid}/events${query}`)
 }

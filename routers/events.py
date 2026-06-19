@@ -41,6 +41,9 @@ async def api_detect_events(group_id: int, body: dict):
         else:
             raise HTTPException(400, detail="群内无聊天数据")
 
+    if task_manager.has_active("event_detection", group_id):
+        raise HTTPException(409, detail="该群已有正在执行的事件分析任务")
+
     task = task_manager.create("event_detection", group_id,
                                 {"date_start": date_start, "date_end": date_end})
     task.update("inference", f"Phase 1/2: 正在扫描消息量尖峰...")
@@ -58,6 +61,12 @@ async def api_detect_events(group_id: int, body: dict):
                 task.update("done", "未发现候选事件窗口")
                 task.finish(success=True)
                 return
+
+            # 清除旧事件（重新分析时替换而非跳过）
+            from models.database import delete_events_in_range
+            deleted = delete_events_in_range(group_id, date_start, date_end)
+            if deleted:
+                logger.info("事件探测: 清除旧事件 %d 条", deleted)
 
             total = len(windows)
             task.update("inference", f"发现 {total} 个候选窗口，开始逐个分析...")
@@ -83,15 +92,20 @@ async def api_detect_events(group_id: int, body: dict):
                 # 分析单个窗口
                 events = await analyze_single_window(chat, group_id, window)
                 if events:
-                    # AI 返回的 time_span 只有 HH:MM，补全日期
-                    win_date = _get_window_date(window)
+                    # AI 返回的 time_span 只有 HH:MM，从窗口消息中匹配日期
                     for e in events:
                         ts = e.get("time_span_start", "")
                         te = e.get("time_span_end", "")
-                        if len(ts) == 5 and win_date:
-                            e["time_span_start"] = f"{win_date} {ts}:00"
-                        if len(te) == 5 and win_date:
-                            e["time_span_end"] = f"{win_date} {te}:00"
+                        date_for_ts = _find_date_for_time(window, ts) if len(ts) == 5 else ""
+                        date_for_te = _find_date_for_time(window, te) if len(te) == 5 else ""
+                        if date_for_ts:
+                            e["time_span_start"] = f"{date_for_ts} {ts}:00"
+                        if date_for_te:
+                            e["time_span_end"] = f"{date_for_te} {ts if not date_for_te else te}:00"
+                        # 计算事件的消息数
+                        e["message_count"] = _count_msgs_in_span(
+                            window, e.get("time_span_start", ""), e.get("time_span_end", "")
+                        )
                     inserted = insert_events_incremental(events, group_id)
                     total_events += inserted
 
@@ -200,13 +214,31 @@ async def api_get_event_detail(group_id: int, event_id: int):
     }
 
 
-def _get_window_date(window: list[dict]) -> str:
-    """从窗口第一条消息提取日期。"""
+def _count_msgs_in_span(window: list[dict], start_time: str, end_time: str) -> int:
+    """统计窗口内落在时间范围内的消息数。"""
+    if not start_time or not end_time:
+        return len(window)  # fallback
+    count = 0
     for m in window:
         ft = m.get("formattedTime", "")
-        if len(ft) >= 10:
-            return ft[:10]  # "2025-03-15"
-    return ""
+        if start_time <= ft <= end_time:
+            count += 1
+    return count or len(window)  # fallback if 0
+
+
+def _find_date_for_time(window: list[dict], hh_mm: str) -> str:
+    """从窗口消息中找最匹配给定 HH:MM 的日期。处理跨午夜场景。"""
+    best_date = ""
+    for m in window:
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 16:
+            msg_time = ft[11:16]  # "HH:MM"
+            msg_date = ft[:10]
+            if not best_date:
+                best_date = msg_date
+            if msg_time >= hh_mm:
+                return msg_date  # 找到第一个 >= 目标时间的消息日期
+    return best_date  # fallback：窗口第一条消息的日期
 
 
 def _get_member_names(group_id: int, member_ids: list) -> dict:
