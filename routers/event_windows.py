@@ -226,7 +226,6 @@ async def api_analyze_all_windows(group_id: int):
                                                                 window_msgs, w)
 
                     if event_data:
-                    if event_data:
                         new_event_id = _save_event_result(event_data, group_id, wid, w)
                         update_window_status(wid, "analyzed",
                                             event_count=1, event_id=new_event_id)
