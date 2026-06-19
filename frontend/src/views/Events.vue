@@ -249,7 +249,7 @@ async function analyzeAll() {
 function startPolling() {
   stopPolling()
   refreshBatchStatus()
-  pollingTimer.value = setInterval(refreshBatchStatus, 2000)
+  pollingTimer.value = setInterval(refreshBatchStatus, 5000)
 }
 
 async function refreshBatchStatus() {

@@ -59,7 +59,7 @@ async def api_detect_events(group_id: int, body: dict):
         }
 
     # 清理旧的未分析窗口（重新检测时替换）
-    delete_windows_by_group(group_id)
+    delete_windows_by_group(group_id, only_pending=True)
 
     # 持久化窗口
     window_records = []

@@ -119,24 +119,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
         event_data = await _analyze_window_with_ai(chat, group_id, window_msgs, window)
 
         if event_data:
-            # 入库 — 字段映射：AI返回(time_span_start/end) → DB列(start_time/end_time)
-            event_data["group_id"] = group_id
-            event_data["window_id"] = window_id
-            event_data["start_time"] = _resolve_event_time(
-                window, event_data.get("time_span_start", ""))
-            event_data["end_time"] = _resolve_event_time(
-                window, event_data.get("time_span_end", ""))
-            event_data["participant_ids"] = json.dumps(
-                _resolve_participant_names(group_id, event_data.get("participants", [])),
-                ensure_ascii=False)
-            event_data["key_quotes"] = json.dumps(
-                (event_data.get("key_quotes") or [])[:3], ensure_ascii=False)
-            event_data.setdefault("message_start_idx", 0)
-            event_data.setdefault("message_end_idx", 0)
-            event_data.setdefault("message_count", window.get("message_count", 0))
-            event_data.setdefault("ai_model_used", "")
-            event_ids = insert_events([event_data])
-            new_event_id = event_ids[0] if event_ids else None
+            new_event_id = _save_event_result(event_data, group_id, window_id, window)
 
             update_window_status(window_id, "analyzed",
                                 event_count=1, event_id=new_event_id)
@@ -222,6 +205,13 @@ async def api_analyze_all_windows(group_id: int):
 
                 wid = w["id"]
                 try:
+                    # 重新检查状态，防止与单窗口分析并发冲突
+                    current = get_window(wid)
+                    if current and current.get("status") != "pending":
+                        logger.info("批量分析跳过窗口 %d: 状态已变为 %s", wid, current.get("status"))
+                        done += 1
+                        continue
+
                     window_msgs = _load_window_messages(chat, w)
                     if not window_msgs:
                         update_window_status(wid, "empty", event_count=0)
@@ -236,24 +226,10 @@ async def api_analyze_all_windows(group_id: int):
                                                                 window_msgs, w)
 
                     if event_data:
-                        event_data["group_id"] = group_id
-                        event_data["window_id"] = wid
-                        event_data["start_time"] = _resolve_event_time(
-                            w, event_data.get("time_span_start", ""))
-                        event_data["end_time"] = _resolve_event_time(
-                            w, event_data.get("time_span_end", ""))
-                        event_data["participant_ids"] = json.dumps(
-                            _resolve_participant_names(group_id, event_data.get("participants", [])),
-                            ensure_ascii=False)
-                        event_data["key_quotes"] = json.dumps(
-                            (event_data.get("key_quotes") or [])[:3], ensure_ascii=False)
-                        event_data.setdefault("message_start_idx", 0)
-                        event_data.setdefault("message_end_idx", 0)
-                        event_data.setdefault("message_count", w.get("message_count", 0))
-                        event_data.setdefault("ai_model_used", "")
-                        eids = insert_events([event_data])
+                    if event_data:
+                        new_event_id = _save_event_result(event_data, group_id, wid, w)
                         update_window_status(wid, "analyzed",
-                                            event_count=1, event_id=eids[0] if eids else None)
+                                            event_count=1, event_id=new_event_id)
                     else:
                         update_window_status(wid, "empty", event_count=0)
                     done += 1
@@ -293,6 +269,32 @@ async def api_analyze_all_windows(group_id: int):
 # ── 内部辅助函数 ──────────────────────────────────────────────────
 
 
+def _save_event_result(event_data: dict, group_id: int,
+                       window_id: int, window: dict) -> int | None:
+    """字段映射 + 入库：AI返回 → DB列 → insert_events。
+
+    统一单窗口分析和批量分析的持久化逻辑，避免重复。
+    Returns: new_event_id or None
+    """
+    event_data["group_id"] = group_id
+    event_data["window_id"] = window_id
+    ts_start = event_data.get("time_span_start", "")
+    ts_end = event_data.get("time_span_end", "")
+    event_data["start_time"] = _resolve_event_time(window, ts_start)
+    event_data["end_time"] = _resolve_event_time(window, ts_end, ts_start)
+    event_data["participant_ids"] = json.dumps(
+        _resolve_participant_names(group_id, event_data.get("participants", [])),
+        ensure_ascii=False)
+    event_data["key_quotes"] = json.dumps(
+        (event_data.get("key_quotes") or [])[:3], ensure_ascii=False)
+    event_data.setdefault("message_start_idx", 0)
+    event_data.setdefault("message_end_idx", 0)
+    event_data.setdefault("message_count", window.get("message_count", 0))
+    event_data.setdefault("ai_model_used", "")
+    eids = insert_events([event_data])
+    return eids[0] if eids else None
+
+
 def _load_window_messages(chat, window: dict) -> list[dict]:
     """从 chat 缓存加载窗口时间范围内的消息。"""
     start = window.get("start_time", "")
@@ -329,30 +331,47 @@ async def _analyze_window_with_ai(chat, group_id: int,
     return result
 
 
-def _resolve_event_time(window: dict, hh_mm: str) -> str:
+def _resolve_event_time(window: dict, hh_mm: str, start_hh_mm: str = "") -> str:
     """从 AI 返回的 HH:MM 和窗口日期组装完整时间字符串。
 
-    AI 返回的 time_span.start/end 只有 HH:MM 格式，
-    需要从窗口的 start_time 中提取日期部分拼接。
+    AI 返回的 time_span 只有 HH:MM 格式。对于 end_time，
+    如果 end HH:MM < start HH:MM 说明跨午夜，日期应 +1 天。
     """
     if not hh_mm or len(hh_mm) != 5:
         return hh_mm  # 已经是完整时间或为空
 
     window_start = window.get("start_time", "")
-    if len(window_start) >= 10:
-        date_part = window_start[:10]
-        return f"{date_part} {hh_mm}:00"
-    return hh_mm
+    if len(window_start) < 10:
+        return hh_mm
+
+    date_part = window_start[:10]
+
+    # 跨午夜检测：end_time 的 HH:MM 比 start_time 早
+    if start_hh_mm and len(start_hh_mm) == 5 and hh_mm < start_hh_mm:
+        try:
+            from datetime import datetime, timedelta
+            dt = datetime.strptime(date_part, "%Y-%m-%d")
+            dt = dt + timedelta(days=1)
+            date_part = dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    return f"{date_part} {hh_mm}:00"
 
 
-def _resolve_participant_names(group_id: int, names: list[str]) -> list[int]:
-    """将 AI 返回的参与者名称解析为 member_id 列表。"""
-    if not names:
-        return []
+# 参与者名称缓存：避免批量分析时每个窗口重复查询 DB
+_participant_cache: dict = {}  # {(group_id,): {name: member_id}}
+
+
+def _get_participant_map(group_id: int) -> dict:
+    """获取群成员名称→ID 映射（带缓存）。"""
+    cache_key = group_id
+    if cache_key in _participant_cache:
+        return _participant_cache[cache_key]
     from models.database import get_members
+    name_to_id = {}
     try:
         members = get_members(group_id)
-        name_to_id = {}
         for m in members:
             mid = m.get("id")
             if mid:
@@ -360,16 +379,25 @@ def _resolve_participant_names(group_id: int, names: list[str]) -> list[int]:
                     val = m.get(field, "")
                     if val:
                         name_to_id[val] = mid
-        ids = []
-        seen = set()
-        for name in names:
-            name = name.strip()
-            if not name:
-                continue
-            mid = name_to_id.get(name)
-            if mid and mid not in seen:
-                ids.append(mid)
-                seen.add(mid)
-        return ids
     except Exception:
+        pass
+    _participant_cache[cache_key] = name_to_id
+    return name_to_id
+
+
+def _resolve_participant_names(group_id: int, names: list[str]) -> list[int]:
+    """将 AI 返回的参与者名称解析为 member_id 列表（使用缓存）。"""
+    if not names:
         return []
+    name_to_id = _get_participant_map(group_id)
+    ids = []
+    seen = set()
+    for name in names:
+        name = name.strip()
+        if not name:
+            continue
+        mid = name_to_id.get(name)
+        if mid and mid not in seen:
+            ids.append(mid)
+            seen.add(mid)
+    return ids

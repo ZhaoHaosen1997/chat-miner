@@ -1055,17 +1055,11 @@ _SETTINGS_DEFS = [
          "分析日志保留天数"),
         ("log_max_records", str(config.LOG_MAX_RECORDS), "int",
          "任务记录最多保留条数"),
-        # v1.18.0: 事件探测
-        ("event_window_size", str(config.EVENT_WINDOW_SIZE), "int",
-         "事件探测窗口消息数"),
-        ("event_window_overlap", str(config.EVENT_WINDOW_OVERLAP), "int",
-         "事件探测窗口重叠消息数"),
-        ("event_ai_concurrency", str(config.EVENT_AI_CONCURRENCY), "int",
-         "事件探测 AI 并发数"),
+        # v1.18.0: 事件探测（event_window_size/overlap/ai_concurrency 已在 v1.18.1 废弃）
         ("event_active_group_threshold", str(config.EVENT_ACTIVE_GROUP_THRESHOLD), "int",
          "活跃群判定阈值(条/小时)"),
         ("event_active_peak_absolute", str(config.EVENT_ACTIVE_PEAK_ABSOLUTE), "int",
-         "活跃群尖峰绝对阈值(条/30分钟)"),
+         "活跃群尖峰绝对阈值(条/小时)"),
         ("event_quiet_peak_multiplier", str(config.EVENT_QUIET_PEAK_MULTIPLIER), "int",
          "安静群尖峰相对倍数"),
         # v1.18.1: 自适应事件组切分
@@ -2510,9 +2504,7 @@ def load_app_settings_to_config():
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",
         # v1.18.0: 事件探测
-        "event_window_size": "EVENT_WINDOW_SIZE",
-        "event_window_overlap": "EVENT_WINDOW_OVERLAP",
-        "event_ai_concurrency": "EVENT_AI_CONCURRENCY",
+        # v1.18.0 配置项（event_window_size/overlap/ai_concurrency 已在 v1.18.1 废弃）
         "event_active_group_threshold": "EVENT_ACTIVE_GROUP_THRESHOLD",
         "event_active_peak_absolute": "EVENT_ACTIVE_PEAK_ABSOLUTE",
         "event_quiet_peak_multiplier": "EVENT_QUIET_PEAK_MULTIPLIER",
@@ -2890,8 +2882,9 @@ def insert_events(events: list[dict]) -> list[int]:
             cur = conn.execute("""
                 INSERT INTO events (group_id, title, description, event_type,
                     participant_ids, key_quotes, start_time, end_time,
-                    message_start_idx, message_end_idx, message_count, ai_model_used)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    message_start_idx, message_end_idx, message_count,
+                    ai_model_used, window_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 e["group_id"],
                 e["title"],
@@ -2905,6 +2898,7 @@ def insert_events(events: list[dict]) -> list[int]:
                 e.get("message_end_idx", 0),
                 e.get("message_count", 0),
                 e.get("ai_model_used", ""),
+                e.get("window_id", None),
             ))
             ids.append(cur.lastrowid)
     return ids
@@ -3041,8 +3035,13 @@ def get_pending_windows_count(group_id: int) -> int:
     return row["cnt"] if row else 0
 
 
-def delete_windows_by_group(group_id: int):
-    """删除群的所有事件窗口"""
+def delete_windows_by_group(group_id: int, only_pending: bool = False):
+    """删除群的事件窗口。only_pending=True 时只删除未分析的窗口。"""
     with db() as conn:
-        conn.execute("DELETE FROM event_windows WHERE group_id=?", (group_id,))
+        if only_pending:
+            conn.execute(
+                "DELETE FROM event_windows WHERE group_id=? AND status IN ('pending','empty')",
+                (group_id,))
+        else:
+            conn.execute("DELETE FROM event_windows WHERE group_id=?", (group_id,))
 

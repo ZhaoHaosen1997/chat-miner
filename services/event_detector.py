@@ -60,12 +60,19 @@ def find_candidate_windows(chat, date_start: str, date_end: str) -> list[dict]:
 # ── Phase 1: 尖峰检测 + 自适应切分 (v1.18.1) ──────────────────────────
 
 
-def _classify_group_activity(chat) -> str:
+def _classify_group_activity(chat, date_start: str = "", date_end: str = "") -> str:
     """判定群活跃度：返回 'active' 或 'quiet'。
 
-    基于日均小时消息量 vs 配置阈值。
+    基于所选时间范围内的日均小时消息量 vs 配置阈值。
     """
     messages = chat.messages
+    if not messages:
+        return "quiet"
+
+    # v1.18.1 fix: 按所选时间范围过滤
+    if date_start and date_end:
+        messages = [m for m in messages
+                    if date_start <= m.get("formattedTime", "")[:10] <= date_end]
     if not messages:
         return "quiet"
 
@@ -75,7 +82,7 @@ def _classify_group_activity(chat) -> str:
         return "quiet"
 
     min_ts, max_ts = min(all_times), max(all_times)
-    hours_span = max((max_ts - min_ts) / 3600, 1)  # Unix timestamp seconds → hours
+    hours_span = max((max_ts - min_ts) / 3600, 1)
     avg_hourly = len(messages) / hours_span
     threshold = getattr(config, "EVENT_ACTIVE_GROUP_THRESHOLD", 30)
 
@@ -90,7 +97,7 @@ def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[dict]:
         list of dicts, each with: messages, start_time, end_time,
         message_count, summary
     """
-    activity = _classify_group_activity(chat)
+    activity = _classify_group_activity(chat, date_start, date_end)
     hourly = _count_hourly_messages(chat, date_start, date_end)
 
     # 检测尖峰
@@ -621,25 +628,13 @@ def _parse_ai_response(result: str) -> dict | None:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        # 尝试用正则提取 JSON 对象
-        match = re.search(r'\{[^{}]*"title"[^{}]*\}', text, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group())
-            except json.JSONDecodeError:
-                # 向后兼容：尝试旧 events 数组格式
-                match2 = re.search(r'\{.*"events".*\}', text, re.DOTALL)
-                if match2:
-                    try:
-                        data = json.loads(match2.group())
-                    except json.JSONDecodeError:
-                        logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
-                        return None
-                else:
-                    logger.warning("AI 返回中未找到事件 JSON: %s...", text[:200])
-                    return None
-        else:
-            logger.warning("AI 返回中未找到事件 JSON: %s...", text[:200])
+        # 用花括号计数提取最外层 JSON 对象（支持嵌套）
+        data = _extract_json_object(text)
+        if data is None:
+            logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
+            return None
+
+    # ... continue with data parsing below
             return None
 
     # 如果 data 是 null
@@ -669,6 +664,37 @@ def _parse_ai_response(result: str) -> dict | None:
         "time_span_start": ts.get("start", ""),
         "time_span_end": ts.get("end", ""),
     }
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """用花括号计数提取最外层 JSON 对象，支持嵌套花括号。
+
+    相比正则 \\{[^{}]*\\} 无法处理嵌套对象，此方法逐字符计数，
+    找到第一个 '{' 后追踪花括号深度直到归零。
+    """
+    # 找到第一个 '{'
+    start = text.find('{')
+    if start == -1:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    # 这个候选无效，继续找下一个 '{'
+                    start = text.find('{', start + 1)
+                    if start == -1:
+                        return None
+                    depth = 0
+                    i = start - 1  # 循环会 +1
+    return None
 
 
 def _normalize_event_type(t: str) -> str:
