@@ -1062,7 +1062,26 @@ onMounted(async () => {
       </div>
 
       <!-- WeFlow 同步 -->
-      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden" v-if="false"></div>
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-sky-400"></div><RefreshCw :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">WeFlow 同步</span></div>
+        <div class="p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-slate-700 font-medium">启用自动同步</label>
+            <button @click="saveWeFlowSetting('weflow_enabled', !weflowSettings.weflow_enabled)"
+              :class="['w-10 h-5 rounded-full transition-colors', weflowSettings.weflow_enabled ? 'bg-sky-500' : 'bg-slate-200']">
+              <div :class="['w-4 h-4 rounded-full bg-white shadow-sm transition-transform', weflowSettings.weflow_enabled ? 'translate-x-5' : 'translate-x-0.5']" />
+            </button>
+          </div>
+          <template v-if="weflowSettings.weflow_enabled">
+            <div><label class="text-xs text-slate-500">WeFlow 地址</label>
+              <input :value="weflowSettings.weflow_base_url" @change="saveWeFlowSetting('weflow_base_url', $event.target.value)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" placeholder="http://127.0.0.1:5031" /></div>
+            <div><label class="text-xs text-slate-500">Access Token</label>
+              <input :value="weflowSettings.weflow_access_token" @change="saveWeFlowSetting('weflow_access_token', $event.target.value)" type="password" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" placeholder="粘贴 WeFlow Token" /></div>
+            <div><label class="text-xs text-slate-500">同步间隔 (小时)</label>
+              <input type="number" :value="weflowSettings.weflow_sync_interval_hours" @change="saveWeFlowSetting('weflow_sync_interval_hours', $event.target.value)" min="1" max="168" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          </template>
+        </div>
+      </div>
 
       <!-- 提示词风格 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">

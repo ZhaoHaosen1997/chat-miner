@@ -243,7 +243,7 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
         batch += 1
         try:
             resp = client.get_session_messages(
-                chatroom_id, limit=5000, since=since, offset=offset
+                chatroom_id, limit=1000, since=since, offset=offset
             )
         except WeFlowError as e:
             logger.error(f"[WeFlow Sync] 拉取失败 (batch={batch}): {e}")
