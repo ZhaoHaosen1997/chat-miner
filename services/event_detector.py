@@ -206,14 +206,16 @@ def _find_peaks(hourly: dict, activity: str,
                 continue
             avg = sum(mon_hours.values()) / len(mon_hours)
             threshold = max(avg * quiet_multiplier, 20)
+            # 稀疏月份（≤5小时）：阈值不超过最高峰的 60%，确保尖峰可被检测
+            n = len(mon_hours)
+            if n <= 5:
+                threshold = min(threshold, max(mon_hours.values()) * 0.6)
             mon_peaks = [h for h, c in mon_hours.items() if c >= threshold]
             peaks.extend(mon_peaks)
         peaks.sort()
 
-    logger.debug("尖峰检测 (%s): %d peaks, threshold=%.0f",
-                 activity, len(peaks),
-                 active_threshold if activity == "active" else
-                 (sum(hourly.values()) / len(hourly) * quiet_multiplier if hourly else 0))
+    logger.debug("尖峰检测 (%s): %d peaks, %d months",
+                 activity, len(peaks), len(monthly))
     return peaks
 
 

@@ -70,9 +70,13 @@ def _find_merged_data(group: dict) -> Path | None:
             candidate = config.BASE_DIR / candidate  # v1.5.7
         if candidate.exists():
             return candidate
-    # 2. data 目录下按 import_{群名} 查找
+    # 2. data 目录下按群名匹配查找（避免跨群污染）
+    group_name = (group.get("name") or "").strip()
     for subdir in config.DATA_DIR.iterdir():
         if subdir.is_dir() and subdir.name.startswith("import_"):
+            # 群名需匹配目录名，防止加载其他群的 merged_data
+            if group_name and group_name not in subdir.name:
+                continue
             candidate = subdir / "merged_data.json"
             if candidate.exists():
                 return candidate
