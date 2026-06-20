@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from config import config
+from services.desensitize import filter_pii
 
 logger = logging.getLogger(__name__)
 
@@ -844,13 +845,15 @@ def format_messages_for_prompt(messages: list[dict],
         if msg.get("type") == "引用消息":
             continue
         time_str = msg.get("formattedTime", "")[11:16]  # "HH:MM"
-        sender = get_sender_name(msg.get("senderID", 0))
+        sender = str(msg.get("senderID", 0))
         raw_content = (msg.get("content") or "").strip()
         if not raw_content:
             continue
         content = strip_mention_from_content(raw_content, member_names)
         if not content or not _has_meaningful_content(content):
             continue
+        # v1.18.5: PII 过滤（身份证/手机号/邮箱）
+        content = filter_pii(content)
 
         line = f"[{time_str}] {sender}: {content}"
         total += len(line)

@@ -27,10 +27,8 @@ from services.stats_engine import (
     compute_activity_stats, compute_language_stats,
     compute_message_style, compute_topic_role,
 )
-from services.weekly_report import (
-    _build_alias_map, _de_anonymize_ai_output,
-    _ai_generate,
-)
+from services.weekly_report import _ai_generate
+from services.desensitize import filter_pii
 
 logger = logging.getLogger(__name__)
 
@@ -165,10 +163,9 @@ async def generate_annual_report(group_id: int, year: int, chat,
     if not ai_data:
         return {"success": False, "error": "AI 返回格式异常，无法解析 JSON"}
 
-    # 8. 解析奖项（用 #N 编号映射成员，避免名字替换污染）
-    member_index = raw_data["member_index"]  # [{wxid, alias, detail}, ...]
+    # 8. 解析奖项（用 #N 编号映射成员）
+    member_index = raw_data["member_index"]  # [{wxid, sender_id, detail}, ...]
     member_map = raw_data["member_map"]  # {wxid: member_id}
-    reverse_map = raw_data["reverse_map"]  # {alias: real_name}
     member_names_map = {}
     for s in chat.senders:
         member_names_map[s["wxid"]] = s.get("displayName") or s.get("nickname") or s["wxid"]
@@ -185,18 +182,15 @@ async def generate_annual_report(group_id: int, year: int, chat,
         if 0 <= idx < len(member_index):
             wxid = member_index[idx]["wxid"]
             member_id = member_map.get(wxid, 0)
-            display_name = member_names_map.get(wxid, member_index[idx]["alias"])
+            display_name = member_names_map.get(wxid, member_index[idx].get("sender_id", str(wxid)))
         else:
             member_id = 0
             display_name = winner_raw
             logger.warning("无法解析获奖者: winner=%s (期望 #N 格式，N=1~%d)", winner_raw, len(member_index))
 
-        # 只脱敏颁奖词（奖项名是纯标题，不需要脱敏）
         reason = award.get("award_reason", "")
-        if reason:
-            reason = _de_anonymize_ai_output(reason, reverse_map)
 
-        # 验证奖项名（过滤被污染的）
+        # 验证奖项名
         award_name = award.get("award_name", "").strip()
         if not award_name or len(award_name) < 3 or award_name in ("null", "None", ""):
             logger.warning("跳过无效奖项名: award_name=%r, winner=%s", award_name, winner_raw)
@@ -219,11 +213,6 @@ async def generate_annual_report(group_id: int, year: int, chat,
     else:
         logger.warning("年度奖项全部被过滤: group=%d year=%d total=%d skipped=%d",
                        group_id, year, len(awards), skipped_awards)
-
-    # 脱敏叙事内容（不含奖项名）
-    for key in ("year_narrative", "group_evolution", "meme_of_the_year", "next_year_wish"):
-        if key in ai_data:
-            ai_data[key] = _de_anonymize_ai_output(ai_data[key], reverse_map)
 
     # 10. 组装年度报告
     date_start = year_dates[0]
@@ -330,9 +319,16 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
 
     name_to_wxid = {v: k for k, v in member_names.items()}
 
-    # 3. 匿名化
-    alias_map = _build_alias_map(member_names)
-    reverse_map = {v: k for k, v in alias_map.items()}
+    # 3. wxid -> senderID 映射
+    wxid_to_sid = {}
+    for s in chat.senders:
+        wxid = s.get("wxid", "")
+        sid = s.get("senderID", 0)
+        if wxid:
+            wxid_to_sid[wxid] = sid
+
+    def _sid_str(wxid):
+        return str(wxid_to_sid.get(wxid, "?"))
 
     # 4. 计算每成员 Python 统计
     member_stats = {}
@@ -367,14 +363,14 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
 
     # 5. 整体统计
     sorted_by_msg = sorted(member_stats.items(), key=lambda x: x[1]["msg_count"], reverse=True)
-    top_speakers = [{"alias": alias_map.get(wxid, member_names.get(wxid, wxid)),
+    top_speakers = [{"sender_id": _sid_str(wxid),
                      "count": s["msg_count"]} for wxid, s in sorted_by_msg[:10]]
 
     night_owls = sorted(
         [(wxid, s) for wxid, s in member_stats.items() if s["peak_hour"] >= 23 or s["peak_hour"] <= 5],
         key=lambda x: x[1]["msg_count"], reverse=True
     )[:5]
-    night_owls = [{"alias": alias_map.get(wxid, member_names.get(wxid, wxid)),
+    night_owls = [{"sender_id": _sid_str(wxid),
                    "peak_hour": s["peak_hour"]} for wxid, s in night_owls]
 
     lurkers = sorted(
@@ -382,14 +378,14 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
          if s["days_active"] >= 10 and s["msg_count"] <= s["days_active"] * 2],
         key=lambda x: x[1]["msg_count"]
     )[:5]
-    lurkers = [{"alias": alias_map.get(wxid, member_names.get(wxid, wxid)),
+    lurkers = [{"sender_id": _sid_str(wxid),
                 "msg_count": s["msg_count"], "days_active": s["days_active"]}
                for wxid, s in lurkers]
 
     emoji_kings = sorted(member_stats.items(),
                          key=lambda x: sum(e.get("count", 0) for e in x[1].get("top_emojis", [])),
                          reverse=True)[:5]
-    emoji_kings = [{"alias": alias_map.get(wxid, member_names.get(wxid, wxid)),
+    emoji_kings = [{"sender_id": _sid_str(wxid),
                     "emoji_count": sum(e.get("count", 0) for e in s.get("top_emojis", []))}
                    for wxid, s in emoji_kings]
 
@@ -411,7 +407,7 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
             content = (m.get("content") or "").strip()
             if len(content) > 10:
                 highlights.append({
-                    "speaker": alias_map.get(m.get("wxid", ""), member_names.get(m.get("wxid", ""), "?")),
+                    "speaker": _sid_str(m.get("wxid", "")),
                     "content": content[:120],
                     "time": m.get("formattedTime", "")[11:16],
                 })
@@ -423,10 +419,10 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
         step = len(sampled_msgs) / 150
         sampled_msgs = [sampled_msgs[int(i * step)] for i in range(150)]
 
-    # 7. 匿名化消息内容
+    # 7. PII 过滤消息内容
     for day in sampled_msgs:
         for h in day["highlights"]:
-            h["content"] = _anonymize_content(h["content"], alias_map)
+            h["content"] = filter_pii(h["content"])
 
     stats = {
         "total_messages": total_text,
@@ -437,13 +433,13 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
         "lurkers": lurkers,
         "emoji_kings": emoji_kings,
         "monthly_trend": monthly_trend,
-        "member_details": {alias_map.get(wxid, member_names.get(wxid, wxid)): s
+        "member_details": {_sid_str(wxid): s
                           for wxid, s in member_stats.items()},
     }
 
     # 构建编号索引（按发言量降序排列，供 prompt 中 #N 引用）
     member_index = [
-        {"wxid": wxid, "alias": alias_map.get(wxid, member_names.get(wxid, wxid)),
+        {"wxid": wxid, "sender_id": _sid_str(wxid),
          "detail": member_stats[wxid]}
         for wxid, _ in sorted_by_msg
     ]
@@ -451,32 +447,11 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
     return {
         "stats": stats,
         "sampled_msgs": sampled_msgs,
-        "alias_map": alias_map,
-        "reverse_map": reverse_map,
+        "member_index": member_index,
         "member_map": member_map,
         "name_to_wxid": name_to_wxid,
         "member_index": member_index,
     }
-
-
-def _anonymize_content(content: str, alias_map: dict[str, str]) -> str:
-    """匿名化单条消息内容"""
-    sorted_names = sorted(alias_map.items(), key=lambda x: len(x[0]), reverse=True)
-    for real_name, alias in sorted_names:
-        if real_name and len(real_name) > 1:
-            content = content.replace(real_name, alias)
-    # 注意：模式顺序很重要！更具体的必须放前面
-    for pattern, replacement in [
-        (re.compile(r'\d{6}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'), '[身份证]'),
-        (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[邮箱]'),
-        (re.compile(r'1[3-9]\d{9}'), '[手机号]'),
-        (re.compile(r'\d{3,4}-\d{7,8}'), '[电话号码]'),              # 座机号码
-    ]:
-        content = pattern.sub(replacement, content)
-    return content
-
-
-# _de_anonymize_ai_output 已从 services.weekly_report 导入，直接使用，不重复定义
 
 
 def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: int,
@@ -508,7 +483,7 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
     for i, m in enumerate(member_index[:20]):
         d = m["detail"]
         member_index_lines.append(
-            f"[#{i+1}] {m['alias']} — {d['msg_count']}条消息，活跃{d['days_active']}天，"
+            f"[#{i+1}] [{m['sender_id']}] — {d['msg_count']}条消息，活跃{d['days_active']}天，"
             f"高峰{d['peak_hour']}点，{d['style_label']}，{d['role_label']}"
         )
 
@@ -527,7 +502,7 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
 - 全年消息：{stats['total_messages']} 条 · 活跃 {stats['active_days']} 天 · {stats['active_members']} 人参与
 
 ### 发言排行
-{chr(10).join(f"{i+1}. {s['alias']} — {s['count']}条" for i, s in enumerate(stats['top_speakers'][:10]))}
+{chr(10).join(f"{i+1}. {s['sender_id']} — {s['count']}条" for i, s in enumerate(stats['top_speakers'][:10]))}
 
 ### 月度趋势
 {chr(10).join(f"- {t['month']}：{t['count']}条" for t in stats['monthly_trend'])}

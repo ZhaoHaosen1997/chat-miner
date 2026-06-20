@@ -18,6 +18,7 @@ from config import config
 from models.database import (
     get_default_prompt, insert_events, get_group
 )
+from services.desensitize import filter_pii
 
 logger = logging.getLogger(__name__)
 
@@ -542,6 +543,8 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
         sender = m.get("senderID", "未知")
         content = (m.get("content") or "").strip()
         if content:
+            # v1.18.5: PII 过滤
+            content = filter_pii(content)
             lines.append(f"[{time_str}] {sender}: {content}")
 
     user_prompt = "\n".join(lines)
