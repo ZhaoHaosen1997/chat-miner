@@ -20,8 +20,28 @@ _PII_PATTERNS = [
     (re.compile(r'\d{3,4}-\d{7,8}'), '[电话号码]'),
 ]
 
-# senderID → 昵称 替换正则：匹配 [数字] 格式
-_SID_PATTERN = re.compile(r'\[(\d+)\]')
+# senderID → 昵称 替换正则
+_SID_BRACKET = re.compile(r'\[(\d+)\]')   # [13]
+_SID_HAO = re.compile(r'\b(\d+)号\b')      # 13号（中文语境常见）
+
+
+def _resolve_all(text: str, name_map: dict[int, str]) -> str:
+    """将文本中所有 [N]、N号 格式替换为昵称"""
+    if not text or not name_map:
+        return text
+
+    def _by_bracket(match):
+        sid = int(match.group(1))
+        return name_map.get(sid, match.group(0))
+
+    def _by_hao(match):
+        sid = int(match.group(1))
+        name = name_map.get(sid)
+        return name if name else match.group(0)
+
+    text = _SID_BRACKET.sub(_by_bracket, text)
+    text = _SID_HAO.sub(_by_hao, text)
+    return text
 
 
 def filter_pii(content: str) -> str:
@@ -57,31 +77,30 @@ def build_sender_name_map(senders: list[dict]) -> dict[int, str]:
 
 
 def resolve_sender_ids(text: str, name_map: dict[int, str]) -> str:
-    """将文本中的 [123] 格式替换为对应昵称
-
-    AI 只能看到数字 ID，存储前通过此函数还原为用户可读的昵称。
-    name_map 由 build_sender_name_map(chat.senders) 构建。
-    """
-    if not text or not name_map:
-        return text
-
-    def _replacer(match):
-        sid = int(match.group(1))
-        return name_map.get(sid, match.group(0))
-
-    return _SID_PATTERN.sub(_replacer, text)
+    """将文本中的 [123]、123号 格式替换为对应昵称"""
+    return _resolve_all(text, name_map)
 
 
 def resolve_sender_ids_deep(data, name_map: dict[int, str]):
-    """递归遍历 dict/list/str，将所有 [senderID] 替换为昵称
+    """递归遍历 dict/list/str，将所有 senderID 引用替换为昵称
 
     用于 AI 输出的 JSON 结构（周报/月报/年报/事件分析）。
+    同时处理 participant.name 中的裸数字。
     """
     if not name_map:
         return data
     if isinstance(data, str):
-        return resolve_sender_ids(data, name_map)
+        return _resolve_all(data, name_map)
     if isinstance(data, dict):
+        # 特殊处理：如果 key 是 "name" 且 value 是纯数字，直接映射
+        if "name" in data and isinstance(data["name"], str):
+            raw = data["name"].strip()
+            # 纯数字如 "4"、"13"
+            if raw.isdigit():
+                sid = int(raw)
+                data["name"] = name_map.get(sid, raw)
+            else:
+                data["name"] = _resolve_all(raw, name_map)
         return {k: resolve_sender_ids_deep(v, name_map) for k, v in data.items()}
     if isinstance(data, list):
         return [resolve_sender_ids_deep(item, name_map) for item in data]

@@ -545,7 +545,7 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
         if content:
             # v1.18.5: PII 过滤
             content = filter_pii(content)
-            lines.append(f"[{time_str}] {sender}: {content}")
+            lines.append(f"[{time_str}] [{sender}]: {content}")
 
     user_prompt = "\n".join(lines)
     return system_prompt, user_prompt
@@ -575,8 +575,8 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | No
   "mood": "欢乐|热闹|沙雕|温馨|吐槽|吃瓜|摸鱼|破防|离谱|平淡",
   "mood_emoji": "🔥",
   "participants": [
-    {"name": "成员A", "role": "主角"},
-    {"name": "成员B", "role": "反对者"}
+    {"name": "[1]", "role": "主角"},
+    {"name": "[13]", "role": "反对者"}
   ],
   "key_moments": [
     {"time": "HH:MM", "description": "发生了什么", "quote": "关键原话（可选）"}
@@ -587,7 +587,7 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | No
 }
 
 注意：
-- mood/mood_emoji/key_moments/aftermath 为可选字段，根据实际内容决定是否提供
+- 群友用 [数字] 格式标识（如 [1]、[13]），participants.name、narrative、key_quotes 中引用群友时都必须使用 [数字] 格式，不要自创名称
 - participants 中 role 可选值：主角/反对者/催化剂/和事佬/围观群众/气氛组/总结者
 - key_moments 最多列 5 个关键时刻
 - key_quotes 最多 3 条，格式为 "原话 — 发言人"

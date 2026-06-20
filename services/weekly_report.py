@@ -739,7 +739,7 @@ def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> s
             speaker = h.get("sender_id", "?")
             content = h.get("content", "")
             time_str = h.get("time", "")
-            lines.append(f"[{speaker}] ({time_str}): {content}")
+            lines.append(f"[{speaker}] [{time_str}]: {content}")
         chat_parts.append("\n".join(lines))
 
     sampled_chat = "\n".join(chat_parts) if chat_parts else "暂无聊天样本"

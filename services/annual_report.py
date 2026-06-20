@@ -496,7 +496,7 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
     for day in sampled[:80]:
         lines = [f"[{day['date']}，{day['count']}条]"]
         for h in day["highlights"]:
-            lines.append(f"  {h['speaker']} ({h['time']}): {h['content']}")
+            lines.append(f"  [{h['speaker']}] ({h['time']}): {h['content']}")
         sample_parts.append("\n".join(lines))
     sample_text = "\n\n".join(sample_parts)
 

@@ -855,7 +855,7 @@ def format_messages_for_prompt(messages: list[dict],
         # v1.18.5: PII 过滤（身份证/手机号/邮箱）
         content = filter_pii(content)
 
-        line = f"[{time_str}] {sender}: {content}"
+        line = f"[{time_str}] [{sender}]: {content}"
         total += len(line)
         if total > max_chars:
             truncated = True
