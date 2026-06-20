@@ -757,6 +757,16 @@ const currentVersion = computed(() => {
               <span v-for="(cnt, yr) in archaeology.yearly_counts" :key="yr">{{ yr }}</span>
             </div>
           </div>
+
+          <!-- 参与的关键事件 -->
+          <RelatedEvents
+            v-if="memberId && portrait?.data_start_date"
+            :group-id="currentGroup?.id"
+            :member-id="memberId"
+            :date-from="portrait.data_start_date"
+            :date-to="portrait.data_end_date"
+            label="参与的关键事件"
+          />
         </template>
       </div>
 
@@ -838,13 +848,5 @@ const currentVersion = computed(() => {
         </div>
       </div>
     </template>
-    <RelatedEvents
-      v-if="memberId && portrait?.data_start_date"
-      :group-id="currentGroup?.id"
-      :member-id="memberId"
-      :date-from="portrait.data_start_date"
-      :date-to="portrait.data_end_date"
-      label="参与的关键事件"
-    />
   </div>
 </template>

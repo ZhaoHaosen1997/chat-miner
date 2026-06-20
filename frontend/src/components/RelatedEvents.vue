@@ -17,6 +17,7 @@ const props = defineProps({
 const router = useRouter()
 const events = ref([])
 const loading = ref(false)
+const error = ref('')
 
 const typeIcons = {
   decision: '🎯',
@@ -40,6 +41,7 @@ async function load() {
     events.value = result.slice(0, props.limit)
   } catch (e) {
     console.error('加载相关事件失败:', e)
+    error.value = e.message || '加载失败'
   } finally {
     loading.value = false
   }
@@ -59,7 +61,18 @@ onMounted(() => load())
 </script>
 
 <template>
-  <div v-if="events.length > 0" class="mt-6 bg-white rounded-xl border border-slate-200 p-4">
+  <!-- 加载中 -->
+  <div v-if="loading" class="mt-6 bg-white rounded-xl border border-slate-200 p-4 text-center">
+    <p class="text-xs text-slate-400">加载相关事件中...</p>
+  </div>
+
+  <!-- 加载失败 -->
+  <div v-else-if="error" class="mt-6 bg-white rounded-xl border border-red-200 p-4 text-center">
+    <p class="text-xs text-red-500">{{ error }}</p>
+  </div>
+
+  <!-- 有事件 -->
+  <div v-else-if="events.length > 0" class="mt-6 bg-white rounded-xl border border-slate-200 p-4">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-semibold text-slate-600 flex items-center gap-1.5">
         <Clock class="w-4 h-4 text-indigo-400" />

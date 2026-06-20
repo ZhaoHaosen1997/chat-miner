@@ -490,3 +490,14 @@ export function getEvents(gid, params = {}) {
 export function getEventDetail(gid, eventId) {
   return request(`/groups/${gid}/events/${eventId}`)
 }
+
+// 重新分析事件（兼容无 window_id 的旧事件）
+export async function reanalyzeEvent(gid, eventId) {
+  const res = await fetch(`${BASE}/groups/${gid}/events/${eventId}/reanalyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  const data = await res.json()
+  if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
+  return data.data  // { window_id, status, event_id, event }
+}

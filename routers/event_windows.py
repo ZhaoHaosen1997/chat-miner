@@ -234,7 +234,7 @@ async def api_analyze_all_windows(group_id: int):
                     done += 1
 
                 except Exception as e:
-                    logger.error("批量分析窗口 %d 失败: %s", wid, e)
+                    logger.error("批量分析窗口 %d 失败: %s", wid, e, exc_info=True)
                     update_window_status(wid, "pending", event_count=0)
                     failed += 1
                     done += 1
@@ -332,7 +332,7 @@ async def _analyze_window_with_ai(chat, group_id: int,
     try:
         result = await _call_ai_for_events(system_prompt, user_prompt)
     except Exception as e:
-        logger.warning("窗口 AI 调用失败: %s", e)
+        logger.warning("窗口 AI 调用失败: %s", e, exc_info=True)
         raise
 
     return result

@@ -595,23 +595,33 @@ null"""
     except Exception as e:
         if fallback:
             logger.info("主模型失败，尝试降级: %s", e)
-            result = await call_online_chat(
-                system_prompt=full_system,
-                user_prompt=user_prompt,
-                model_config=fallback,
-                temperature=0.8,
-                json_mode=True,
-                thinking=False,
-                max_tokens=4096,
-                timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
-            )
+            try:
+                result = await call_online_chat(
+                    system_prompt=full_system,
+                    user_prompt=user_prompt,
+                    model_config=fallback,
+                    temperature=0.8,
+                    json_mode=True,
+                    thinking=False,
+                    max_tokens=4096,
+                    timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
+                )
+            except Exception as fb_e:
+                logger.error("备用模型也失败: %s", fb_e, exc_info=True)
+                raise
         else:
+            logger.error("主模型调用失败且无备用模型: %s", e, exc_info=True)
             raise
 
     # call_online_chat 返回 dict: {"success": bool, "data": str, ...}
+    if isinstance(result, dict) and not result.get("success"):
+        error_msg = result.get("error", "未知错误")
+        model_name = result.get("model", "unknown")
+        raise RuntimeError(f"AI 模型调用失败 ({model_name}): {error_msg}")
+
     response_text = result.get("data", "") if isinstance(result, dict) else str(result)
     if not response_text:
-        logger.warning("AI 返回空内容: %s", result.get("error", "unknown"))
+        logger.error("AI 返回空内容: %s (model=%s)", result.get("error", "unknown"), result.get("model", "unknown"))
         return None
     return _parse_ai_response(response_text)
 

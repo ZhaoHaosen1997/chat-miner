@@ -5,7 +5,7 @@ import {
   getDates, getRecentReports, getGroupStats, analyzeDateAsync, analyzeAll, getPortraits,
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
   generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
-  getEvents, getEventWindows, detectEvents, analyzeWindow,
+  getEvents, getEventWindows, detectEvents, analyzeWindow, reanalyzeEvent,
 } from '../api/index.js'
 import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
@@ -376,8 +376,9 @@ async function loadDashboardEvents() {
     ])
     dashboardEvents.value = Array.isArray(evts) ? evts : []
     dashboardWindows.value = Array.isArray(wins) ? wins : []
-  } catch (e) { /* ignore */ }
-  finally { eventsLoading.value = false }
+  } catch (e) {
+    console.error('加载事件列表失败:', e)
+  } finally { eventsLoading.value = false }
 }
 
 async function handleScanEvents(force = false) {
@@ -387,8 +388,9 @@ async function handleScanEvents(force = false) {
     await detectEvents(gid.value, '', '', force)
     eventShowCount.value = 8
     await loadDashboardEvents()
-  } catch (e) { /* ignore */ }
-  finally { eventsScanning.value = false }
+  } catch (e) {
+    showError?.('事件扫描失败', e.message, e.stack, '仪表盘·扫描事件')
+  } finally { eventsScanning.value = false }
 }
 
 function handleRescanConfirm() { showRescanConfirm.value = true }
@@ -399,13 +401,25 @@ async function handleRescanExecute() {
 }
 
 async function handleReanalyzeEvent(event) {
-  if (!gid.value || !event.window_id) return
-  analyzingWindowId.value = event.window_id
+  if (!gid.value) return
+  const useEventId = !event.window_id
+  const idForTracking = useEventId ? event.id : event.window_id
+  analyzingWindowId.value = idForTracking
   try {
-    await analyzeWindow(gid.value, event.window_id)
+    let result
+    if (useEventId) {
+      // 旧事件无 window_id，走兼容端点
+      result = await reanalyzeEvent(gid.value, event.id)
+    } else {
+      result = await analyzeWindow(gid.value, event.window_id)
+    }
+    if (result?.status === 'empty') {
+      showError?.('未发现事件', 'AI 判断该时段不构成值得记录的事件', '', '仪表盘·重新分析事件')
+    }
     await loadDashboardEvents()
-  } catch (e) { /* ignore */ }
-  finally { analyzingWindowId.value = null }
+  } catch (e) {
+    showError?.('重新分析失败', e.message, e.stack, '仪表盘·重新分析事件')
+  } finally { analyzingWindowId.value = null }
 }
 
 async function handleAnalyzeAllEvents() {
@@ -414,7 +428,9 @@ async function handleAnalyzeAllEvents() {
     const { analyzeAllWindows: analyzeAll } = await import('../api/index.js')
     const result = await analyzeAll(gid.value)
     if (result?.task_id) activeTaskId.value = result.task_id
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    showError?.('一键分析失败', e.message, e.stack, '仪表盘·一键分析全部')
+  }
 }
 
 async function handleAnalyzeWindow(windowId) {
@@ -424,11 +440,15 @@ async function handleAnalyzeWindow(windowId) {
     const result = await analyzeWindow(gid.value, windowId)
     if (result?.event_id) {
       router.push(`/event/${result.event_id}`)
+    } else if (result?.status === 'empty') {
+      showError?.('未发现事件', 'AI 判断该时段不构成值得记录的事件', '', '仪表盘·分析窗口')
+      await loadDashboardEvents()
     } else {
       await loadDashboardEvents()
     }
-  } catch (e) { /* ignore */ }
-  finally { analyzingWindowId.value = null }
+  } catch (e) {
+    showError?.('窗口分析失败', e.message, e.stack, '仪表盘·分析窗口')
+  } finally { analyzingWindowId.value = null }
 }
 
 const groupedDashboardEvents = computed(() => {
@@ -712,7 +732,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-400 text-[10px] flex-shrink-0">{{ e.message_count || 0 }}条</span>
                     <span class="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0">已分析</span>
                     <button @click.stop="handleReanalyzeEvent(e)"
-                      :disabled="analyzingWindowId === e.window_id"
+                      :disabled="analyzingWindowId != null && analyzingWindowId === e.window_id"
                       class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full text-[10px] hover:bg-amber-100 disabled:opacity-40 flex-shrink-0">
                       ↻
                     </button>

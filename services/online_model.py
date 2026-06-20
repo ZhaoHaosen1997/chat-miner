@@ -193,7 +193,7 @@ async def call_online_chat(
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.error(f"在线模型调用异常: {e}")
+        logger.error("在线模型调用异常: %s", e, exc_info=True)
         return {
             "success": False, "data": None,
             "error": str(e), "model": model_name, "duration_ms": duration_ms,

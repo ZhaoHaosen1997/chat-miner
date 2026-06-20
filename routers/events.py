@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 
 from models.database import (
     get_group, get_events, get_event, get_events_by_member,
-    insert_windows, delete_windows_by_group,
+    insert_windows, delete_windows_by_group, update_window_status,
 )
 from routers.groups import get_chat_cache
 
@@ -220,3 +220,125 @@ def _get_member_names(group_id: int, member_ids: list) -> dict:
         return name_map
     except Exception:
         return {}
+
+
+@router.post("/{event_id}/reanalyze")
+async def api_reanalyze_event(group_id: int, event_id: int):
+    """重新分析指定事件 — 兼容无 window_id 的旧事件。
+
+    流程：
+    1. 查找事件 → 获取时间范围和消息索引
+    2. 若事件有 window_id → 直接走窗口分析
+    3. 若无 window_id → 根据事件数据创建临时窗口，关联旧 event_id
+    4. 删除旧事件 → 调 AI → 写入新事件
+    """
+    from models.database import db, get_window
+    from routers.event_windows import (
+        _load_window_messages, _analyze_window_with_ai, _save_event_result,
+    )
+
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, detail="群不存在")
+
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, detail="群数据未加载")
+
+    old_event = get_event(event_id)
+    if not old_event or old_event.get("group_id") != group_id:
+        raise HTTPException(404, detail="事件不存在")
+
+    # 阶段1：确定或创建窗口
+    window_id = old_event.get("window_id")
+    window = None
+
+    if window_id:
+        # 有 window_id，直接用
+        window = get_window(window_id)
+        if not window:
+            raise HTTPException(404, detail=f"事件关联的窗口 {window_id} 不存在")
+
+    if not window:
+        # 无窗口：根据事件时间范围创建临时窗口
+        start_time = old_event.get("start_time", "")
+        end_time = old_event.get("end_time", "")
+        msg_count = old_event.get("message_count", 0)
+
+        # 加载该时间范围的消息（复用 _load_window_messages 用临时 dict）
+        all_msgs = _load_window_messages(chat, {"start_time": start_time, "end_time": end_time})
+        actual_count = max(msg_count, len(all_msgs))
+
+        # 创建窗口并关联旧事件
+        new_windows = insert_windows([{
+            "start_time": start_time,
+            "end_time": end_time,
+            "message_count": actual_count,
+            "summary_json": json.dumps({
+                "preview": [{"senderID": m.get("senderID", ""), "content": (m.get("content") or "")[:80]}
+                           for m in all_msgs[:5]]
+            }, ensure_ascii=False),
+        }], group_id)
+        window_id = new_windows[0]
+        window = get_window(window_id)
+        # 关联旧事件以便后续删除
+        with db() as conn:
+            conn.execute(
+                "UPDATE event_windows SET event_id=? WHERE id=?",
+                (event_id, window_id),
+            )
+        logger.info("为旧事件 %d 创建临时窗口 %d (start=%s, msgs=%d)",
+                    event_id, window_id, start_time[:16], actual_count)
+
+    # 阶段2：删除旧事件
+    with db() as conn:
+        conn.execute("DELETE FROM events WHERE id=?", (event_id,))
+    logger.info("重新分析事件 %d，已删除旧事件（窗口=%d）", event_id, window_id)
+
+    # 阶段3：锁定窗口为 analyzing
+    if window.get("status") == "analyzing":
+        raise HTTPException(409, detail="该事件组正在分析中")
+    update_window_status(window_id, "analyzing")
+
+    # 阶段4：加载消息 + AI 分析
+    try:
+        window_msgs = _load_window_messages(chat, window)
+        if not window_msgs:
+            update_window_status(window_id, "empty", event_count=0)
+            return {
+                "code": 200,
+                "message": "窗口无有效消息",
+                "data": {"window_id": window_id, "status": "empty", "event": None},
+            }
+
+        event_data = await _analyze_window_with_ai(chat, group_id, window_msgs, window)
+
+        if event_data:
+            new_event_id = _save_event_result(event_data, group_id, window_id, window)
+            update_window_status(window_id, "analyzed",
+                                event_count=1, event_id=new_event_id)
+            logger.info("事件 %d 重新分析完成: '%s' → 新事件 id=%s",
+                        event_id, event_data.get("title", ""), new_event_id)
+            return {
+                "code": 200,
+                "message": "重新分析完成，发现事件",
+                "data": {
+                    "window_id": window_id,
+                    "status": "analyzed",
+                    "event_id": new_event_id,
+                    "event": {"id": new_event_id, "title": event_data.get("title", "")},
+                },
+            }
+        else:
+            update_window_status(window_id, "empty", event_count=0)
+            logger.info("事件 %d 重新分析完成: 无事件", event_id)
+            return {
+                "code": 200,
+                "message": "重新分析完成，未发现事件",
+                "data": {"window_id": window_id, "status": "empty", "event": None},
+            }
+
+    except Exception as e:
+        update_window_status(window_id, "pending", event_count=0)
+        logger.error("事件 %d 重新分析失败: %s", event_id, e, exc_info=True)
+        raise HTTPException(500, detail=f"AI 分析失败: {str(e)}")

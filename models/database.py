@@ -503,6 +503,8 @@ def init_db():
         _migrate_v1_18_1(conn)
         # v1.18.2: 事件丰富化 — report_json 列
         _migrate_v1_18_2(conn)
+        # v1.18.3: 回填旧事件的 window_id
+        _migrate_v1_18_3(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -891,6 +893,18 @@ def _migrate_v1_18_2(conn):
     if "report_json" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN report_json TEXT DEFAULT ''")
         logger.info("DB migrate v1.18.2: added events.report_json")
+
+
+def _migrate_v1_18_3(conn):
+    """v1.18.3: 回填旧事件的 window_id — 从 event_windows 表关联"""
+    result = conn.execute(
+        "UPDATE events SET window_id = ("
+        "  SELECT id FROM event_windows WHERE event_windows.event_id = events.id"
+        ") WHERE window_id IS NULL"
+    )
+    count = result.rowcount
+    if count > 0:
+        logger.info("DB migrate v1.18.3: backfilled %d events.window_id from event_windows", count)
 
 
 def _seed_default_model_configs(conn):

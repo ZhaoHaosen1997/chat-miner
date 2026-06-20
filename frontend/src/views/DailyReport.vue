@@ -9,6 +9,7 @@ const props = defineProps({ date: String })
 const router = useRouter()
 const currentGroup = inject('currentGroup')
 const activeTaskId = inject('activeTaskId')
+const showError = inject('showError')
 
 const reanalyzing = ref(false)
 const adjacentDates = ref({ prev: null, next: null })
@@ -23,7 +24,10 @@ async function loadAdjacentDates() {
       adjacentDates.value.prev = idx < dates.length - 1 ? dates[idx + 1] : dates[0]
       adjacentDates.value.next = idx > 0 ? dates[idx - 1] : dates[dates.length - 1]
     }
-  } catch { adjacentDates.value = { prev: null, next: null } }
+  } catch (e) {
+    console.error('加载相邻日期失败:', e)
+    adjacentDates.value = { prev: null, next: null }
+  }
 }
 
 function goDate(date) {
@@ -45,8 +49,10 @@ async function reanalyze() {
       // 立即完成（消息太少等）
       await load()
     }
-  } catch (e) { console.error(e) }
-  finally { reanalyzing.value = false }
+  } catch (e) {
+    console.error(e)
+    showError?.('重新分析失败', e.message, e.stack, '每日报告·重新分析')
+  } finally { reanalyzing.value = false }
 }
 
 const report = ref(null)
