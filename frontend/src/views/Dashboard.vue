@@ -734,17 +734,17 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <span class="text-xs text-slate-400 font-normal">{{ dashboardEvents.length + dashboardWindows.filter(w=>w.status==='pending').length }}</span>
               </h3>
               <div class="flex items-center gap-1.5">
-                <button @click="checkPrivacyConsent(() => handleScanEvents(false))" :disabled="!!analyzingTarget || eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleScanEvents(false))" :disabled="!!analyzingTarget || showPrivacyConfirm || eventsScanning"
                   class="text-[10px] bg-emerald-500 text-white px-2 py-1 rounded-full hover:bg-emerald-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Search :size="10" />扫描新事件
                 </button>
-                <button @click="checkPrivacyConsent(() => handleRescanConfirm())" :disabled="!!analyzingTarget || eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleRescanConfirm())" :disabled="!!analyzingTarget || showPrivacyConfirm || eventsScanning"
                   class="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full hover:bg-red-600 disabled:opacity-40 flex items-center gap-0.5"
                   title="删除全部窗口后重新检测">
                   <RefreshCw :size="10" />重新扫描
                 </button>
                 <button v-if="dashboardWindows.some(w=>w.status==='pending')" @click="checkPrivacyConsent(() => handleAnalyzeAllEvents())"
-                  :disabled="!!analyzingTarget || !!activeTaskId || eventsScanning"
+                  :disabled="!!analyzingTarget || showPrivacyConfirm || !!activeTaskId || eventsScanning"
                   class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Zap :size="10" />一键分析
                 </button>
@@ -771,7 +771,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-400 w-16 flex-shrink-0">{{ (w.start_time||'').slice(5,10) }}</span>
                     <span class="flex-1 text-slate-500 truncate">{{ (w.summary?.preview||[])[0]?.content || '候选事件' }}</span>
                     <button @click.stop="checkPrivacyConsent(() => handleAnalyzeWindow(w.id))"
-                      :disabled="!!analyzingTarget || analyzingWindowId === w.id"
+                      :disabled="!!analyzingTarget || showPrivacyConfirm || analyzingWindowId === w.id"
                       class="bg-indigo-500 text-white px-2 py-0.5 rounded-full text-[10px] hover:bg-indigo-600 disabled:opacity-40 flex-shrink-0">
                       {{ analyzingWindowId === w.id ? '...' : '分析' }}
                     </button>
@@ -786,7 +786,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-400 text-[10px] flex-shrink-0">{{ e.message_count || 0 }}条</span>
                     <span class="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0">已分析</span>
                     <button @click.stop="checkPrivacyConsent(() => handleReanalyzeEvent(e))"
-                      :disabled="!!analyzingTarget || (analyzingWindowId != null && analyzingWindowId === e.window_id)"
+                      :disabled="!!analyzingTarget || showPrivacyConfirm || (analyzingWindowId != null && analyzingWindowId === e.window_id)"
                       class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full text-[10px] hover:bg-amber-100 disabled:opacity-40 flex-shrink-0">
                       ↻
                     </button>

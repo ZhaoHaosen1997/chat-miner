@@ -657,16 +657,16 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
     sampled = raw_data.get("sampled_msgs", [])
 
     top_speakers = ", ".join(
-        f"{m['alias']}({m['count']}条)" for m in stats.get("top_speakers", [])[:5]
+        f"[{m['sender_id']}]({m['count']}条)" for m in stats.get("top_speakers", [])[:5]
     ) or "暂无数据"
     night_owls = ", ".join(
-        f"{m['alias']}({m['peak']})" for m in stats.get("night_owls", [])[:3]
+        f"[{m['sender_id']}]({m['peak']})" for m in stats.get("night_owls", [])[:3]
     ) or "暂无"
     lurkers = ", ".join(
-        f"{m['alias']}({m['days']}天{m['msgs']}条)" for m in stats.get("lurkers", [])[:3]
+        f"[{m['sender_id']}]({m['days']}天{m['msgs']}条)" for m in stats.get("lurkers", [])[:3]
     ) or "暂无"
     emoji_kings = ", ".join(
-        f"{m['alias']}({' '.join(m['emojis'][:3])})" for m in stats.get("emoji_kings", [])[:3]
+        f"[{m['sender_id']}]({' '.join(m['emojis'][:3])})" for m in stats.get("emoji_kings", [])[:3]
     ) or "暂无"
 
     # 按天聚合聊天精华（月报每天限5条控制上下文）
