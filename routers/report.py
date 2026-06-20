@@ -569,6 +569,17 @@ async def api_periods(group_id: int, type: str = "weekly"):
     if chat:
         all_dates = chat.all_dates()
         periods = compute_available_periods(all_dates, type, chat=chat)
+        # 已生成报告 vs 当前数据：标记是否有新数据
+        current = {p["period_key"]: p for p in periods}
+        for item in result:
+            pk = item["period_key"]
+            cur = current.get(pk)
+            if cur and (
+                cur["day_count"] > item["day_count"]
+                or cur["msg_count"] > item["msg_count"] * 1.1
+            ):
+                item["has_new_data"] = True
+        # 补充未生成的周期
         for p in periods:
             pk = p["period_key"]
             if pk not in seen_keys:

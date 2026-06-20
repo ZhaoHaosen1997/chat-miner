@@ -451,6 +451,32 @@ async function handleAnalyzeWindow(windowId) {
   } finally { analyzingWindowId.value = null }
 }
 
+// ISO 周标识 → 日期范围（如 2026-W25 → 6/15-6/21）
+function isoWeekToRange(key) {
+  const m = key.match(/^(\d{4})-W(\d{2})$/)
+  if (!m) return ''
+  const y = parseInt(m[1]), w = parseInt(m[2])
+  const jan4 = new Date(y, 0, 4)
+  const dow = jan4.getDay() || 7
+  const firstMonday = new Date(jan4)
+  firstMonday.setDate(jan4.getDate() - (dow - 1))
+  const monday = new Date(firstMonday)
+  monday.setDate(firstMonday.getDate() + (w - 1) * 7)
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`
+  return `${fmt(monday)}-${fmt(sunday)}`
+}
+
+// 月份标识 → 日期范围（如 2026-06 → 6/1-6/30）
+function monthToRange(key) {
+  const m = key.match(/^(\d{4})-(\d{2})$/)
+  if (!m) return ''
+  const y = parseInt(m[1]), mo = parseInt(m[2])
+  const lastDay = new Date(y, mo, 0).getDate()
+  return `${mo}/1-${mo}/${lastDay}`
+}
+
 const groupedDashboardEvents = computed(() => {
   const groups = {}
   for (const e of dashboardEvents.value) {
@@ -607,7 +633,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
           <div class="flex items-start justify-between mb-3">
             <div>
               <span class="text-[10px] font-semibold tracking-wider text-indigo-400 uppercase">Latest Weekly</span>
-              <h3 class="text-lg font-bold text-slate-800 mt-0.5">{{ latestWeekly.period_key }}</h3>
+              <h3 class="text-lg font-bold text-slate-800 mt-0.5">{{ latestWeekly.period_key }} <span class="text-sm font-normal text-slate-400">{{ isoWeekToRange(latestWeekly.period_key) }}</span></h3>
+              <span v-if="latestWeekly.has_new_data" class="inline-block mt-1 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据，可重新生成</span>
             </div>
             <span class="text-3xl group-hover:scale-110 transition-transform">{{ latestWeekly.report?.overall_mood_emoji || '📰' }}</span>
           </div>
@@ -622,7 +649,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
           <div class="flex items-start justify-between mb-3">
             <div>
               <span class="text-[10px] font-semibold tracking-wider text-purple-400 uppercase">Latest Monthly</span>
-              <h3 class="text-lg font-bold text-slate-800 mt-0.5">{{ latestMonthly.period_key }}</h3>
+              <h3 class="text-lg font-bold text-slate-800 mt-0.5">{{ latestMonthly.period_key }} <span class="text-sm font-normal text-slate-400">{{ monthToRange(latestMonthly.period_key) }}</span></h3>
+              <span v-if="latestMonthly.has_new_data" class="inline-block mt-1 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据，可重新生成</span>
             </div>
             <span class="text-3xl group-hover:scale-110 transition-transform">{{ latestMonthly.report?.personality_type_emoji || '🌙' }}</span>
           </div>
@@ -792,9 +820,9 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    class="flex items-center gap-2.5 text-xs py-2 px-2.5 rounded-lg transition-all"
                    :class="p.status === 'generated' ? 'hover:bg-indigo-50 cursor-pointer border border-transparent hover:border-indigo-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
                    @click="p.status === 'generated' ? goWeekly(p.period_key) : null">
-                <span class="font-mono font-medium text-slate-600 w-20 flex-shrink-0">{{ p.period_key }}</span>
+                <span class="font-mono font-medium text-slate-600 flex-shrink-0" style="min-width:7rem">{{ p.period_key }} <span class="text-slate-400 font-normal text-[10px]">{{ isoWeekToRange(p.period_key) }}</span></span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><button @click.stop="doGenerateWeekly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateWeekly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
                 <button v-else-if="p.status === 'ready'" @click.stop="doGenerateWeekly(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full hover:bg-indigo-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>
@@ -814,9 +842,9 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    class="flex items-center gap-2.5 text-xs py-2 px-2.5 rounded-lg transition-all"
                    :class="p.status === 'generated' ? 'hover:bg-purple-50 cursor-pointer border border-transparent hover:border-purple-100' : p.status === 'ready' ? 'bg-amber-50/40 border border-amber-100/50' : 'opacity-35'"
                    @click="p.status === 'generated' ? goMonthly(p.period_key) : null">
-                <span class="font-mono font-medium text-slate-600 w-20 flex-shrink-0">{{ p.period_key }}</span>
+                <span class="font-mono font-medium text-slate-600 flex-shrink-0" style="min-width:7rem">{{ p.period_key }} <span class="text-slate-400 font-normal text-[10px]">{{ monthToRange(p.period_key) }}</span></span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><button @click.stop="doGenerateMonthly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateMonthly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
                 <button v-else-if="p.status === 'ready'" @click.stop="doGenerateMonthly(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-purple-500 text-white px-2 py-0.5 rounded-full hover:bg-purple-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>
@@ -835,7 +863,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    @click="p.status === 'generated' ? goAnnual(p.period_key) : null">
                 <span class="font-mono font-medium text-slate-600 w-20 flex-shrink-0">{{ p.period_key }}年</span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><button @click.stop="doGenerateAnnual(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateAnnual(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
                 <button v-else-if="p.status === 'ready'" @click.stop="doGenerateAnnual(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full hover:bg-amber-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>

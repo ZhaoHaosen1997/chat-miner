@@ -190,14 +190,25 @@ def _find_peaks(hourly: dict, activity: str,
         )
     else:
         # 安静群：按相对倍数检测
+        # v1.18.4: 分月计算阈值，避免 WeFlow 文本数据被原始全量数据的均值压制
         if len(hourly) == 0:
             return []
-        avg = sum(hourly.values()) / len(hourly)
-        threshold = max(avg * quiet_multiplier, 20)  # 兜底不低于 20 条
-        peaks = sorted(
-            [h for h, c in hourly.items() if c >= threshold],
-            key=lambda h: h
-        )
+        peaks = []
+        # 按月份分组
+        monthly = {}
+        for h, c in hourly.items():
+            mon = h[:7]  # "2026-06"
+            if mon not in monthly:
+                monthly[mon] = {}
+            monthly[mon][h] = c
+        for mon, mon_hours in monthly.items():
+            if not mon_hours:
+                continue
+            avg = sum(mon_hours.values()) / len(mon_hours)
+            threshold = max(avg * quiet_multiplier, 20)
+            mon_peaks = [h for h, c in mon_hours.items() if c >= threshold]
+            peaks.extend(mon_peaks)
+        peaks.sort()
 
     logger.debug("尖峰检测 (%s): %d peaks, threshold=%.0f",
                  activity, len(peaks),
@@ -463,7 +474,7 @@ def _extract_group_summary(window_msgs: list[dict]) -> dict:
         if len(ft) >= 16:
             times.append(ft[:16])
             hourly[ft[:13]] += 1  # "2025-03-15 14"
-        sender = (m.get("senderID") or "").strip()
+        sender = str(m.get("senderID") or "").strip()
         if sender:
             senders[sender] += 1
         if len(preview) < 5:

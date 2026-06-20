@@ -37,19 +37,18 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
     if not group:
         return None
 
-    # 优先用 file_path，缺失时回退到 merged_data.json（WeFlow 同步会生成）
+    # v1.18.4: 优先用 merged_data.json（WeFlow 同步会生成合并数据），
+    # 不存在时回退到原始 file_path
     file_path = None
-    if group.get("file_path"):
+    merged = _find_merged_data(group)
+    if merged:
+        file_path = merged
+    if not file_path and group.get("file_path"):
         fp = Path(group["file_path"])
         if not fp.is_absolute():
-            fp = config.BASE_DIR / fp  # v1.5.7: 相对路径基于 EXE 目录解析
-        # JSON 不存在但有 pickle 缓存时也允许加载（parser.load() 会回退到 pickle）
+            fp = config.BASE_DIR / fp
         if fp.exists() or Path(str(fp) + ".pickle").exists():
             file_path = fp
-    if not file_path:
-        merged = _find_merged_data(group)
-        if merged:
-            file_path = merged
 
     if not file_path:
         logger.warning("群 %s 数据加载失败: file_path=%s 不存在, merged_data也未找到",
