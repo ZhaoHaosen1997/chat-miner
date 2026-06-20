@@ -1230,6 +1230,11 @@ async def generate_weekly_report(
             "_version": "legacy",
         }
 
+    # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
+    from services.desensitize import build_sender_name_map, resolve_sender_ids_deep
+    name_map = build_sender_name_map(chat.senders)
+    report = resolve_sender_ids_deep(report, name_map)
+
     # 保存到数据库
     model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_MODEL
     day_count_val = report.get("day_count", len(week_dates))
@@ -1569,6 +1574,11 @@ async def generate_monthly_report(
             "coldest_day": aggregated["coldest_day"],
             "_version": "legacy",
         }
+
+    # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
+    from services.desensitize import build_sender_name_map, resolve_sender_ids_deep
+    name_map = build_sender_name_map(chat.senders)
+    report = resolve_sender_ids_deep(report, name_map)
 
     # ---- 保存 + 返回 ----
     model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_REASONER_MODEL

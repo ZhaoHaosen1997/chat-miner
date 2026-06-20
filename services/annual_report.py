@@ -28,7 +28,7 @@ from services.stats_engine import (
     compute_message_style, compute_topic_role,
 )
 from services.weekly_report import _ai_generate
-from services.desensitize import filter_pii
+from services.desensitize import filter_pii, build_sender_name_map, resolve_sender_ids_deep
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +240,10 @@ async def generate_annual_report(group_id: int, year: int, chat,
         "emoji_kings": raw_data["stats"].get("emoji_kings", []),
         "monthly_trend": raw_data["stats"].get("monthly_trend", []),
     }
+
+    # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
+    name_map = build_sender_name_map(chat.senders)
+    report = resolve_sender_ids_deep(report, name_map)
 
     # 11. 保存到 periodic_reports
     save_periodic_report(
