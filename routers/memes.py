@@ -97,10 +97,15 @@ async def api_scan_memes(group_id: int):
 {"memes": [{"term": "梗文本", "description": "一句话解释"}]}
 没有则返回 {"memes": []}"""
 
-    from services.online_model import call_deepseek_chat
-    result = await call_deepseek_chat(
+    from services.online_model import call_online_chat
+    from services.model_config import get_effective_model
+    online_cfg = get_effective_model("online")
+    if not online_cfg.get("api_key"):
+        raise HTTPException(400, detail="在线模型未配置，无法使用 AI 扫描")
+    result = await call_online_chat(
         system_prompt=_MEME_SCAN_SYSTEM + "\n\n" + json_inst,
         user_prompt="\n".join(lines),
+        model_config=online_cfg,
         temperature=0.6,
         json_mode=True,
         max_tokens=2048,

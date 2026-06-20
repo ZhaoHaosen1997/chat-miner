@@ -160,7 +160,10 @@ def build_meme_prefix(group_id: int) -> str:
             return ""
         lines = ["【群梗百科】以下为群内约定俗成的表达，供你理解消息上下文："]
         for m in memes:
-            lines.append(f'- "{m["term"]}"：{m["description"]}')
-        return "\n".join(lines) + "\n"
+            t = (m.get("term") or "").strip()
+            d = (m.get("description") or "").strip()
+            if t and d:
+                lines.append(f'- "{t}"：{d}')
+        return "\n".join(lines) + "\n" if len(lines) > 1 else ""
     except Exception:
         return ""

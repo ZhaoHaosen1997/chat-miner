@@ -183,6 +183,7 @@ def _find_peaks(hourly: dict, activity: str,
     if not hourly:
         return []
 
+    monthly = {}
     if activity == "active":
         # 活跃群：按绝对阈值检测小时级尖峰
         peaks = sorted(
@@ -605,7 +606,7 @@ def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[di
             span = max((pts[-1] - pts[0]).total_seconds() / 60, 1)
             density = len(pts) / span
         else:
-            density = max_count
+            density = 0
         if density > best_density:
             best_density = density
             best_start = i

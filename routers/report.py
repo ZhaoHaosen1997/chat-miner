@@ -125,7 +125,11 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
     )
 
     if result["success"] and result["data"]:
-        report_json = json.dumps(result["data"], ensure_ascii=False)
+        # v1.18.3: 将 AI 输出中的 senderID 还原为昵称
+        from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+        _, name_map = build_stable_id_map(chat.senders)
+        report_data = resolve_sender_ids_deep(result["data"], name_map)
+        report_json = json.dumps(report_data, ensure_ascii=False)
         stats = chat.stats_for_date(date)
         save_daily_report(
             group_id=group_id, date=date,
@@ -345,10 +349,14 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
                 model_config=model_config,
                 hourly_stats=hourly_stats_str,
                 is_private=len(chat.senders) <= 2,
+                group_id=group_id,
             )
 
             if result["success"] and result["data"]:
-                report_json = json.dumps(result["data"], ensure_ascii=False)
+                from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+                _, name_map = build_stable_id_map(chat.senders)
+                report_data = resolve_sender_ids_deep(result["data"], name_map)
+                report_json = json.dumps(report_data, ensure_ascii=False)
                 stats = chat.stats_for_date(date)
                 save_daily_report(
                     group_id=group_id, date=date,

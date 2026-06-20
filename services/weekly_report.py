@@ -859,7 +859,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
         for attempt in range(max_attempts):
             result = await call_online_chat(
                 system_prompt, user_prompt,
-                group_id=group_id, model_config=model_config,
+                model_config=model_config,
                 temperature=temperature,
                 json_mode=json_mode,
                 max_tokens=max_tokens,
