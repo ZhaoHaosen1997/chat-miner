@@ -116,27 +116,36 @@ def resolve_sender_ids(text: str, name_map: dict[int, str]) -> str:
     return _resolve_all(text, name_map)
 
 
+def _try_resolve_digit(val: str, name_map: dict[int, str]) -> str:
+    """如果 val 是纯数字字符串，映射为昵称；否则原样返回"""
+    if isinstance(val, str) and val.strip().isdigit():
+        sid = int(val.strip())
+        return name_map.get(sid, val)
+    return val
+
+
 def resolve_sender_ids_deep(data, name_map: dict[int, str]):
     """递归遍历 dict/list/str，将所有 senderID 引用替换为昵称
 
-    用于 AI 输出的 JSON 结构（周报/月报/年报/事件分析）。
-    同时处理 participant.name 中的裸数字。
+    处理格式：[N]、N号、participant.name 裸数字、sender_id 字段、
+    member_details 的 digit key、top5/night_owl_names 的 digit 列表项。
     """
     if not name_map:
         return data
     if isinstance(data, str):
-        return _resolve_all(data, name_map)
+        return _try_resolve_digit(_resolve_all(data, name_map), name_map)
     if isinstance(data, dict):
-        # 特殊处理：如果 key 是 "name" 且 value 是纯数字，直接映射
-        if "name" in data and isinstance(data["name"], str):
-            raw = data["name"].strip()
-            # 纯数字如 "4"、"13"
-            if raw.isdigit():
-                sid = int(raw)
-                data["name"] = name_map.get(sid, raw)
-            else:
-                data["name"] = _resolve_all(raw, name_map)
-        return {k: resolve_sender_ids_deep(v, name_map) for k, v in data.items()}
+        # 处理 sender_id / name 等字段的值（裸数字 → 昵称）
+        for key in ("sender_id", "name", "alias"):
+            if key in data and isinstance(data[key], str):
+                data[key] = _try_resolve_digit(
+                    _resolve_all(data[key], name_map), name_map)
+        # 递归处理所有键值，同时处理 digit key 的映射
+        result = {}
+        for k, v in data.items():
+            new_key = _try_resolve_digit(k, name_map) if isinstance(k, str) else k
+            result[new_key] = resolve_sender_ids_deep(v, name_map)
+        return result
     if isinstance(data, list):
         return [resolve_sender_ids_deep(item, name_map) for item in data]
     return data
