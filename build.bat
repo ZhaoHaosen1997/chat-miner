@@ -8,10 +8,22 @@ echo ============================================
 echo   Chat-Miner v%VERSION% Packaging Script
 echo ============================================
 
+REM Ensure dependencies
+echo.
+echo [1/5] Checking dependencies...
+pip install -r requirements.txt -q
+if errorlevel 1 (
+    echo [WARN] pip install failed, continuing anyway...
+)
+cd frontend
+call npm install --silent
+if errorlevel 1 (
+    echo [WARN] npm install failed, continuing anyway...
+)
+
 REM Build frontend
 echo.
-echo [0/4] Building frontend...
-cd frontend
+echo [2/5] Building frontend...
 call npm run build
 if errorlevel 1 (
     echo [ERROR] Frontend build failed
@@ -28,7 +40,7 @@ if exist "dist" rmdir /s /q "dist"
 
 REM Build with PyInstaller
 echo.
-echo [1/4] Building with PyInstaller...
+echo [3/5] Building with PyInstaller...
 python -m PyInstaller --clean pyinstaller.spec
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed
@@ -37,7 +49,7 @@ if errorlevel 1 (
 
 REM Copy to releases folder
 echo.
-echo [2/4] Copying to releases\ChatMiner...
+echo [4/5] Copying to releases\ChatMiner...
 if not exist "releases" mkdir "releases"
 if exist "releases\ChatMiner" rmdir /s /q "releases\ChatMiner"
 xcopy /e /i /y "dist\ChatMiner\*" "releases\ChatMiner\"
@@ -51,20 +63,26 @@ python -c "from config import config;v=config.VERSION;t=open('newbie-guide.txt',
 
 REM Create portable zip
 echo.
-echo [3/4] Creating portable ZIP...
+echo [5/5] Creating portable ZIP and installer...
 if exist "releases\ChatMiner-v%VERSION%-portable.zip" del "releases\ChatMiner-v%VERSION%-portable.zip"
-REM Wait 2s for antivirus to release file handles on fresh exe
-timeout /t 2 /nobreak >NUL
+
+REM Wait 5s then retry up to 3 times for antivirus file lock release
+set RETRY=0
+:zip_retry
+timeout /t 5 /nobreak >NUL
 powershell -Command "Compress-Archive -Path 'releases\ChatMiner\*' -DestinationPath 'releases\ChatMiner-v%VERSION%-portable.zip' -Force -ErrorAction SilentlyContinue; if (-not (Test-Path 'releases\ChatMiner-v%VERSION%-portable.zip')) { exit 1 }"
 if errorlevel 1 (
-    echo [ERROR] ZIP creation failed
+    set /a RETRY+=1
+    if %RETRY% LSS 3 (
+        echo   ZIP locked by antivirus, retry %RETRY%/3...
+        goto :zip_retry
+    )
+    echo [ERROR] ZIP creation failed after 3 retries
     goto :error
 )
 echo   ZIP created
 
 REM Build NSIS installer (auto-detect makensis)
-echo.
-echo [4/4] Building NSIS installer...
 where makensis >NUL 2>&1
 if errorlevel 1 (
     echo [SKIP] NSIS not found. Run: makensis installer.nsi
