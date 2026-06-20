@@ -532,6 +532,10 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
     # System Prompt：优先 DB prompt_profiles，否则硬编码 fallback
     system_prompt = get_default_prompt("event_detection") or _EVENT_DEFAULT_SYSTEM_PROMPT
 
+    # v1.18.5: 基于 wxid 的稳定 ID 映射（避免 senderID 跨数据源不一致）
+    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
+    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
+
     # User Prompt：对话原文
     lines = []
     group_label = f'群聊"{group_name}"中' if group_name else "群聊"
@@ -540,7 +544,9 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
     for m in window:
         ct = m.get("formattedTime", "")
         time_str = ct[11:16] if len(ct) >= 16 else ct  # "HH:MM"
-        sender = m.get("senderID", "未知")
+        # 用稳定 ID 代替易变的 senderID
+        wxid = m.get("wxid", "")
+        sender = str(wxid_to_stable.get(wxid, m.get("senderID", "?")))
         content = (m.get("content") or "").strip()
         if content:
             # v1.18.5: PII 过滤

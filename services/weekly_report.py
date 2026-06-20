@@ -245,27 +245,22 @@ def _extract_period_raw_data(
         logger.warning(f"周期内无文本消息: dates={dates}")
         return {"stats": {}, "sampled_msgs": [], "member_summary": {}}
 
-    # 2. 预建成员映射 wxid -> senderID
-    wxid_to_sid = {}  # {wxid: senderID}
-    for s in chat.senders:
-        wxid = s.get("wxid", "")
-        sid = s.get("senderID", 0)
-        if wxid:
-            wxid_to_sid[wxid] = sid
+    # 2. 预建成员映射 wxid -> stable_id（基于 wxid 排序，跨数据源一致）
+    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
+    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
+    wxid_set = set(wxid_to_stable.keys())
 
     # 3. Python 统计（每个成员独立计算）
-    all_wxids = set(wxid_to_sid.keys())
     member_stats = {}
-    for wxid, sid in wxid_to_sid.items():
+    for wxid, stable_id in wxid_to_stable.items():
         sender_msgs = [m for m in all_msgs if m.get("wxid") == wxid]
         if not sender_msgs:
             continue
         activity = compute_activity_stats(all_msgs, wxid, sender_msgs=sender_msgs)
         language = compute_language_stats(all_msgs, wxid, member_names=set(), sender_msgs=sender_msgs)
         style = compute_message_style(language, activity)
-        role = compute_topic_role(all_msgs, wxid, all_wxids)
-        # 用 senderID 数字代替别名
-        sid_str = str(sid)
+        role = compute_topic_role(all_msgs, wxid, wxid_set)
+        sid_str = str(stable_id)
         member_stats[wxid] = {
             "sender_id": sid_str,
             "msg_count": activity.get("total_messages", 0),
@@ -333,7 +328,7 @@ def _extract_period_raw_data(
         sampled_msgs.append({
             "date": date,
             "count": len(day_anon_msgs),
-            "highlights": [{"sender_id": str(m.get("senderID", 0)),
+            "highlights": [{"sender_id": str(wxid_to_stable.get(m.get("wxid", ""), m.get("senderID", 0))),
                            "content": m.get("content", "")[:120],
                            "time": (m.get("formattedTime") or "")[11:16]}
                           for m in top],
@@ -1231,8 +1226,8 @@ async def generate_weekly_report(
         }
 
     # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
-    from services.desensitize import build_sender_name_map, resolve_sender_ids_deep
-    name_map = build_sender_name_map(chat.senders)
+    from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+    _, name_map = build_stable_id_map(chat.senders)
     report = resolve_sender_ids_deep(report, name_map)
 
     # 保存到数据库
@@ -1576,8 +1571,8 @@ async def generate_monthly_report(
         }
 
     # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
-    from services.desensitize import build_sender_name_map, resolve_sender_ids_deep
-    name_map = build_sender_name_map(chat.senders)
+    from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+    _, name_map = build_stable_id_map(chat.senders)
     report = resolve_sender_ids_deep(report, name_map)
 
     # ---- 保存 + 返回 ----

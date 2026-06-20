@@ -15,6 +15,20 @@ from typing import Optional
 from config import config
 from services.desensitize import filter_pii
 
+# v1.18.5: wxid→stable_id 缓存（避免重复构建）
+_stable_id_cache = {}  # {wxid_tuple_key: {wxid: stable_id}}
+
+
+def _get_stable_id(wxid: str, senders: list[dict]) -> int:
+    """根据 wxid 返回稳定短 ID（基于 wxid 排序，跨数据源一致）"""
+    if not senders:
+        return 0
+    key = tuple(sorted(s.get("wxid", "") for s in senders if s.get("wxid", "")))
+    if key not in _stable_id_cache:
+        sorted_wxids = sorted(set(k for k in key if k))
+        _stable_id_cache[key] = {w: i for i, w in enumerate(sorted_wxids, 1)}
+    return _stable_id_cache[key].get(wxid, 0)
+
 logger = logging.getLogger(__name__)
 
 # 有文本内容的消息类型
@@ -845,7 +859,9 @@ def format_messages_for_prompt(messages: list[dict],
         if msg.get("type") == "引用消息":
             continue
         time_str = msg.get("formattedTime", "")[11:16]  # "HH:MM"
-        sender = str(msg.get("senderID", 0))
+        # v1.18.5: 用稳定 ID（基于 wxid）代替易变的 senderID
+        wxid = msg.get("wxid", "")
+        sender = str(_get_stable_id(wxid, senders) if wxid and senders else msg.get("senderID", 0))
         raw_content = (msg.get("content") or "").strip()
         if not raw_content:
             continue

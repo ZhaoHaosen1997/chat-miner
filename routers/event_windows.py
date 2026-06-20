@@ -120,8 +120,8 @@ async def api_analyze_single_window(group_id: int, window_id: int):
 
         if event_data:
             # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
-            from services.desensitize import build_sender_name_map, resolve_sender_ids_deep
-            name_map = build_sender_name_map(chat.senders)
+            from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+            _, name_map = build_stable_id_map(chat.senders)
             event_data = resolve_sender_ids_deep(event_data, name_map)
 
             new_event_id = _save_event_result(event_data, group_id, window_id, window)

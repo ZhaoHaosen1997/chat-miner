@@ -28,7 +28,7 @@ from services.stats_engine import (
     compute_message_style, compute_topic_role,
 )
 from services.weekly_report import _ai_generate
-from services.desensitize import filter_pii, build_sender_name_map, resolve_sender_ids_deep
+from services.desensitize import filter_pii, build_stable_id_map, resolve_sender_ids_deep
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
     }
 
     # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
-    name_map = build_sender_name_map(chat.senders)
+    _, name_map = build_stable_id_map(chat.senders)
     report = resolve_sender_ids_deep(report, name_map)
 
     # 11. 保存到 periodic_reports
@@ -323,16 +323,12 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
 
     name_to_wxid = {v: k for k, v in member_names.items()}
 
-    # 3. wxid -> senderID 映射
-    wxid_to_sid = {}
-    for s in chat.senders:
-        wxid = s.get("wxid", "")
-        sid = s.get("senderID", 0)
-        if wxid:
-            wxid_to_sid[wxid] = sid
+    # 3. wxid -> stable_id 映射（基于 wxid 排序，跨数据源一致）
+    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
+    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
 
     def _sid_str(wxid):
-        return str(wxid_to_sid.get(wxid, "?"))
+        return str(wxid_to_stable.get(wxid, "?"))
 
     # 4. 计算每成员 Python 统计
     member_stats = {}

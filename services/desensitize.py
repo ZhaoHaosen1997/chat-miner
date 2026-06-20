@@ -66,6 +66,8 @@ def build_sender_name_map(senders: list[dict]) -> dict[int, str]:
     """从 chat.senders 构建 {senderID: 显示名} 映射表
 
     降级优先级：displayName → nickname → str(senderID)
+    注意：senderID 在 JSON 导入和 WeFlow 合并时可能变化，跨数据源不一致。
+    如需稳定映射请用 build_stable_id_map。
     """
     name_map = {}
     for s in senders:
@@ -74,6 +76,39 @@ def build_sender_name_map(senders: list[dict]) -> dict[int, str]:
             name = s.get("displayName", "") or s.get("nickname", "") or str(sid)
             name_map[sid] = name
     return name_map
+
+
+def build_stable_id_map(senders: list[dict]) -> tuple[dict[str, int], dict[int, str]]:
+    """基于 wxid 排序生成稳定的短数字 ID，确保跨数据源一致。
+
+    解决 senderID 在 JSON 导入 vs WeFlow 合并时被重新分配导致的不稳定问题。
+    wxid 是跨平台的唯一标识（如 wxid_xxx、u_xxx），排序后序号稳定。
+
+    Returns:
+        (wxid_to_stable: {wxid: stable_id}, stable_to_name: {stable_id: 显示名})
+        降级优先级：displayName → nickname → str(stable_id)
+    """
+    # 收集所有唯一 wxid，按字母序排列
+    wxids = sorted(set(
+        s.get("wxid", "") for s in senders if s.get("wxid", "")
+    ))
+    # 构建 {wxid: name} 用于后续降级
+    wxid_to_name = {}
+    for s in senders:
+        wxid = s.get("wxid", "")
+        if wxid:
+            name = s.get("displayName", "") or s.get("nickname", "") or ""
+            if name:
+                wxid_to_name[wxid] = name
+
+    wxid_to_stable = {}
+    stable_to_name = {}
+    for i, wxid in enumerate(wxids, 1):
+        wxid_to_stable[wxid] = i
+        name = wxid_to_name.get(wxid, "") or wxid[:20]
+        stable_to_name[i] = name
+
+    return wxid_to_stable, stable_to_name
 
 
 def resolve_sender_ids(text: str, name_map: dict[int, str]) -> str:
