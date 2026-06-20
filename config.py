@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.18.4"
+    VERSION = "1.18.5"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
