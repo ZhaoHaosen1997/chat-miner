@@ -328,8 +328,8 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
     name_to_wxid = {v: k for k, v in member_names.items()}
 
     # 3. wxid -> stable_id 映射（基于 wxid 排序，跨数据源一致）
-    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
-    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
+    from services.desensitize import build_wxid_to_stable_id
+    wxid_to_stable = build_wxid_to_stable_id(chat.senders)
 
     def _sid_str(wxid):
         return str(wxid_to_stable.get(wxid, "?"))

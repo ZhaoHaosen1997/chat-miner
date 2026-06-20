@@ -520,6 +520,8 @@ def init_db():
         _migrate_v1_18_3(conn)
         # v1.18.4: 群梗百科（group_memes 表由 CREATE TABLE IF NOT EXISTS 自动创建）
         _migrate_v1_18_4(conn)
+        # v1.18.5: 回填 QQ 群的 platform 字段（旧版本导入的 QQ 群 platform 为空）
+        _migrate_v1_18_5(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -924,6 +926,62 @@ def _migrate_v1_18_3(conn):
 
 def _migrate_v1_18_4(conn):
     """v1.18.4: 群梗百科 — group_memes 由 CREATE TABLE IF NOT EXISTS 自动创建"""
+
+
+def _migrate_v1_18_5(conn):
+    """v1.18.5: 回填 QQ 群的 platform 字段
+
+    旧版本导入的 QQ 群 platform 为空字符串，根据 wxid 特征推断：
+    - 纯数字 wxid（QQ群聊 chunked-JSONL）→ 'qq'
+    - wxid 含 'u_' 且不含 '@chatroom'（QQ私聊 single-JSON）→ 'qq'
+    - wxid 含 '@chatroom'（微信群聊）→ 'wechat'
+    - file_path 目录名含 'group_'（QQ群聊）→ 'qq'
+    """
+    # 回填 QQ 群聊（纯数字 wxid，如 '687419090'）
+    result = conn.execute(
+        "UPDATE chat_groups SET platform='qq' "
+        "WHERE (platform='' OR platform IS NULL) "
+        "AND wxid GLOB '[0-9]*' AND wxid != '' AND wxid NOT LIKE '%@%'"
+    )
+    if result.rowcount > 0:
+        logger.info("DB migrate v1.18.5: backfilled %d QQ群聊 platform", result.rowcount)
+
+    # 回填 QQ 私聊（wxid 含 u_，不含 @chatroom）
+    result = conn.execute(
+        "UPDATE chat_groups SET platform='qq' "
+        "WHERE (platform='' OR platform IS NULL) "
+        "AND wxid LIKE 'u\\_%' ESCAPE '\\' "
+        "AND wxid NOT LIKE '%@chatroom%'"
+    )
+    if result.rowcount > 0:
+        logger.info("DB migrate v1.18.5: backfilled %d QQ私聊 platform", result.rowcount)
+
+    # 回填基于 file_path（目录名含 group_，QQ群聊 chunked-JSONL 特征）
+    result = conn.execute(
+        "UPDATE chat_groups SET platform='qq' "
+        "WHERE (platform='' OR platform IS NULL) "
+        "AND file_path LIKE '%group\\_%' ESCAPE '\\'"
+    )
+    if result.rowcount > 0:
+        logger.info("DB migrate v1.18.5: backfilled %d QQ groups by file_path", result.rowcount)
+
+    # 回填微信群聊（wxid 含 @chatroom）
+    result = conn.execute(
+        "UPDATE chat_groups SET platform='wechat' "
+        "WHERE (platform='' OR platform IS NULL) "
+        "AND wxid LIKE '%@chatroom%'"
+    )
+    if result.rowcount > 0:
+        logger.info("DB migrate v1.18.5: backfilled %d 微信群聊 platform", result.rowcount)
+
+    # 回填微信私聊（wxid 以 wxid_ 开头）
+    result = conn.execute(
+        "UPDATE chat_groups SET platform='wechat' "
+        "WHERE (platform='' OR platform IS NULL) "
+        "AND wxid LIKE 'wxid\\_%' ESCAPE '\\'"
+    )
+    if result.rowcount > 0:
+        logger.info("DB migrate v1.18.5: backfilled %d 微信私聊 platform", result.rowcount)
 
 
 # ── 群梗百科 CRUD ─────────────────────────────────────────────────

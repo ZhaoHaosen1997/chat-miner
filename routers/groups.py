@@ -367,6 +367,7 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
             "session": merged_chat.session,
             "senders": merged_chat.senders,
             "messages": merged_chat.messages,
+            "platform": getattr(merged_chat, "platform", ""),
         }
         # 原子写入：先写临时文件，成功后再 rename
         tmp_path = merged_path.with_suffix(".tmp")
@@ -383,6 +384,7 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
                 "senders": merged_chat.senders,
                 "messages": merged_chat.messages,
                 "_by_date": merged_chat._by_date,
+                "platform": getattr(merged_chat, "platform", ""),
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
         logger.debug(f"pickle 缓存已同步: {merged_pickle}")
 

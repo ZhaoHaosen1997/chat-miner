@@ -78,6 +78,21 @@ def build_sender_name_map(senders: list[dict]) -> dict[int, str]:
     return name_map
 
 
+def build_wxid_to_stable_id(senders: list[dict]) -> dict[str, int]:
+    """基于 wxid 排序生成 {wxid: stable_id} 映射（v1.18.5 权威实现）
+
+    所有需要 wxid→stable_id 映射的代码（prompt 构建、摘要提取等）
+    必须调用此函数，确保发信人编号全局一致。
+
+    Returns:
+        {wxid: stable_id}，stable_id 从 1 开始按 wxid 字母序编号
+    """
+    wxids = sorted(set(
+        s.get("wxid", "") for s in senders if s.get("wxid", "")
+    ))
+    return {wxid: i for i, wxid in enumerate(wxids, 1)}
+
+
 def build_stable_id_map(senders: list[dict]) -> tuple[dict[str, int], dict[int, str]]:
     """基于 wxid 排序生成稳定的短数字 ID，确保跨数据源一致。
 
@@ -88,11 +103,10 @@ def build_stable_id_map(senders: list[dict]) -> tuple[dict[str, int], dict[int, 
         (wxid_to_stable: {wxid: stable_id}, stable_to_name: {stable_id: 显示名})
         降级优先级：displayName → nickname → str(stable_id)
     """
-    # 收集所有唯一 wxid，按字母序排列
-    wxids = sorted(set(
-        s.get("wxid", "") for s in senders if s.get("wxid", "")
-    ))
-    # 构建 {wxid: name} 用于后续降级
+    # v1.18.5: 复用权威函数
+    wxid_to_stable = build_wxid_to_stable_id(senders)
+
+    # 构建 {wxid: name} 用于降级
     wxid_to_name = {}
     for s in senders:
         wxid = s.get("wxid", "")
@@ -101,12 +115,10 @@ def build_stable_id_map(senders: list[dict]) -> tuple[dict[str, int], dict[int, 
             if name:
                 wxid_to_name[wxid] = name
 
-    wxid_to_stable = {}
     stable_to_name = {}
-    for i, wxid in enumerate(wxids, 1):
-        wxid_to_stable[wxid] = i
+    for wxid, sid in wxid_to_stable.items():
         name = wxid_to_name.get(wxid, "") or wxid[:20]
-        stable_to_name[i] = name
+        stable_to_name[sid] = name
 
     return wxid_to_stable, stable_to_name
 

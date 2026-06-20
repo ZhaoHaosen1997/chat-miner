@@ -24,21 +24,23 @@ logger = logging.getLogger(__name__)
 
 # ── 硬编码默认 System Prompt（无 DB 配置时 fallback） ────────────────
 _EVENT_DEFAULT_SYSTEM_PROMPT = """你是一个群聊历史学家+八卦记者+脱口秀段子手的混合体。
-你的任务是从群聊对话中发掘那些值得被记住的事件——
-无论是重要决定、欢乐瞬间、名场面诞生，还是群友之间的默契互动。
+你的任务是从群聊对话中发掘值得被记住的瞬间——
+无论是重要决定、欢乐时刻、观点交锋、开车现场、名场面诞生，还是群友之间的默契互动。
 
-你像一个坐在群里的隐形观察员，把精华时刻记录下来，
-用轻松诙谐的口吻写成事件卡片。读者看完应该会心一笑：
-"对对对，那天就是这样！"
+你像一个坐在群里的隐形观察员，用敏锐的嗅觉捕捉每一个闪光点，
+用轻松诙谐的口吻写成事件卡片。宁可多记一笔，也不要漏掉精彩。
+读者看完应该会心一笑："对对对，那天就是这样！"
 
 事件类型：
 - decision：群内做出了某个决定（讨论→收敛→结论）
-- discussion：围绕某个话题的深度讨论
-- social：社交互动（庆祝、欢迎、告别、起哄等）
-- announcement：某人宣布了重要消息
-- meme：梗/文化的诞生和传播
+- discussion：对某个话题展开了有意思的讨论（不一定要很深入，有观点碰撞或信息量就算）
+- social：社交互动（庆祝、欢迎、告别、起哄、整活等）
+- announcement：某人宣布了重要消息或分享了大新闻
+- meme：梗/文化的诞生、传播或玩梗现场
+- driving：开车/擦边球/内涵段子现场（群友开始讲黄色笑话、性暗示、内涵发言等）
 
-如果这段对话中没有明显事件（就是日常闲聊），返回空 events 数组。"""
+注意：只要对话中出现以上任一类型的苗头，就值得记录。不要因为"不够正式"就忽略——
+群聊的精华往往藏在看似随意的对话里。只有纯粹的灌水（如纯表情、无意义复读）才返回 null。"""
 
 # ── 入口函数 ──────────────────────────────────────────────────────────
 
@@ -114,6 +116,10 @@ def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[dict]:
     if not segments:
         return []
 
+    # v1.18.5: 构建 wxid→stable_id 映射（与 _build_event_prompt 一致）
+    from services.desensitize import build_wxid_to_stable_id
+    wxid_to_stable = build_wxid_to_stable_id(chat.senders)
+
     # v1.18.1: 自适应切分替换固定窗口
     result = []
     for seg in segments:
@@ -133,7 +139,7 @@ def _detect_peaks_and_split(chat, date_start: str, date_end: str) -> list[dict]:
                 continue
             start_t = g[0].get("formattedTime", "")
             end_t = g[-1].get("formattedTime", "")
-            summary = _extract_group_summary(g)
+            summary = _extract_group_summary(g, wxid_to_stable)
             result.append({
                 "messages": g,
                 "start_time": start_t,
@@ -458,8 +464,11 @@ def _force_split_evenly(msgs: list[dict], max_size: int) -> list[list[dict]]:
     return result
 
 
-def _extract_group_summary(window_msgs: list[dict]) -> dict:
+def _extract_group_summary(window_msgs: list[dict], wxid_to_stable: dict = None) -> dict:
     """Python 提取事件组摘要（不调 AI）。
+
+    v1.18.5: 使用 wxid→stable_id 替代 senderID，确保摘要中的发信人编号
+    与 AI prompt 中的 [N] 编号一致。
 
     Returns:
         JSON-serializable dict with: time_start, time_end, duration_minutes,
@@ -478,7 +487,12 @@ def _extract_group_summary(window_msgs: list[dict]) -> dict:
         if len(ft) >= 16:
             times.append(ft[:16])
             hourly[ft[:13]] += 1  # "2025-03-15 14"
-        sender = str(m.get("senderID") or "").strip()
+        # v1.18.5: 使用 stable_id 替代 senderID
+        if wxid_to_stable:
+            wxid = m.get("wxid", "")
+            sender = str(wxid_to_stable.get(wxid, m.get("senderID", 0)))
+        else:
+            sender = str(m.get("senderID") or "").strip()
         if sender:
             senders[sender] += 1
         if len(preview) < 5:
@@ -535,8 +549,8 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "",
     system_prompt = get_default_prompt("event_detection") or _EVENT_DEFAULT_SYSTEM_PROMPT
 
     # v1.18.5: 基于 wxid 的稳定 ID 映射（避免 senderID 跨数据源不一致）
-    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
-    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
+    from services.desensitize import build_wxid_to_stable_id
+    wxid_to_stable = build_wxid_to_stable_id(chat.senders)
 
     # User Prompt：对话原文
     lines = []
@@ -573,12 +587,12 @@ _LOCAL_EVENT_JSON_INSTRUCTION = """
 {
   "headline": "一句话标题",
   "narrative": "1段简要叙述（100字以内），说清事件的起因、经过、结果",
-  "event_type": "decision|discussion|social|announcement|meme",
+  "event_type": "decision|discussion|social|announcement|meme|driving",
   "participants": [{"name": "[1]", "role": "主角"}],
   "key_quotes": ["最精彩的原话 — 发言人"],
   "time_span": {"start": "HH:MM", "end": "HH:MM"}
 }
-注意：群友用 [数字] 格式标识。如果只是日常闲聊，返回 null。"""
+注意：群友用 [数字] 格式标识。门槛放低，宁可多报。只有纯灌水才返回 null。"""
 
 
 def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[dict]:
@@ -618,10 +632,11 @@ def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[di
 async def _call_ai_for_events(system_prompt: str, user_prompt: str,
                               chat=None, window_msgs: list[dict] | None = None,
                               group_name: str = "") -> dict | None:
-    """调用 AI 分析单个窗口，返回单个事件 dict 或 None。
+    """调用 AI 分析单个窗口，返回事件 dict / None / 含 no_event_reason 的 dict。
 
     v1.18.1: 一个事件组 = 一个 AI 调用 = 一个事件或空。
     v1.18.3: 补齐 online→local 降级链路。
+    v1.18.5: AI 自然语言"无事件"时返回 {"no_event_reason": str}，不再误报错。
     """
     from services.model_config import resolve_model_with_fallback
     from services.online_model import call_online_chat
@@ -637,8 +652,8 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str,
 {
   "headline": "一句话抓人眼球的标题",
   "narrative": "2-3段故事化叙述，用轻松诙谐的口吻把事件的起因、经过、高潮讲清楚。像在给朋友讲八卦一样自然。",
-  "event_type": "decision|discussion|social|announcement|meme",
-  "mood": "欢乐|热闹|沙雕|温馨|吐槽|吃瓜|摸鱼|破防|离谱|平淡",
+  "event_type": "decision|discussion|social|announcement|meme|driving",
+  "mood": "欢乐|热闹|沙雕|温馨|吐槽|吃瓜|摸鱼|破防|离谱|平淡|暧昧|内涵",
   "mood_emoji": "🔥",
   "participants": [
     {"name": "[1]", "role": "主角"},
@@ -654,11 +669,12 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str,
 
 注意：
 - 群友用 [数字] 格式标识（如 [1]、[13]），participants.name、narrative、key_quotes 中引用群友时都必须使用 [数字] 格式，不要自创名称
-- participants 中 role 可选值：主角/反对者/催化剂/和事佬/围观群众/气氛组/总结者
+- participants 中 role 可选值：主角/反对者/催化剂/和事佬/围观群众/气氛组/总结者/老司机/吃瓜群众
 - key_moments 最多列 5 个关键时刻
 - key_quotes 最多 3 条，格式为 "原话 — 发言人"
+- 门槛放低：只要有一点点事件苗头就值得记录，宁可多报不要漏报
 
-如果这段对话只是日常闲聊，不构成事件，返回：
+只有纯灌水（纯表情、无意义复读、完全无信息量）才返回：
 null"""
 
     full_system = system_prompt + "\n\n" + json_instruction
@@ -704,7 +720,11 @@ null"""
         if isinstance(result, dict) and result.get("success"):
             response_text = result.get("data", "")
             if response_text and response_text.strip():
-                return _parse_ai_response(response_text)
+                parsed, no_reason = _parse_ai_response(response_text)
+                if parsed is not None:
+                    return parsed
+                if no_reason:
+                    return {"no_event_reason": no_reason}
             last_error = "AI 返回空内容"
         else:
             last_error = result.get("error", "未知错误") if isinstance(result, dict) else "未知错误"
@@ -754,29 +774,37 @@ null"""
     if ollama_result.get("success") and ollama_result.get("data"):
         response_text = ollama_result.get("data", "")
         if isinstance(response_text, str) and response_text.strip():
-            result = _parse_ai_response(response_text)
-            if result:
-                result["ai_model_used"] = ollama_result.get("model", "local")
-                return result
+            parsed, no_reason = _parse_ai_response(response_text)
+            if parsed is not None:
+                parsed["ai_model_used"] = ollama_result.get("model", "local")
+                return parsed
+            if no_reason:
+                return {"no_event_reason": no_reason}
 
     logger.warning("本地模型事件分析失败: %s", ollama_result.get("error", ""))
     raise RuntimeError(f"事件分析失败（在线+本地均不可用）: {last_error}")
 
 
-def _parse_ai_response(result: str) -> dict | None:
+def _parse_ai_response(result: str) -> tuple[dict | None, str]:
     """解析 AI 返回的 JSON，提取单个事件或 null。
 
     v1.18.1: 新格式 — 单个事件对象或 null。
     向后兼容：也支持旧格式 {"events": [...]} 取第一个。
+    v1.18.5: 返回 (event_dict_or_None, no_event_reason) — AI 自然语言"无事件"不再报错。
+
+    Returns:
+        (event_dict, "") — 有效事件
+        (None, "") — 确实无事件（null/空）
+        (None, reason) — AI 判断无事件并给了自然语言解释
     """
     if not result:
-        return None
+        return None, ""
 
     text = result.strip()
 
     # null 直接返回
     if text.lower() == "null":
-        return None
+        return None, ""
 
     # 尝试去掉 markdown 代码块
     if text.startswith("```"):
@@ -793,8 +821,12 @@ def _parse_ai_response(result: str) -> dict | None:
         # 用花括号计数提取最外层 JSON 对象（支持嵌套）
         data = _extract_json_object(text)
         if data is None:
+            # v1.18.5: AI 返回自然语言"无事件"解释，保存为 ai_reason 供前端展示
+            if len(text) > 10 and '{' not in text:
+                logger.info("AI 判断无事件: %s...", text[:120])
+                return None, text.strip()
             logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
-            return None
+            return None, ""
 
     # 向后兼容：旧格式 {"events": [...]}
     if "events" in data:
@@ -802,12 +834,12 @@ def _parse_ai_response(result: str) -> dict | None:
         if isinstance(events, list) and events:
             data = events[0]
         else:
-            return None
+            return None, ""
 
     # v1.18.2: headline 替代 title（向后兼容 title 字段）
     headline = (data.get("headline") or data.get("title") or "").strip()
     if not headline:
-        return None
+        return None, ""
 
     ts = data.get("time_span", {}) or {}
 
@@ -834,7 +866,7 @@ def _parse_ai_response(result: str) -> dict | None:
             "time_span": ts,
         },
     }
-    return result
+    return result, ""
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -869,8 +901,8 @@ def _extract_json_object(text: str) -> dict | None:
 
 
 def _normalize_event_type(t: str) -> str:
-    """标准化事件类型到 5 个合法值"""
-    valid = {"decision", "discussion", "social", "announcement", "meme"}
+    """标准化事件类型到合法值（v1.18.5: 新增 driving）"""
+    valid = {"decision", "discussion", "social", "announcement", "meme", "driving"}
     t = t.lower().strip()
     if t in valid:
         return t
@@ -881,6 +913,8 @@ def _normalize_event_type(t: str) -> str:
         "社交": "social", "庆祝": "social", "欢迎": "social", "告别": "social",
         "公告": "announcement", "宣布": "announcement",
         "梗": "meme", "玩梗": "meme", "文化": "meme",
+        "开车": "driving", "飙车": "driving", "擦边": "driving", "内涵": "driving",
+        "黄段子": "driving", "性暗示": "driving",
     }
     return mapping.get(t, "discussion")  # 默认 discussion
 

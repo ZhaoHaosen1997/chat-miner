@@ -246,8 +246,8 @@ def _extract_period_raw_data(
         return {"stats": {}, "sampled_msgs": [], "member_summary": {}}
 
     # 2. 预建成员映射 wxid -> stable_id（基于 wxid 排序，跨数据源一致）
-    sorted_wxids = sorted(set(s.get("wxid", "") for s in chat.senders if s.get("wxid", "")))
-    wxid_to_stable = {wxid: i for i, wxid in enumerate(sorted_wxids, 1)}
+    from services.desensitize import build_wxid_to_stable_id
+    wxid_to_stable = build_wxid_to_stable_id(chat.senders)
     wxid_set = set(wxid_to_stable.keys())
 
     # 3. Python 统计（每个成员独立计算）

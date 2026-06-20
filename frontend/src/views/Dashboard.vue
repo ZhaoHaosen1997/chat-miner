@@ -7,7 +7,7 @@ import {
   generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
   getEvents, getEventWindows, detectEvents, analyzeWindow, reanalyzeEvent,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle, Info, X } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 import WeFlowImportModal from '../components/WeFlowImportModal.vue'
 
@@ -16,6 +16,17 @@ const currentGroup = inject('currentGroup')
 const triggerRefresh = inject('triggerRefresh')
 const activeTaskId = inject('activeTaskId')
 const showError = inject('showError')
+// v1.18.5: AI 无事件提示（友好展示，非报错弹窗）
+const noEventNotice = ref(null)  // { message, aiReason }
+let _noEventTimer = null
+function showNoEventNotice(aiReason = '') {
+  if (_noEventTimer) clearTimeout(_noEventTimer)
+  noEventNotice.value = {
+    message: 'AI 判断该时段不构成值得记录的事件',
+    aiReason: aiReason || '',
+  }
+  _noEventTimer = setTimeout(() => { noEventNotice.value = null }, 12000)
+}
 const gid = computed(() => currentGroup.value?.id)
 
 // 批量任务运行时定时刷新（逐个标绿）— v1.5.2: 10s间隔 + 仅刷新关键数据
@@ -438,7 +449,9 @@ async function handleReanalyzeEvent(event) {
       result = await analyzeWindow(gid.value, event.window_id)
     }
     if (result?.status === 'empty') {
-      showError?.('未发现事件', 'AI 判断该时段不构成值得记录的事件', '', '仪表盘·重新分析事件')
+      showNoEventNotice(result.ai_reason || '')
+      await loadDashboardEvents()
+      return
     }
     await loadDashboardEvents()
   } catch (e) {
@@ -467,8 +480,9 @@ async function handleAnalyzeWindow(windowId) {
     if (result?.event_id) {
       router.push(`/event/${result.event_id}`)
     } else if (result?.status === 'empty') {
-      showError?.('未发现事件', 'AI 判断该时段不构成值得记录的事件', '', '仪表盘·分析窗口')
+      showNoEventNotice(result.ai_reason || '')
       await loadDashboardEvents()
+      return
     } else {
       await loadDashboardEvents()
     }
@@ -725,6 +739,18 @@ async function _executeAnnualGenerate(periodKey, force = false) {
       <!-- 主体：左(周期报告主舞台) 右(日历+排行) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 space-y-5">
+          <!-- v1.18.5: AI 无事件友好提示 -->
+          <div v-if="noEventNotice" class="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3">
+            <Info class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-amber-800">{{ noEventNotice.message }}</p>
+              <p v-if="noEventNotice.aiReason" class="text-xs text-amber-600 mt-1 leading-relaxed line-clamp-4">{{ noEventNotice.aiReason }}</p>
+            </div>
+            <button @click="noEventNotice = null" class="text-amber-400 hover:text-amber-600 shrink-0">
+              <X :size="14" />
+            </button>
+          </div>
+
           <!-- v1.18.2: 事件时间轴 -->
           <div class="card p-5 mb-5">
             <div class="flex items-center justify-between mb-3">

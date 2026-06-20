@@ -118,6 +118,22 @@ async def api_analyze_single_window(group_id: int, window_id: int):
         # 构建 Prompt + 调 AI
         event_data = await _analyze_window_with_ai(chat, group_id, window_msgs, window)
 
+        # v1.18.5: AI 返回了 no_event_reason → 无事件但有解释
+        if isinstance(event_data, dict) and event_data.get("no_event_reason"):
+            ai_reason = event_data["no_event_reason"]
+            update_window_status(window_id, "empty", event_count=0)
+            logger.info("窗口 %d 分析完成: AI 判断无事件 — %s", window_id, ai_reason[:80])
+            return {
+                "code": 200,
+                "message": "AI 判断该时段不构成事件",
+                "data": {
+                    "window_id": window_id,
+                    "status": "empty",
+                    "event": None,
+                    "ai_reason": ai_reason,
+                },
+            }
+
         if event_data:
             # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
             from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
@@ -230,7 +246,11 @@ async def api_analyze_all_windows(group_id: int):
                     event_data = await _analyze_window_with_ai(chat, group_id,
                                                                 window_msgs, w)
 
-                    if event_data:
+                    # v1.18.5: AI 返回了 no_event_reason → 无事件但有解释
+                    if isinstance(event_data, dict) and event_data.get("no_event_reason"):
+                        update_window_status(wid, "empty", event_count=0)
+                        logger.info("批量分析窗口 %d: AI 判断无事件", wid)
+                    elif event_data:
                         from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
                         _, name_map = build_stable_id_map(chat.senders)
                         event_data = resolve_sender_ids_deep(event_data, name_map)
