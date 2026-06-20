@@ -157,13 +157,16 @@ async def call_online_chat(
         result = resp.json()
         msg = result.get("choices", [{}])[0].get("message", {})
         content = msg.get("content", "")
-        if not content:
+        # v1.18.5: 空白内容也要尝试降级字段
+        if not content or not content.strip():
             # SenseNova deepseek-v4-flash 可能把回复放 reasoning_content
-            content = msg.get("reasoning_content", "")
-        if not content:
+            rc = msg.get("reasoning_content", "")
+            if rc and rc.strip():
+                content = rc
+        if not content or not content.strip():
             content = result.get("choices", [{}])[0].get("text", "")
-        if not content:
-            logger.warning(f"在线模型返回空内容，原始响应: {json.dumps(result, ensure_ascii=False)[:500]}")
+        if not content or not content.strip():
+            logger.warning(f"在线模型返回空/空白内容 (len={len(content)}), 原始响应: {json.dumps(result, ensure_ascii=False)[:800]}")
         logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
 
         if content.strip():
