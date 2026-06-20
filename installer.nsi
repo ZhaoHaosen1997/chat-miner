@@ -22,6 +22,11 @@ Function .onInit
     ReadRegStr $OldVersion HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" "DisplayVersion"
     ${If} $OldVersion != ""
         StrCpy $IsUpgrade "1"
+        ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatMiner" "UninstallString"
+        ${If} $0 != ""
+            ${GetParent} "$0" $0
+            StrCpy $INSTDIR "$0"
+        ${EndIf}
     ${Else}
         StrCpy $IsUpgrade "0"
     ${EndIf}
