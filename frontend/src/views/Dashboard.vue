@@ -61,7 +61,30 @@ const eventsLoading = ref(false)
 const eventsScanning = ref(false)
 const eventShowCount = ref(8)
 const analyzingWindowId = ref(null)
+const analyzingTarget = ref('')  // 事件操作互斥锁（scan/reanalyze/analyze/all）
 const showRescanConfirm = ref(false)
+const showPrivacyConfirm = ref(false)
+const privacyDontShow = ref(false)
+const pendingEventAction = ref(null)  // 待执行的事件操作函数
+
+function checkPrivacyConsent(actionFn) {
+  if (localStorage.getItem('event_privacy_consent') === '1') {
+    actionFn()
+    return
+  }
+  pendingEventAction.value = actionFn
+  showPrivacyConfirm.value = true
+}
+
+function confirmPrivacyAndProceed() {
+  if (privacyDontShow.value) {
+    localStorage.setItem('event_privacy_consent', '1')
+  }
+  showPrivacyConfirm.value = false
+  const fn = pendingEventAction.value
+  pendingEventAction.value = null
+  if (fn) fn()
+}
 const expandedEventMonths = ref(new Set())
 
 function toggleEventMonth(month) {
@@ -382,7 +405,8 @@ async function loadDashboardEvents() {
 }
 
 async function handleScanEvents(force = false) {
-  if (!gid.value || eventsScanning.value) return
+  if (!gid.value || analyzingTarget.value || eventsScanning.value) return
+  analyzingTarget.value = 'scan'
   eventsScanning.value = true
   try {
     await detectEvents(gid.value, '', '', force)
@@ -390,7 +414,7 @@ async function handleScanEvents(force = false) {
     await loadDashboardEvents()
   } catch (e) {
     showError?.('事件扫描失败', e.message, e.stack, '仪表盘·扫描事件')
-  } finally { eventsScanning.value = false }
+  } finally { analyzingTarget.value = ''; eventsScanning.value = false }
 }
 
 function handleRescanConfirm() { showRescanConfirm.value = true }
@@ -401,14 +425,14 @@ async function handleRescanExecute() {
 }
 
 async function handleReanalyzeEvent(event) {
-  if (!gid.value) return
+  if (!gid.value || analyzingTarget.value) return
   const useEventId = !event.window_id
   const idForTracking = useEventId ? event.id : event.window_id
+  analyzingTarget.value = 'reanalyze:' + idForTracking
   analyzingWindowId.value = idForTracking
   try {
     let result
     if (useEventId) {
-      // 旧事件无 window_id，走兼容端点
       result = await reanalyzeEvent(gid.value, event.id)
     } else {
       result = await analyzeWindow(gid.value, event.window_id)
@@ -419,22 +443,24 @@ async function handleReanalyzeEvent(event) {
     await loadDashboardEvents()
   } catch (e) {
     showError?.('重新分析失败', e.message, e.stack, '仪表盘·重新分析事件')
-  } finally { analyzingWindowId.value = null }
+  } finally { analyzingTarget.value = ''; analyzingWindowId.value = null }
 }
 
 async function handleAnalyzeAllEvents() {
-  if (!gid.value || activeTaskId.value) return
+  if (!gid.value || analyzingTarget.value || activeTaskId.value) return
+  analyzingTarget.value = 'all'
   try {
     const { analyzeAllWindows: analyzeAll } = await import('../api/index.js')
     const result = await analyzeAll(gid.value)
     if (result?.task_id) activeTaskId.value = result.task_id
   } catch (e) {
     showError?.('一键分析失败', e.message, e.stack, '仪表盘·一键分析全部')
-  }
+  } finally { analyzingTarget.value = '' }
 }
 
 async function handleAnalyzeWindow(windowId) {
-  if (!gid.value) return
+  if (!gid.value || analyzingTarget.value) return
+  analyzingTarget.value = 'analyze:' + windowId
   analyzingWindowId.value = windowId
   try {
     const result = await analyzeWindow(gid.value, windowId)
@@ -448,7 +474,7 @@ async function handleAnalyzeWindow(windowId) {
     }
   } catch (e) {
     showError?.('窗口分析失败', e.message, e.stack, '仪表盘·分析窗口')
-  } finally { analyzingWindowId.value = null }
+  } finally { analyzingTarget.value = ''; analyzingWindowId.value = null }
 }
 
 // ISO 周标识 → 日期范围（如 2026-W25 → 6/15-6/21）
@@ -708,17 +734,17 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <span class="text-xs text-slate-400 font-normal">{{ dashboardEvents.length + dashboardWindows.filter(w=>w.status==='pending').length }}</span>
               </h3>
               <div class="flex items-center gap-1.5">
-                <button @click="handleScanEvents(false)" :disabled="eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleScanEvents(false))" :disabled="!!analyzingTarget || eventsScanning"
                   class="text-[10px] bg-emerald-500 text-white px-2 py-1 rounded-full hover:bg-emerald-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Search :size="10" />扫描新事件
                 </button>
-                <button @click="handleRescanConfirm" :disabled="eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleRescanConfirm())" :disabled="!!analyzingTarget || eventsScanning"
                   class="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full hover:bg-red-600 disabled:opacity-40 flex items-center gap-0.5"
                   title="删除全部窗口后重新检测">
                   <RefreshCw :size="10" />重新扫描
                 </button>
-                <button v-if="dashboardWindows.some(w=>w.status==='pending')" @click="handleAnalyzeAllEvents"
-                  :disabled="!!activeTaskId || eventsScanning"
+                <button v-if="dashboardWindows.some(w=>w.status==='pending')" @click="checkPrivacyConsent(() => handleAnalyzeAllEvents())"
+                  :disabled="!!analyzingTarget || !!activeTaskId || eventsScanning"
                   class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Zap :size="10" />一键分析
                 </button>
@@ -744,8 +770,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-300 w-4 text-center">○</span>
                     <span class="text-slate-400 w-16 flex-shrink-0">{{ (w.start_time||'').slice(5,10) }}</span>
                     <span class="flex-1 text-slate-500 truncate">{{ (w.summary?.preview||[])[0]?.content || '候选事件' }}</span>
-                    <button @click.stop="handleAnalyzeWindow(w.id)"
-                      :disabled="analyzingWindowId === w.id"
+                    <button @click.stop="checkPrivacyConsent(() => handleAnalyzeWindow(w.id))"
+                      :disabled="!!analyzingTarget || analyzingWindowId === w.id"
                       class="bg-indigo-500 text-white px-2 py-0.5 rounded-full text-[10px] hover:bg-indigo-600 disabled:opacity-40 flex-shrink-0">
                       {{ analyzingWindowId === w.id ? '...' : '分析' }}
                     </button>
@@ -759,8 +785,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="flex-1 text-slate-700 font-medium truncate">{{ e.title }}</span>
                     <span class="text-slate-400 text-[10px] flex-shrink-0">{{ e.message_count || 0 }}条</span>
                     <span class="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0">已分析</span>
-                    <button @click.stop="handleReanalyzeEvent(e)"
-                      :disabled="analyzingWindowId != null && analyzingWindowId === e.window_id"
+                    <button @click.stop="checkPrivacyConsent(() => handleReanalyzeEvent(e))"
+                      :disabled="!!analyzingTarget || (analyzingWindowId != null && analyzingWindowId === e.window_id)"
                       class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full text-[10px] hover:bg-amber-100 disabled:opacity-40 flex-shrink-0">
                       ↻
                     </button>
@@ -798,6 +824,27 @@ async function _executeAnnualGenerate(periodKey, force = false) {
               </div>
             </div>
           </div>
+
+          <!-- 隐私确认弹窗（事件分析首次触发） -->
+          <Teleport to="body">
+            <div v-if="showPrivacyConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showPrivacyConfirm = false">
+              <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-sm mx-4">
+                <p class="text-sm font-semibold text-slate-800 mb-2">🔒 数据隐私提醒</p>
+                <p class="text-xs text-slate-500 leading-relaxed mb-4">
+                  事件分析会将<strong>聊天消息内容</strong>提交给在线 AI 模型处理。消息中的敏感信息（手机号、身份证等）已自动过滤，发言者用数字 ID 替代。<br><br>
+                  请确认你已获得群成员的知情同意，或确认群聊内容不包含个人隐私信息。
+                </p>
+                <label class="flex items-center gap-2 mb-5 text-xs text-slate-500 cursor-pointer">
+                  <input type="checkbox" v-model="privacyDontShow" class="rounded border-slate-300" />
+                  不再提示
+                </label>
+                <div class="flex gap-2 justify-end">
+                  <button @click="showPrivacyConfirm = false" class="px-4 py-2 text-xs rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">取消</button>
+                  <button @click="confirmPrivacyAndProceed" class="px-4 py-2 text-xs rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition-colors">确认并继续</button>
+                </div>
+              </div>
+            </div>
+          </Teleport>
 
           <!-- 加载时段 -->
           <template v-if="!periodsLoaded && !periodsLoading">
