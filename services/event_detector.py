@@ -523,7 +523,8 @@ def _extract_group_summary(window_msgs: list[dict]) -> dict:
 # ── Phase 2: AI 分析 (v1.18.1) ──────────────────────────────────────────
 
 
-def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple[str, str]:
+def _build_event_prompt(chat, window: list[dict], group_name: str = "",
+                       group_id: int = 0) -> tuple[str, str]:
     """构建事件分析 Prompt（v1.18.1: 单事件输出）。
 
     Returns:
@@ -538,6 +539,12 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
 
     # User Prompt：对话原文
     lines = []
+    # v1.18.3: 注入梗百科
+    if group_id:
+        from services.desensitize import build_meme_prefix
+        mp = build_meme_prefix(group_id)
+        if mp:
+            lines.append(mp)
     group_label = f'群聊"{group_name}"中' if group_name else "群聊"
     lines.append(f"以下是{group_label}的一段连续对话。请判断它是否构成一个值得记录的事件。\n")
 
@@ -557,10 +564,63 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "") -> tuple
     return system_prompt, user_prompt
 
 
-async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | None:
-    """调用在线 AI 分析单个窗口，返回单个事件 dict 或 None。
+# v1.18.3: 本地降级用简化 JSON 指令（字段精简以适应 32k 上下文）
+_LOCAL_EVENT_JSON_INSTRUCTION = """
+请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）。
+
+如果这段对话构成了一个值得记录的事件：
+{
+  "headline": "一句话标题",
+  "narrative": "1段简要叙述（100字以内），说清事件的起因、经过、结果",
+  "event_type": "decision|discussion|social|announcement|meme",
+  "participants": [{"name": "[1]", "role": "主角"}],
+  "key_quotes": ["最精彩的原话 — 发言人"],
+  "time_span": {"start": "HH:MM", "end": "HH:MM"}
+}
+注意：群友用 [数字] 格式标识。如果只是日常闲聊，返回 null。"""
+
+
+def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[dict]:
+    """滑动窗口取消息密度最高段，用于本地模型上下文截断。"""
+    if len(msgs) <= max_count:
+        return msgs
+
+    from datetime import datetime
+    times = []
+    for m in msgs:
+        ft = m.get("formattedTime", "")
+        if len(ft) >= 16:
+            try:
+                times.append(datetime.strptime(ft[:16], "%Y-%m-%d %H:%M"))
+            except ValueError:
+                times.append(None)
+        else:
+            times.append(None)
+
+    best_start = 0
+    best_density = 0
+    for i in range(len(msgs) - max_count + 1):
+        pts = [t for t in times[i:i + max_count] if t is not None]
+        if len(pts) >= 2:
+            span = max((pts[-1] - pts[0]).total_seconds() / 60, 1)
+            density = len(pts) / span
+        else:
+            density = max_count
+        if density > best_density:
+            best_density = density
+            best_start = i
+
+    logger.debug("消息截断: %d→%d (密度=%.1f)", len(msgs), max_count, best_density)
+    return msgs[best_start:best_start + max_count]
+
+
+async def _call_ai_for_events(system_prompt: str, user_prompt: str,
+                              chat=None, window_msgs: list[dict] | None = None,
+                              group_name: str = "") -> dict | None:
+    """调用 AI 分析单个窗口，返回单个事件 dict 或 None。
 
     v1.18.1: 一个事件组 = 一个 AI 调用 = 一个事件或空。
+    v1.18.3: 补齐 online→local 降级链路。
     """
     from services.model_config import resolve_model_with_fallback
     from services.online_model import call_online_chat
@@ -569,7 +629,6 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | No
     if not primary:
         raise RuntimeError("没有可用的在线模型")
 
-    # v1.18.2: 丰富化事件输出格式
     json_instruction = """
 请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）。
 
@@ -602,7 +661,9 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str) -> dict | No
 null"""
 
     full_system = system_prompt + "\n\n" + json_instruction
+    last_error = None
 
+    # ── 尝试主模型 ──
     try:
         result = await call_online_chat(
             system_prompt=full_system,
@@ -615,37 +676,90 @@ null"""
             timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
         )
     except Exception as e:
-        if fallback:
-            logger.info("主模型失败，尝试降级: %s", e)
-            try:
-                result = await call_online_chat(
-                    system_prompt=full_system,
-                    user_prompt=user_prompt,
-                    model_config=fallback,
-                    temperature=0.8,
-                    json_mode=True,
-                    thinking=False,
-                    max_tokens=4096,
-                    timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
-                )
-            except Exception as fb_e:
-                logger.error("备用模型也失败: %s", fb_e, exc_info=True)
-                raise
+        last_error = str(e)
+        logger.warning("事件分析主模型失败: %s", e)
+        result = None
+
+    # ── 主模型失败 → 尝试 fallback（仅当 fallback 也是在线模型时） ──
+    if result is None and fallback and fallback.get("model_type") == "online":
+        logger.info("尝试在线备用模型: %s", fallback.get("model_name", ""))
+        try:
+            result = await call_online_chat(
+                system_prompt=full_system,
+                user_prompt=user_prompt,
+                model_config=fallback,
+                temperature=0.8,
+                json_mode=True,
+                thinking=False,
+                max_tokens=4096,
+                timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
+            )
+        except Exception as fb_e:
+            logger.warning("在线备用模型也失败: %s", fb_e)
+            last_error = str(fb_e)
+
+    # ── 在线模型成功 → 解析返回 ──
+    if result is not None:
+        if isinstance(result, dict) and result.get("success"):
+            response_text = result.get("data", "")
+            if response_text and response_text.strip():
+                return _parse_ai_response(response_text)
+            last_error = "AI 返回空内容"
         else:
-            logger.error("主模型调用失败且无备用模型: %s", e, exc_info=True)
-            raise
+            last_error = result.get("error", "未知错误") if isinstance(result, dict) else "未知错误"
 
-    # call_online_chat 返回 dict: {"success": bool, "data": str, ...}
-    if isinstance(result, dict) and not result.get("success"):
-        error_msg = result.get("error", "未知错误")
-        model_name = result.get("model", "unknown")
-        raise RuntimeError(f"AI 模型调用失败 ({model_name}): {error_msg}")
+    # ── 在线模型失败 → 尝试本地降级 ──
+    if not config.LOCAL_LLM_ENABLED:
+        raise RuntimeError(f"AI 调用失败且本地模型已禁用: {last_error}")
 
-    response_text = result.get("data", "") if isinstance(result, dict) else str(result)
-    if not response_text:
-        logger.error("AI 返回空内容: %s (model=%s)", result.get("error", "unknown"), result.get("model", "unknown"))
-        return None
-    return _parse_ai_response(response_text)
+    # 获取本地模型配置
+    local_cfg = fallback if (fallback and fallback.get("model_type") == "local") else None
+    if not local_cfg:
+        from services.model_config import get_effective_model
+        try:
+            local_cfg = get_effective_model("local")
+        except Exception:
+            pass
+    if not local_cfg:
+        raise RuntimeError(f"未找到本地模型配置: {last_error}")
+
+    logger.info("事件分析降级到本地模型: %s", local_cfg.get("model_name", ""))
+
+    # 重建简化 prompt（截断消息 + 精简 JSON 指令）
+    from services.analyzer import call_ollama_chat
+    if window_msgs and chat:
+        truncated = _truncate_densest_segment(window_msgs, 200)
+        local_system, local_user = _build_event_prompt(chat, truncated, group_name)
+    else:
+        local_system = system_prompt
+        local_user = user_prompt
+        lines = user_prompt.split("\n")
+        if len(lines) > 220:
+            local_user = "\n".join(lines[:200]) + "\n\n（内容过长已截断）"
+
+    local_full = local_system + "\n\n" + _LOCAL_EVENT_JSON_INSTRUCTION
+
+    try:
+        ollama_result = await call_ollama_chat(
+            system_prompt=local_full,
+            user_prompt=local_user,
+            model=local_cfg.get("model_name", ""),
+            timeout=180,
+        )
+    except Exception as e:
+        logger.error("本地模型调用异常: %s", e, exc_info=True)
+        raise RuntimeError(f"事件分析降级失败: {e}")
+
+    if ollama_result.get("success") and ollama_result.get("data"):
+        response_text = ollama_result.get("data", "")
+        if isinstance(response_text, str) and response_text.strip():
+            result = _parse_ai_response(response_text)
+            if result:
+                result["ai_model_used"] = ollama_result.get("model", "local")
+                return result
+
+    logger.warning("本地模型事件分析失败: %s", ollama_result.get("error", ""))
+    raise RuntimeError(f"事件分析失败（在线+本地均不可用）: {last_error}")
 
 
 def _parse_ai_response(result: str) -> dict | None:

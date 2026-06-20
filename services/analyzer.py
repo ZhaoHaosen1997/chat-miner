@@ -310,6 +310,7 @@ async def analyze_daily_chat(
     task=None,
     hourly_stats: str = "",
     is_private: bool = False,
+    group_id: int = 0,
 ) -> dict:
     """分析一天的群聊内容，生成每日报告
 
@@ -347,6 +348,7 @@ async def analyze_daily_chat(
                 chat_text, group_name, date, msg_count,
                 model_config=model_config, task=task,
                 hourly_stats=hourly_stats, is_private=is_private,
+                group_id=group_id,
             )
         else:
             data = await run_daily_pipeline(

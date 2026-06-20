@@ -32,8 +32,13 @@ function draw() {
 
   ctx.clearRect(0, 0, w, h)
 
+  // v1.18.3: 过滤纯数字和单字符
+  const filtered = props.words.filter(w => {
+    const t = (w.text || '').trim()
+    return t.length >= 2 && !/^\d+$/.test(t)
+  })
   // Sort by weight descending
-  const sorted = [...props.words].sort((a, b) => b.weight - a.weight)
+  const sorted = [...filtered].sort((a, b) => b.weight - a.weight)
   const maxWeight = Math.max(...sorted.map(s => s.weight), 1)
 
   // Simple spiral layout

@@ -501,3 +501,10 @@ export async function reanalyzeEvent(gid, eventId) {
   if (!res.ok || data.code !== 200) throw new Error(data.detail || data.message || '请求失败')
   return data.data  // { window_id, status, event_id, event }
 }
+
+// ── v1.18.3 群梗百科 ──────────────────────────────────────────────
+export function getGroupMemes(gid) { return apiGet(`/groups/${gid}/memes`) }
+export async function addGroupMeme(gid, term, desc) { return request(`/groups/${gid}/memes`, { method: 'POST', body: JSON.stringify({ term, description: desc }) }) }
+export async function updateGroupMeme(gid, mid, desc) { return request(`/groups/${gid}/memes/${mid}`, { method: 'PUT', body: JSON.stringify({ description: desc }) }) }
+export function deleteGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}`, { method: 'DELETE' }) }
+export function scanGroupMemes(gid) { return request(`/groups/${gid}/memes/scan`, { method: 'POST' }) }

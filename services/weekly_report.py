@@ -820,24 +820,15 @@ async def _ai_generate(system_prompt: str, user_prompt: str,
                        temperature: float = 0.8, max_tokens: int = 4096,
                        thinking: bool = False,
                        model_config: dict | None = None,
-                       task=None) -> dict:
-    """AI 生成入口，支持在线/本地模型 + 降级
-
-    v0.12.0: 优先使用 model_config 选择模型和端点。
-    若 model_config 为 None 或 model_config["model_type"]=="online" 且无 api_key，
-    则回退到旧版 DeepSeek → Ollama 降级逻辑。
-
-    Args:
-        model_config: v0.12.0 模型配置 dict。若为 None 则使用旧版 DeepSeek 逻辑。
-    """
+                       task=None, group_id: int = 0) -> dict:
+    """AI 生成入口，支持在线/本地模型 + 降级"""
     import asyncio as _asyncio
     try:
         return await _asyncio.wait_for(
             _do_ai_generate(system_prompt, user_prompt, model, json_mode,
                           temperature, max_tokens, thinking, model_config,
-                          task),
-            timeout=300  # v0.13.4: 硬兜底 5 分钟总超时
-        )
+                          task, group_id),
+            timeout=300)
     except _asyncio.TimeoutError:
         logger.error("_ai_generate 总超时 (300s)")
         return {"success": False, "data": None,
@@ -851,8 +842,14 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
                            temperature: float, max_tokens: int,
                            thinking: bool,
                            model_config: dict | None,
-                           task=None) -> dict:
+                           task=None, group_id: int = 0) -> dict:
     """_ai_generate 的实际实现（由 asyncio.wait_for 包裹调用）"""
+    # v1.18.3: 在线模型注入梗百科
+    if group_id and model_config and model_config.get("model_type") == "online":
+        from services.desensitize import build_meme_prefix
+        mp = build_meme_prefix(group_id)
+        if mp:
+            user_prompt = mp + "\n" + user_prompt
     # v0.12.0: 使用 model_config 路由
     if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
         from services.online_model import call_online_chat
@@ -862,7 +859,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
         for attempt in range(max_attempts):
             result = await call_online_chat(
                 system_prompt, user_prompt,
-                model_config=model_config,
+                group_id=group_id, model_config=model_config,
                 temperature=temperature,
                 json_mode=json_mode,
                 max_tokens=max_tokens,
@@ -1122,7 +1119,7 @@ async def generate_weekly_report(
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.WEEKLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_WEEKLY,
-            model_config=model_config,
+            group_id=group_id, model_config=model_config,
         )
 
         if not ai_result["success"]:
@@ -1194,7 +1191,7 @@ async def generate_weekly_report(
         ai_result = await _ai_generate(
             _adapt_prompt(WEEKLY_SYSTEM_PROMPT) if is_private else WEEKLY_SYSTEM_PROMPT,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
-            json_mode=True, model_config=model_config)
+            json_mode=True, group_id=group_id, model_config=model_config)
 
         if not ai_result["success"]:
             return {
@@ -1451,7 +1448,7 @@ async def generate_monthly_report(
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.MONTHLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_MONTHLY,
-            thinking=True, model_config=model_config,
+            thinking=True, group_id=group_id, model_config=model_config,
         )
 
         if not ai_result["success"]:
@@ -1538,7 +1535,7 @@ async def generate_monthly_report(
             _adapt_prompt(MONTHLY_SYSTEM_PROMPT) if is_private else MONTHLY_SYSTEM_PROMPT,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             model=config.DEEPSEEK_REASONER_MODEL,
-            json_mode=True, model_config=model_config,
+            json_mode=True, group_id=group_id, model_config=model_config,
         )
 
         if not ai_result["success"]:

@@ -149,3 +149,18 @@ def resolve_sender_ids_deep(data, name_map: dict[int, str]):
     if isinstance(data, list):
         return [resolve_sender_ids_deep(item, name_map) for item in data]
     return data
+
+
+def build_meme_prefix(group_id: int) -> str:
+    """构建梗百科注入前缀。群无梗时返回空字符串。"""
+    try:
+        from models.database import get_group_memes
+        memes = get_group_memes(group_id)
+        if not memes:
+            return ""
+        lines = ["【群梗百科】以下为群内约定俗成的表达，供你理解消息上下文："]
+        for m in memes:
+            lines.append(f'- "{m["term"]}"：{m["description"]}')
+        return "\n".join(lines) + "\n"
+    except Exception:
+        return ""

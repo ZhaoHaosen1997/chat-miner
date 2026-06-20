@@ -444,6 +444,19 @@ def init_db():
                 ON event_windows(group_id, start_time);
             CREATE INDEX IF NOT EXISTS idx_event_windows_group_status
                 ON event_windows(group_id, status);
+
+            -- v1.18.3 群梗百科
+            CREATE TABLE IF NOT EXISTS group_memes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                term TEXT NOT NULL,
+                description TEXT NOT NULL,
+                source TEXT DEFAULT 'ai',
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                updated_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(group_id, term),
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
+            );
         """)
         # 向后兼容：为已有数据库添加新列
         _migrate_db(conn)
@@ -505,6 +518,8 @@ def init_db():
         _migrate_v1_18_2(conn)
         # v1.18.3: 回填旧事件的 window_id
         _migrate_v1_18_3(conn)
+        # v1.18.4: 群梗百科（group_memes 表由 CREATE TABLE IF NOT EXISTS 自动创建）
+        _migrate_v1_18_4(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -905,6 +920,47 @@ def _migrate_v1_18_3(conn):
     count = result.rowcount
     if count > 0:
         logger.info("DB migrate v1.18.3: backfilled %d events.window_id from event_windows", count)
+
+
+def _migrate_v1_18_4(conn):
+    """v1.18.4: 群梗百科 — group_memes 由 CREATE TABLE IF NOT EXISTS 自动创建"""
+
+
+# ── 群梗百科 CRUD ─────────────────────────────────────────────────
+
+def get_group_memes(group_id: int) -> list[dict]:
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM group_memes WHERE group_id=? ORDER BY term", (group_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_group_meme(group_id: int, term: str, description: str, source: str = "user") -> int | None:
+    try:
+        with db() as conn:
+            cur = conn.execute(
+                "INSERT INTO group_memes (group_id, term, description, source) VALUES (?,?,?,?)",
+                (group_id, term.strip(), description.strip(), source)
+            )
+            return cur.lastrowid
+    except Exception:
+        return None
+
+
+def update_group_meme(meme_id: int, description: str) -> bool:
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE group_memes SET description=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (description.strip(), meme_id)
+        )
+        return cur.rowcount > 0
+
+
+def delete_group_meme(meme_id: int) -> bool:
+    with db() as conn:
+        cur = conn.execute("DELETE FROM group_memes WHERE id=?", (meme_id,))
+        return cur.rowcount > 0
 
 
 def _seed_default_model_configs(conn):

@@ -335,10 +335,11 @@ async def _analyze_window_with_ai(chat, group_id: int,
     except Exception:
         pass
 
-    system_prompt, user_prompt = _build_event_prompt(chat, window_msgs, group_name)
+    system_prompt, user_prompt = _build_event_prompt(chat, window_msgs, group_name, group_id)
 
     try:
-        result = await _call_ai_for_events(system_prompt, user_prompt)
+        result = await _call_ai_for_events(system_prompt, user_prompt,
+            chat=chat, window_msgs=window_msgs, group_name=group_name)
     except Exception as e:
         logger.warning("窗口 AI 调用失败: %s", e, exc_info=True)
         raise

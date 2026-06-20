@@ -669,6 +669,7 @@ async def run_daily_pipeline_online(
     task=None,
     hourly_stats: str = "",
     is_private: bool = False,
+    group_id: int = 0,
 ) -> dict:
     """在线模型单次调用日报管线 v0.12.0
 
@@ -694,6 +695,13 @@ async def run_daily_pipeline_online(
     hs = (hourly_stats or "(无小时分布数据)")
     full_chat = chat_for_prompt + f"\n\n小时消息分布：\n{hs}"
     user_prompt = DAILY_ONLINE_USER.format(chat=full_chat)
+
+    # v1.18.3: 注入梗百科
+    if group_id:
+        from services.desensitize import build_meme_prefix
+        mp = build_meme_prefix(group_id)
+        if mp:
+            user_prompt = mp + "\n" + user_prompt
 
     logger.info(f"在线模型日报: {group_name} {date}, 模型={model_config.get('model_name')}")
 

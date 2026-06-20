@@ -121,6 +121,7 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
         task=task,
         hourly_stats=hourly_stats_str,
         is_private=is_private,
+        group_id=group_id,
     )
 
     if result["success"] and result["data"]:
@@ -421,65 +422,86 @@ async def api_analyze_all(group_id: int, model_id: int = None):
 
 @router.get("/trending")
 async def api_trending_topics(group_id: int, days: int = 7):
-    """群聊热搜榜：聚合最近 N 天日报中的话题和关键词，排行"""
+    """群聊热搜榜：聚合最近 N 天日报话题 + 事件标题，排行"""
     from collections import Counter
     from datetime import datetime, timedelta
 
-    reports = get_recent_reports(group_id, limit=days)
-    if not reports:
-        return {"code": 200, "message": "暂无数据", "data": {"topics": [], "keywords": []}}
-
     now = datetime.now()
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+
     topic_counter = Counter()
-    topic_dates = {}  # topic → 最近出现日期
+    topic_dates = {}
     kw_counter = Counter()
     kw_dates = {}
 
-    for r in reports:
+    # ── 1. 日报关键词 ──
+    reports = get_recent_reports(group_id, limit=days)
+    for r in (reports or []):
         try:
             rj = json.loads(r["report_json"])
         except (json.JSONDecodeError, TypeError):
-            logger.warning(f"热搜榜: 报告 JSON 损坏，已跳过 date={r.get('date', '?')}")
             continue
-
         date = r["date"]
-        # 话题
-        for t in rj.get("topic_summary", []):
+        for t in (rj.get("topic_summary") or []):
             t = str(t).strip()
             if t and len(t) >= 2:
                 topic_counter[t] += 1
                 if t not in topic_dates or date > topic_dates[t]:
                     topic_dates[t] = date
-        # 关键词
-        for kw in rj.get("keywords", []):
+        for kw in (rj.get("keywords") or []):
             kw = str(kw).strip()
             if kw and len(kw) >= 2:
                 kw_counter[kw] += 1
                 if kw not in kw_dates or date > kw_dates[kw]:
                     kw_dates[kw] = date
 
-    # 按热度排序 (频次权重 + 时间衰减)
+    # ── 2. 事件标题（v1.18.3） ──
+    from models.database import get_events
+    events = get_events(group_id, date_from=cutoff)
+    for evt in (events or []):
+        title = (evt.get("title") or "").strip()
+        if title:
+            # 事件标题本身就是一个高质量话题标签
+            topic_counter[title] += 1
+            evt_date = (evt.get("start_time") or "")[:10]
+            if evt_date:
+                if title not in topic_dates or evt_date > topic_dates[title]:
+                    topic_dates[title] = evt_date
+        # 从 report_json 提取 narrative 中的关键短语
+        try:
+            rj = json.loads(evt.get("report_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            rj = {}
+        narrative = (rj.get("narrative") or "").strip()
+        if narrative:
+            # 简单切分取 4-10 字短语作为关键词
+            import re
+            for phrase in re.findall(r'[一-鿿]{4,10}', narrative):
+                if phrase not in topic_counter:  # 不在话题中才加入关键词
+                    kw_counter[phrase] += 1
+                    evt_date = (evt.get("start_time") or "")[:10]
+                    if evt_date:
+                        if phrase not in kw_dates or evt_date > kw_dates[phrase]:
+                            kw_dates[phrase] = evt_date
+
+    if not topic_counter and not kw_counter:
+        return {"code": 200, "message": "暂无数据", "data": {"topics": [], "keywords": [], "period": f"最近{days}天"}}
+
+    # 热度：频次 × 时间衰减
     def heat_score(item, counter, dates):
         count = counter.get(item, 1)
         last_date = dates.get(item, "")
-        # 最近出现的加权
         try:
             dt = datetime.strptime(last_date, "%Y-%m-%d")
             days_ago = max(0, (now - dt).days)
         except Exception:
             days_ago = days
-        recency_bonus = max(0, days - days_ago) / days  # 0~1
+        recency_bonus = max(0, days - days_ago) / max(days, 1)
         return round(count * (1 + recency_bonus), 1)
 
-    # 判断趋势：↑上期也在 ↓新上榜
     def trend_label(item, counter, dates):
         count = counter.get(item, 0)
-        last = dates.get(item, "")
-        if count >= 3:
-            return "hot"  # 连续出现 → 沸
-        if count >= 2:
-            return "up"   # 多次出现 → ↑
-        return "new"      # 首次 → 新
+        return "hot" if count >= 3 else ("up" if count >= 2 else "new")
 
     topics_ranked = []
     for t, c in topic_counter.most_common(15):

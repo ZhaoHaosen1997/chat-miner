@@ -58,6 +58,7 @@ ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼
       "award_emoji": "emoji"
     }
   ],
+  "year_keywords": [{"word": "主题词", "weight": 10}],
   "meme_of_the_year": "年度热梗（30字以内）",
   "next_year_wish": "新年寄语（50-80字）"
 }
@@ -81,6 +82,7 @@ ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼
 - award_name 是纯奖项标题（如"年度金句王"），不要在里面写人名
 - 每个获奖者只能拿一个奖（一人一奖）
 - 奖项数量 = {award_count} 个，严格按这个数量输出
+- year_keywords 提取 15-20 个最能代表年度群聊主题的关键词（如"跳槽""买房""相亲"），权重 1-10，不要笼统词或群友名
 - 语言风格：幽默、温暖、有仪式感"""
 
 
@@ -151,6 +153,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
         json_mode=True,
         thinking=True,
         model_config=model_config,
+        group_id=group_id,
     )
 
     if not ai_result["success"]:
@@ -231,6 +234,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
         "year_narrative": ai_data.get("year_narrative", ""),
         "group_evolution": ai_data.get("group_evolution", ""),
         "meme_of_the_year": ai_data.get("meme_of_the_year", ""),
+        "year_keywords": ai_data.get("year_keywords", []),
         "next_year_wish": ai_data.get("next_year_wish", ""),
         "annual_awards": saved_awards,
         # Python 统计

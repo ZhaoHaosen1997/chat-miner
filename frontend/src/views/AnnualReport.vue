@@ -139,34 +139,25 @@ function buildTimeline() {
   }))
 }
 
-// Gather all words from monthly data for word cloud
+// v1.18.3: 词云优先使用 AI 生成的 year_keywords
 const wordCloudWords = ref([])
 watch(report, (r) => {
   if (!r?.report_json) return
   const rj = r.report_json
+  if (rj.year_keywords?.length) {
+    wordCloudWords.value = rj.year_keywords
+      .filter(k => k.word?.length >= 2 && !/^\d+$/.test(k.word))
+      .map(k => ({ text: k.word, weight: k.weight }))
+      .slice(0, 50)
+    return
+  }
+  // 兜底：旧逻辑
   const words = []
-  // Extract words from annual awards
   if (rj.annual_awards) {
-    rj.annual_awards.forEach(a => {
-      if (a.award_name) words.push({ text: a.award_name, weight: 5 })
-      if (a.award_reason) {
-        a.award_reason.split(/[，,、\s]+/).forEach(w => {
-          if (w.length >= 2) words.push({ text: w, weight: 2 })
-        })
-      }
-    })
+    rj.annual_awards.forEach(a => { if (a.award_name) words.push({ text: a.award_name, weight: 5 }) })
   }
-  // Add top speakers
-  if (rj.top_speakers) {
-    rj.top_speakers.slice(0, 5).forEach(s => {
-      if (s.alias) words.push({ text: s.alias, weight: 3 })
-    })
-  }
-  // Add meme
-  if (rj.meme_of_the_year) {
-    words.push({ text: rj.meme_of_the_year, weight: 6 })
-  }
-  wordCloudWords.value = words.slice(0, 60)
+  if (rj.meme_of_the_year) words.push({ text: rj.meme_of_the_year, weight: 6 })
+  wordCloudWords.value = words.slice(0, 30)
 })
 </script>
 
