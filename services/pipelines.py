@@ -708,7 +708,7 @@ async def run_daily_pipeline_online(
     from services.pipeline_context import PipelineContext
     ctx = PipelineContext(
         pipeline="daily", group_id=group_id, group_name=group_name,
-        model_config=model_config,
+        model_config=model_config, task=task,
     )
 
     try:
@@ -1104,7 +1104,7 @@ async def run_portrait_pipeline_online(
     from services.pipeline_context import PipelineContext
     ctx = PipelineContext(
         pipeline="portrait", group_id=group_id, group_name=group_name,
-        model_config=model_config,
+        model_config=model_config, task=task,
     )
 
     try:

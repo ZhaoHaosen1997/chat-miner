@@ -857,7 +857,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
     from services.pipeline_context import PipelineContext
     ctx = PipelineContext(
         pipeline=pipeline, group_id=group_id, group_name="",
-        model_config=model_config or {},
+        model_config=model_config or {}, task=task,
     )
     # v0.12.0: 使用 model_config 路由
     if model_config and model_config.get("model_type") == "online" and model_config.get("api_key"):
@@ -945,7 +945,7 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
             if online_cfg.get("api_key"):
                 fallback_ctx = PipelineContext(
                     pipeline=pipeline, group_id=group_id, group_name="",
-                    model_config=online_cfg,
+                    model_config=online_cfg, task=task,
                 )
                 online_result = await fallback_ctx.call_ai(
                     system_prompt, user_prompt,
@@ -1129,7 +1129,7 @@ async def generate_weekly_report(
             temperature=config.WEEKLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_WEEKLY,
             group_id=group_id, model_config=model_config,
-            pipeline="weekly",
+            pipeline="weekly", task=task,
         )
 
         if not ai_result["success"]:
@@ -1202,7 +1202,7 @@ async def generate_weekly_report(
             _adapt_prompt(WEEKLY_SYSTEM_PROMPT) if is_private else WEEKLY_SYSTEM_PROMPT,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             json_mode=True, group_id=group_id, model_config=model_config,
-            pipeline="weekly")
+            pipeline="weekly", task=task)
 
         if not ai_result["success"]:
             return {
@@ -1460,7 +1460,7 @@ async def generate_monthly_report(
             temperature=config.MONTHLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_MONTHLY,
             thinking=True, group_id=group_id, model_config=model_config,
-            pipeline="monthly",
+            pipeline="monthly", task=task,
         )
 
         if not ai_result["success"]:
@@ -1548,7 +1548,7 @@ async def generate_monthly_report(
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             model=config.DEEPSEEK_REASONER_MODEL,
             json_mode=True, group_id=group_id, model_config=model_config,
-            pipeline="monthly",
+            pipeline="monthly", task=task,
         )
 
         if not ai_result["success"]:

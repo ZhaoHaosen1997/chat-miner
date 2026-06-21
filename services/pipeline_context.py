@@ -14,12 +14,12 @@ class PipelineContext:
     """管线执行上下文，封装任务生命周期和 AI 调用日志"""
 
     def __init__(self, pipeline: str, group_id: int, group_name: str,
-                 model_config: dict):
+                 model_config: dict, task=None):
         self.pipeline = pipeline
         self.group_id = group_id
         self.group_name = group_name
         self.model_config = model_config
-        self._task = None  # TaskInfo | None
+        self._task = task  # TaskInfo | None
 
     @property
     def task(self):

@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/ai-logs", tags=["AI调用日志"])
 
 @router.get("")
 async def api_list_logs(
-    task_id: int = Query(0, description="按任务 ID 筛选"),
+    task_id: str = Query("", description="按任务 ID 筛选（int 或 UUID 字符串）"),
     pipeline: str = Query("", description="按管线筛选"),
     group_id: int = Query(0, description="按群 ID 筛选"),
     limit: int = Query(50, ge=1, le=200),

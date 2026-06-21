@@ -189,7 +189,7 @@ async function openAiLogs(r) {
   showAiLogsModal.value = true
   aiLogsLoading.value = true
   try {
-    const res = await getAiCallLogs({ task_id: r.id, limit: 100 })
+    const res = await getAiCallLogs({ task_id: r.task_id, limit: 100 })
     aiLogs.value = res.logs || []
   } catch { aiLogs.value = [] }
   finally { aiLogsLoading.value = false }

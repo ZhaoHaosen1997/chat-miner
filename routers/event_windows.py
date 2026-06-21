@@ -137,7 +137,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
             }
 
         # 构建 Prompt + 调 AI
-        event_data = await _analyze_window_with_ai(chat, group_id, window_msgs, window)
+        event_data = await _analyze_window_with_ai(chat, group_id, window_msgs, window, task=task)
 
         # v1.18.5: AI 返回了 no_event_reason → 无事件但有解释
         if isinstance(event_data, dict) and event_data.get("no_event_reason"):
@@ -278,7 +278,7 @@ async def api_analyze_all_windows(group_id: int):
 
                     update_window_status(wid, "analyzing")
                     event_data = await _analyze_window_with_ai(chat, group_id,
-                                                                window_msgs, w)
+                                                                window_msgs, w, task=task)
 
                     # v1.18.5: AI 返回了 no_event_reason → 无事件但有解释
                     if isinstance(event_data, dict) and event_data.get("no_event_reason"):
@@ -392,7 +392,7 @@ def _load_window_messages(chat, window: dict) -> list[dict]:
 
 async def _analyze_window_with_ai(chat, group_id: int,
                                    window_msgs: list[dict],
-                                   window: dict) -> dict | None:
+                                   window: dict, task=None) -> dict | None:
     """调用 AI 分析单个事件组，返回单个事件 dict 或 None。"""
     from services.event_detector import _build_event_prompt, _call_ai_for_events
 
@@ -409,7 +409,7 @@ async def _analyze_window_with_ai(chat, group_id: int,
     try:
         result = await _call_ai_for_events(system_prompt, user_prompt,
             chat=chat, window_msgs=window_msgs, group_name=group_name,
-            group_id=group_id)
+            group_id=group_id, task=task)
     except Exception as e:
         logger.warning("窗口 AI 调用失败: %s", e, exc_info=True)
         raise

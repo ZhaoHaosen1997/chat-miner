@@ -621,13 +621,14 @@ def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[di
 
 async def _call_ai_for_events(system_prompt: str, user_prompt: str,
                               chat=None, window_msgs: list[dict] | None = None,
-                              group_name: str = "", group_id: int = 0) -> dict | None:
+                              group_name: str = "", group_id: int = 0,
+                              task=None) -> dict | None:
     """调用 AI 分析单个窗口，返回事件 dict / None / 含 no_event_reason 的 dict。
 
     v1.18.1: 一个事件组 = 一个 AI 调用 = 一个事件或空。
     v1.18.3: 补齐 online→local 降级链路。
     v1.18.5: AI 自然语言"无事件"时返回 {"no_event_reason": str}，不再误报错。
-    v1.19.x: 新增 group_id 参数，用于 AI 调用日志。
+    v1.19.x: 新增 group_id + task 参数，用于 AI 调用日志。
     """
     from services.model_config import resolve_model_with_fallback
     from services.pipeline_context import PipelineContext
@@ -638,7 +639,7 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str,
 
     ctx = PipelineContext(
         pipeline="event", group_id=group_id, group_name=group_name,
-        model_config=primary,
+        model_config=primary, task=task,
     )
 
     json_instruction = """
@@ -697,7 +698,7 @@ null"""
         logger.info("尝试在线备用模型: %s", fallback.get("model_name", ""))
         fallback_ctx = PipelineContext(
             pipeline="event", group_id=group_id, group_name=group_name,
-            model_config=fallback,
+            model_config=fallback, task=task,
         )
         try:
             result = await fallback_ctx.call_ai(

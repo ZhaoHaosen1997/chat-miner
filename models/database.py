@@ -462,7 +462,7 @@ def init_db():
             -- v1.19.0 AI 调用日志
             CREATE TABLE IF NOT EXISTS ai_call_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER,
+                task_id TEXT DEFAULT '',
                 pipeline TEXT NOT NULL,
                 group_id INTEGER,
                 model_name TEXT DEFAULT '',
@@ -476,7 +476,6 @@ def init_db():
                 success INTEGER NOT NULL DEFAULT 1,
                 error TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now','localtime')),
-                FOREIGN KEY (task_id) REFERENCES task_records(id) ON DELETE SET NULL,
                 FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE SET NULL
             );
             CREATE INDEX IF NOT EXISTS idx_ai_call_logs_task ON ai_call_logs(task_id);
@@ -1036,7 +1035,7 @@ def _migrate_v1_19_0(conn):
 
 # ── AI 调用日志 CRUD ──────────────────────────────────────────────
 
-def add_ai_call_log(task_id: int | None, pipeline: str, group_id: int,
+def add_ai_call_log(task_id: str | None, pipeline: str, group_id: int,
                     model_name: str, system_prompt: str, user_prompt: str,
                     response_raw: str, token_estimate: int,
                     input_chars: int = 0, output_chars: int = 0,
@@ -1055,7 +1054,7 @@ def add_ai_call_log(task_id: int | None, pipeline: str, group_id: int,
         return cur.lastrowid
 
 
-def get_ai_call_logs(task_id: int = 0, pipeline: str = "",
+def get_ai_call_logs(task_id: str = "", pipeline: str = "",
                      group_id: int = 0, limit: int = 50, offset: int = 0) -> list[dict]:
     with db() as conn:
         sql = "SELECT * FROM ai_call_logs WHERE 1=1"
@@ -1071,7 +1070,7 @@ def get_ai_call_logs(task_id: int = 0, pipeline: str = "",
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
-def get_ai_call_logs_count(task_id: int = 0, pipeline: str = "",
+def get_ai_call_logs_count(task_id: str = "", pipeline: str = "",
                            group_id: int = 0) -> int:
     """统计符合条件的 AI 调用日志总数"""
     with db() as conn:
@@ -1385,6 +1384,49 @@ def _migrate_db(conn):
             conn.execute("ALTER TABLE ai_call_logs ADD COLUMN output_chars INTEGER DEFAULT 0")
     except Exception:
         pass  # ai_call_logs 表不存在（极旧的数据库）
+
+    # v1.19.x: 去掉 task_id 的 FK 约束（task_id 存 UUID 字符串，不匹配 task_records.id 整数）
+    try:
+        cur = conn.execute("PRAGMA foreign_key_list(ai_call_logs)")
+        fks = cur.fetchall()
+        has_task_fk = any(fk[2] == "task_records" for fk in fks)
+        if has_task_fk:
+            with conn:
+                conn.execute("""
+                    CREATE TABLE ai_call_logs_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id TEXT DEFAULT '',
+                        pipeline TEXT NOT NULL,
+                        group_id INTEGER,
+                        model_name TEXT DEFAULT '',
+                        system_prompt TEXT DEFAULT '',
+                        user_prompt TEXT DEFAULT '',
+                        response_raw TEXT DEFAULT '',
+                        token_estimate INTEGER DEFAULT 0,
+                        input_chars INTEGER DEFAULT 0,
+                        output_chars INTEGER DEFAULT 0,
+                        duration_ms INTEGER DEFAULT 0,
+                        success INTEGER NOT NULL DEFAULT 1,
+                        error TEXT DEFAULT '',
+                        created_at TEXT DEFAULT (datetime('now','localtime')),
+                        FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE SET NULL
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO ai_call_logs_new SELECT
+                        id, task_id, pipeline, group_id, model_name,
+                        system_prompt, user_prompt, response_raw, token_estimate,
+                        input_chars, output_chars, duration_ms, success, error, created_at
+                    FROM ai_call_logs
+                """)
+                conn.execute("DROP TABLE ai_call_logs")
+                conn.execute("ALTER TABLE ai_call_logs_new RENAME TO ai_call_logs")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_call_logs_task ON ai_call_logs(task_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_call_logs_group ON ai_call_logs(group_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_call_logs_created ON ai_call_logs(created_at)")
+            logger.info("DB migrate: ai_call_logs FK 约束已移除")
+    except Exception:
+        pass
 
     # group_members v0.5 迁移：唯一键从 sender_id 改为 wxid
     cur = conn.execute("PRAGMA index_list(group_members)")

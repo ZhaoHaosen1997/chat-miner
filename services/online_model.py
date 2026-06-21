@@ -63,7 +63,7 @@ async def call_online_chat(
     max_tokens: int = 0,
     timeout: int = 0,
     # v1.19.0: 日志记录参数
-    task_id: int = 0,
+    task_id: str = "",
     pipeline: str = "",
     group_id: int = 0,
 ) -> dict:
