@@ -257,7 +257,7 @@ def _extract_period_raw_data(
         if not sender_msgs:
             continue
         activity = compute_activity_stats(all_msgs, wxid, sender_msgs=sender_msgs)
-        language = compute_language_stats(all_msgs, wxid, member_names=set(), sender_msgs=sender_msgs)
+        language = compute_language_stats(all_msgs, wxid, member_names=set(), sender_msgs=sender_msgs, group_id=group_id)
         style = compute_message_style(language, activity)
         role = compute_topic_role(all_msgs, wxid, wxid_set)
         sid_str = str(stable_id)
@@ -1415,7 +1415,7 @@ async def generate_monthly_report(
                         if name:
                             member_name_set.add(name)
                     from services.stats_engine import detect_bursting_keywords
-                    bursting = detect_bursting_keywords(this_msgs, prev_msgs, member_name_set)
+                    bursting = detect_bursting_keywords(this_msgs, prev_msgs, member_name_set, group_id=group_id)
                     if bursting:
                         bursting_parts = []
                         for b in bursting[:10]:

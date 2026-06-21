@@ -8,9 +8,38 @@ import logging
 from collections import defaultdict, Counter
 from typing import Callable
 
+import jieba
+
 from models.database import get_daily_report, get_analyzed_dates, get_stopwords_text
 
 logger = logging.getLogger(__name__)
+
+# v1.19.0: jieba 自定义词典缓存（避免重复加载）
+_jieba_dict_group_ids: set[int] = set()
+
+
+def _load_jieba_userdict(group_id: int = 0):
+    """从群梗百科词条构建 jieba 自定义词典，防止群内黑话被切碎"""
+    if not group_id or group_id in _jieba_dict_group_ids:
+        return
+    try:
+        from models.database import get_group_memes
+        memes = get_group_memes(group_id, status="approved")
+        for m in memes:
+            term = (m.get("term") or "").strip()
+            if len(term) >= 2:
+                jieba.add_word(term, freq=100)
+        _jieba_dict_group_ids.add(group_id)
+        logger.info("jieba 自定义词典已加载: group=%d words=%d", group_id, len(memes))
+    except Exception:
+        pass
+
+
+def _tokenize_chinese(text: str, group_id: int = 0) -> list[str]:
+    """中文分词：jieba 精确模式，过滤单字和停用词后的 2 字以上词"""
+    _load_jieba_userdict(group_id)
+    words = jieba.lcut(text)
+    return [w for w in words if len(w) >= 2 and re.search(r'[一-鿿]', w)]
 
 # 微信表情模式：匹配 [中文] 格式的内置表情（如 [微笑]、[捂脸]、[强]）
 # 这是微信聊天中最主要的 emoji 形式，99%+ 的表情都是这种格式
@@ -169,7 +198,8 @@ def compute_activity_stats(messages: list[dict], wxid: str = "",
 
 def compute_language_stats(messages: list[dict], wxid: str,
                             member_names: set[str] = None,
-                            sender_msgs: list[dict] = None) -> dict:
+                            sender_msgs: list[dict] = None,
+                            group_id: int = 0) -> dict:
     """计算成员的语言特征
 
     Args:
@@ -223,17 +253,14 @@ def compute_language_stats(messages: list[dict], wxid: str,
             if inner not in _META_TOKENS:  # [图片][视频][链接] 不算表情
                 emoji_counter[e] += 1
 
-        # 中文分词（简单 2-gram）
-        # [捂脸] → 保留 "捂脸"（有语义）；[图片][视频] → 整体删除（元数据噪音）
+        # v1.19.0: jieba 精确模式分词
         clean_content = WECHAT_EMOJI_PATTERN.sub(
             lambda m: '' if m.group(0)[1:-1] in _META_TOKENS else m.group(0)[1:-1],
             content
         )
-        # 提取连续中文字符作为词
-        chinese_chunks = re.findall(r'[一-鿿]{2,4}', clean_content)
-        for chunk in chinese_chunks:
-            if chunk not in dynamic_stop_words:
-                word_counter[chunk] += 1
+        for word in _tokenize_chinese(clean_content, group_id):
+            if word not in dynamic_stop_words:
+                word_counter[word] += 1
 
     msg_count = len(text_msgs)
 
@@ -717,6 +744,7 @@ def compute_message_style(language: dict, activity: dict) -> dict:
 def compute_recent_status(messages: list[dict], wxid: str = "",
                           member_names: set[str] = None,
                           recent_days: int = 30,
+                          group_id: int = 0,
                           sender_msgs: list[dict] = None) -> dict:
     """计算成员最近状态的快照（最近 N 天）
 
@@ -791,10 +819,9 @@ def compute_recent_status(messages: list[dict], wxid: str = "",
             lambda m2: '' if m2.group(0)[1:-1] in _META_TOKENS else m2.group(0)[1:-1],
             content
         )
-        chunks = re.findall(r'[一-鿿]{2,4}', clean)
-        for chunk in chunks:
-            if chunk not in dynamic_stop:
-                word_counter[chunk] += 1
+        for word in _tokenize_chinese(clean, group_id):
+            if word not in dynamic_stop:
+                word_counter[word] += 1
 
     recent_topics = [w for w, _ in word_counter.most_common(5)]
 
@@ -945,6 +972,7 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
 def detect_bursting_keywords(messages: list[dict],
                               prev_messages: list[dict],
                               member_names: set[str] = None,
+                              group_id: int = 0,
                               min_growth: float = 2.0,
                               min_count: int = 10) -> list[dict]:
     """检测词频突变（新梗发现）
@@ -975,10 +1003,9 @@ def detect_bursting_keywords(messages: list[dict],
                 lambda m2: '' if m2.group(0)[1:-1] in _META_TOKENS else m2.group(0)[1:-1],
                 content
             )
-            chunks = re.findall(r'[一-鿿]{2,4}', clean)
-            for chunk in chunks:
-                if chunk not in dynamic_stop and len(chunk) >= 2:
-                    counter[chunk] += 1
+            for word in _tokenize_chinese(clean, group_id):
+                if word not in dynamic_stop:
+                    counter[word] += 1
         return counter
 
     this_words = _extract_words(messages)

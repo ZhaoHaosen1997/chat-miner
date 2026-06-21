@@ -351,7 +351,7 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
 
     for wxid, msgs in all_member_msgs.items():
         activity = compute_activity_stats(msgs, wxid)
-        language = compute_language_stats(msgs, wxid, member_names=member_name_set)
+        language = compute_language_stats(msgs, wxid, member_names=member_name_set, group_id=group_id)
         style = compute_message_style(language, activity)
         role = compute_topic_role(all_msgs_flat, wxid, all_wxids)
         member_stats[wxid] = {
