@@ -445,9 +445,8 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
         if swxid:
             all_wxids.add(swxid)
 
-    from services.parser import format_sender_messages_for_portrait
-    chat_text = format_sender_messages_for_portrait(all_msgs, sender_name,
-                                                     member_names=member_names)
+    from services.message_formatter import format_messages_for_ai
+    chat_text = format_messages_for_ai(all_msgs, header=f"{sender_name} 的发言记录：", include_sender=False, use_stable_id=False, time_format="YYYY-MM-DD HH:MM", member_names=member_names, filter_game_cmds=False, max_chars=30000)
 
     is_private = len(chat.senders) <= 2
 

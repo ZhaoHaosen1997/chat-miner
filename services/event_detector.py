@@ -548,10 +548,6 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "",
     # System Prompt：优先 DB prompt_profiles，否则硬编码 fallback
     system_prompt = get_default_prompt("event_detection") or _EVENT_DEFAULT_SYSTEM_PROMPT
 
-    # v1.18.5: 基于 wxid 的稳定 ID 映射（避免 senderID 跨数据源不一致）
-    from services.desensitize import build_wxid_to_stable_id
-    wxid_to_stable = build_wxid_to_stable_id(chat.senders)
-
     # User Prompt：对话原文
     lines = []
     # v1.18.3: 注入梗百科
@@ -563,17 +559,11 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "",
     group_label = f'群聊"{group_name}"中' if group_name else "群聊"
     lines.append(f"以下是{group_label}的一段连续对话。请判断它是否构成一个值得记录的事件。\n")
 
-    for m in window:
-        ct = m.get("formattedTime", "")
-        time_str = ct[11:16] if len(ct) >= 16 else ct  # "HH:MM"
-        # 用稳定 ID 代替易变的 senderID
-        wxid = m.get("wxid", "")
-        sender = str(wxid_to_stable.get(wxid, m.get("senderID", "?")))
-        content = (m.get("content") or "").strip()
-        if content:
-            # v1.18.5: PII 过滤
-            content = filter_pii(content)
-            lines.append(f"[{time_str}] [{sender}]: {content}")
+    # v1.19.0: 共享格式化层
+    from services.message_formatter import format_messages_for_ai
+    chat_text = format_messages_for_ai(window, senders=chat.senders)
+    if chat_text:
+        lines.append(chat_text)
 
     user_prompt = "\n".join(lines)
     return system_prompt, user_prompt

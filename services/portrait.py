@@ -11,7 +11,8 @@ from models.database import (
     save_portrait_version, get_latest_portrait_version,
 )
 from services.analyzer import call_ollama_chat
-from services.parser import format_sender_messages_for_portrait, ParsedChat
+from services.parser import ParsedChat
+from services.message_formatter import format_messages_for_ai
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ async def generate_single_portrait(
         name = chat.get_sender_name(s.get("senderID"))
         if name and len(name) >= 2:
             member_names.add(name)
-    chat_text = format_sender_messages_for_portrait(all_msgs, sender_name, member_names=member_names)
+    chat_text = format_messages_for_ai(all_msgs, header=f"{sender_name} 的发言记录：", include_sender=False, use_stable_id=False, time_format="YYYY-MM-DD HH:MM", member_names=member_names, filter_game_cmds=False, max_chars=30000)
 
     logger.info(f"生成画像: {sender_name} ({len(all_msgs)} 条消息, pipeline模式)")
     import time as _time

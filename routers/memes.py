@@ -126,13 +126,14 @@ async def api_scan_memes(group_id: int):
     logger.info("梗扫描已有梗: group=%d approved=%d pending=%d",
                 group_id, len(approved_terms), len(pending_terms))
 
-    lines = [f'以下是群聊"{gname}"的近期消息。请仔细观察，发现其中可能的自有梗：']
-    char_count = 0
-    for m in sampled:
-        c = filter_pii((m.get("content") or "").strip())
-        if c:
-            lines.append(f"[{m.get('senderID','?')}]: {c}")
-            char_count += len(c)
+    from services.message_formatter import format_messages_for_ai
+    header = f'以下是群聊"{gname}"的近期消息。请仔细观察，发现其中可能的自有梗：'
+    chat_text = format_messages_for_ai(sampled, include_time=False, use_stable_id=False,
+                                        filter_content=False, filter_pii_content=True)
+    char_count = len(chat_text)
+    lines = [header, chat_text] if chat_text else [header]
+    if not chat_text:
+        char_count = 0
 
     # 注入近期事件作为扫描线索
     event_count = 0

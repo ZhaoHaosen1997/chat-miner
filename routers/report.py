@@ -16,7 +16,7 @@ from models.database import (
     save_task_record,
 )
 from services.analyzer import analyze_daily_chat
-from services.parser import format_messages_for_prompt
+from services.message_formatter import format_messages_for_ai
 from services.task_manager import task_manager
 from routers.groups import get_chat_cache
 
@@ -100,7 +100,7 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
 
     # 根据模型类型决定格式化方式
     model_name = model_config.get("model_name", config.OLLAMA_MODEL)
-    chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
+    chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders)
     if len(chat_text) > 100000:
         logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
 
@@ -333,7 +333,7 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
 
         mark_date_analyzing(group_id, date)
         try:
-            chat_text = format_messages_for_prompt(text_msgs, chat.get_sender_name, model=model_name, senders=chat.senders)
+            chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders)
             # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
             task.update("inference", f"({i+1}/{total}) 分析 {date}...",
                        progress={"current": i, "total": total})
