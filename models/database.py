@@ -522,6 +522,7 @@ def init_db():
         _migrate_v1_18_4(conn)
         # v1.18.5: 回填 QQ 群的 platform 字段（旧版本导入的 QQ 群 platform 为空）
         _migrate_v1_18_5(conn)
+        _migrate_v1_18_7(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -982,6 +983,15 @@ def _migrate_v1_18_5(conn):
     )
     if result.rowcount > 0:
         logger.info("DB migrate v1.18.5: backfilled %d 微信私聊 platform", result.rowcount)
+
+
+def _migrate_v1_18_7(conn):
+    """v1.18.7: task_records 新增 message_count 列（展示 WeFlow 同步新增消息数）"""
+    cur = conn.execute("PRAGMA table_info(task_records)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "message_count" not in cols:
+        conn.execute("ALTER TABLE task_records ADD COLUMN message_count INTEGER DEFAULT 0")
+        logger.info("DB migrate v1.18.7: added task_records.message_count")
 
 
 # ── 群梗百科 CRUD ─────────────────────────────────────────────────
@@ -1635,15 +1645,16 @@ def log_analysis(group_id: int, date: str, analysis_type: str,
 
 def save_task_record(task_id: str, group_id: int, task_type: str, target: str,
                      status: str, total_duration_ms: int, model_used: str = "",
-                     steps_json: str = "", error_summary: str = ""):
+                     steps_json: str = "", error_summary: str = "",
+                     message_count: int = 0):
     """保存任务执行记录"""
     with db() as conn:
         conn.execute(
             """INSERT INTO task_records (task_id, group_id, task_type, target, status,
-               total_duration_ms, model_used, steps_json, error_summary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               total_duration_ms, model_used, steps_json, error_summary, message_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, group_id, task_type, target, status,
-             total_duration_ms, model_used, steps_json, error_summary)
+             total_duration_ms, model_used, steps_json, error_summary, message_count)
         )
 
 

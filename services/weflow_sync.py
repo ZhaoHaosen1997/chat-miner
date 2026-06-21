@@ -154,18 +154,20 @@ def normalize_chatlab_to_parsed(chatlab_data: dict) -> dict:
 def _get_last_message_timestamp(group_id: int) -> int:
     """获取已有数据的最后一条消息时间戳（秒）
 
-    优先从 _chat_cache 取，回退到 merged_data.json。
+    三层 fallback：内存缓存 → merged_data.json → 原始上传文件
     """
     # 优先从内存缓存取
     try:
         from routers.groups import get_chat_cache
         chat = get_chat_cache(group_id)
         if chat and chat.messages:
-            return max(m.get("createTime", 0) for m in chat.messages)
+            ts = max(m.get("createTime", 0) for m in chat.messages)
+            logger.debug(f"[WeFlow] since 来源=内存缓存 group={group_id} ts={ts}")
+            return ts
     except Exception as e:
         logger.debug("从内存缓存读取最后消息时间失败: %s", e)
 
-    # 回退：读磁盘文件
+    # 回退：读 merged_data.json
     merged_path = _get_merged_data_path(group_id)
     if merged_path and merged_path.exists():
         try:
@@ -173,10 +175,29 @@ def _get_last_message_timestamp(group_id: int) -> int:
                 data = json.load(f)
             messages = data.get("messages", [])
             if messages:
-                return max(m.get("createTime", 0) for m in messages)
+                ts = max(m.get("createTime", 0) for m in messages)
+                logger.debug(f"[WeFlow] since 来源=merged_data.json group={group_id} ts={ts}")
+                return ts
         except Exception as e:
             logger.debug("从磁盘读取最后消息时间失败: %s", e)
 
+    # 最后 fallback：从原始上传文件读取
+    try:
+        from services.parser import load_and_parse
+        from models.database import get_group
+        grp = get_group(group_id)
+        if grp and grp.get("file_path"):
+            fp = Path(grp["file_path"])
+            if fp.exists():
+                chat = load_and_parse(fp)
+                if chat and chat.messages:
+                    ts = max(m.get("createTime", 0) for m in chat.messages)
+                    logger.info(f"[WeFlow] since 来源=原始文件 group={group_id} ts={ts}")
+                    return ts
+    except Exception as e:
+        logger.debug("从原始文件读取最后时间失败: %s", e)
+
+    logger.info(f"[WeFlow] since 来源=无 (从头拉取) group={group_id}")
     return 0
 
 
@@ -227,7 +248,8 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
     if task:
         task.update("pending", f"增量拉取 since={datetime.fromtimestamp(since).strftime('%Y-%m-%d %H:%M') if since else '全量'}...")
 
-    logger.info(f"[WeFlow Sync] group={group['name']} chatroom={chatroom_id} since={since}")
+    logger.info(f"[WeFlow Sync] group={group['name']} chatroom={chatroom_id} since={since}"
+                f" (ts={datetime.fromtimestamp(since).strftime('%Y-%m-%d %H:%M:%S') if since else '从头拉取'})")
 
     # 2. 分页拉取所有新消息
     all_chatlab_messages = []
@@ -261,8 +283,8 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
                         f"拉取第 {batch} 批 ({len(messages)} 条)...",
                         progress={"current": total_pulled, "total": 0})
 
-        logger.debug(f"[WeFlow Sync] batch={batch}: {len(messages)} msgs, "
-                     f"hasMore={sync.get('hasMore')}, total={total_pulled}")
+        logger.info(f"[WeFlow Sync] 第 {batch} 批: {len(messages)} 条, "
+                     f"hasMore={sync.get('hasMore')}, offset={offset}, total={total_pulled}")
 
         if not sync.get("hasMore"):
             break
@@ -303,12 +325,42 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
     # 5. 合并去重
     existing_messages = []
     merged_path = _get_merged_data_path(group_id)
+
+    # 优先从 merged_data.json 加载
     if merged_path and merged_path.exists():
         try:
             with open(merged_path, "r", encoding="utf-8") as f:
                 existing_messages = json.load(f).get("messages", [])
+            logger.debug(f"[WeFlow Sync] 已有消息来源=merged_data.json: {len(existing_messages)} 条")
         except Exception as e:
             logger.debug("读取已有合并数据失败: %s", e)
+
+    # fallback: 从内存缓存加载
+    if not existing_messages:
+        try:
+            from routers.groups import get_chat_cache
+            chat = get_chat_cache(group_id)
+            if chat and chat.messages:
+                existing_messages = chat.messages
+                logger.info(f"[WeFlow Sync] 已有消息来源=内存缓存: {len(existing_messages)} 条")
+        except Exception as e:
+            logger.debug("从缓存加载现有消息失败: %s", e)
+
+    # 最后 fallback: 从原始上传文件加载（防止首次 WeFlow 同步覆盖原数据）
+    if not existing_messages and group.get("file_path"):
+        try:
+            from services.parser import load_and_parse
+            fp = Path(group["file_path"])
+            if fp.exists():
+                chat = load_and_parse(fp)
+                if chat and chat.messages:
+                    existing_messages = chat.messages
+                    logger.info(f"[WeFlow Sync] 已有消息来源=原始文件: {len(existing_messages)} 条")
+        except Exception as e:
+            logger.debug("从原始文件加载消息失败: %s", e)
+
+    if not existing_messages:
+        logger.info(f"[WeFlow Sync] 无已有消息，本次将作为首次导入")
 
     merge_result = merge_chat_data(existing_messages, new_messages)
     added = merge_result["added"]
@@ -317,6 +369,14 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
     logger.info(f"[WeFlow Sync] {group['name']}: 拉取 {total_pulled} 条, "
                 f"过滤后 {len(new_messages)} 条, 新增 {len(added)} 条, "
                 f"跳过 {skipped} 条")
+
+    # 合并后类型分布（用于排查过滤/丢失问题）
+    merged_for_stats = existing_messages + added
+    type_counts = {}
+    for m in merged_for_stats:
+        t = m.get("type", "?")
+        type_counts[t] = type_counts.get(t, 0) + 1
+    logger.info(f"[WeFlow Sync] 合并后 {len(merged_for_stats)} 条, 类型分布: {type_counts}")
 
     if not added:
         if task:

@@ -60,6 +60,10 @@
             <div class="text-sm font-medium text-slate-700 truncate">{{ typeStyle(r.task_type).label }} · {{ r.target || '-' }}</div>
             <div class="text-xs text-slate-400 mt-0.5">{{ formatTime(r.created_at) }}</div>
           </div>
+          <!-- 新增消息数 -->
+          <span v-if="r.message_count > 0" class="text-xs text-emerald-600 font-medium flex-shrink-0">
+            +{{ r.message_count }} 条
+          </span>
           <!-- 状态标签 -->
           <span :class="['px-2 py-0.5 rounded-md text-xs font-medium flex-shrink-0', statusBadge(r.status)]">
             {{ statusLabel(r.status) }}

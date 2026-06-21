@@ -164,7 +164,7 @@ async def api_upload_group(file: UploadFile = File(...)):
             _chat_cache[existing["id"]] = recovered_chat
             logger.info(f"JSON 已恢复: {new_dest}, 缓存已更新")
 
-            # v1.18.6: 恢复文件后同步更新数据库（消息数、日期范围、文件路径）
+            # v1.18.7: 恢复文件后同步更新数据库（消息数、日期范围、文件路径）
             new_start, new_end = recovered_chat.get_date_range()
             real_sender_count = len([
                 s for s in recovered_chat.senders

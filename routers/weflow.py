@@ -39,6 +39,23 @@ def _get_client():
     return WeFlowClient(base_url=config.WEFLOW_BASE_URL, access_token=token)
 
 
+def _require_wechat_group(group_id: int) -> dict:
+    """验证群存在且为微信平台（WeFlow 仅支持微信群聊）
+
+    Returns:
+        group dict on success
+    Raises:
+        HTTPException(404) if group not found
+        HTTPException(400) if group is QQ (platform='qq')
+    """
+    group = get_group(group_id)
+    if not group:
+        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    if group.get("platform") == "qq":
+        raise HTTPException(400, "QQ 群不支持 WeFlow 同步，WeFlow 仅支持微信群聊")
+    return group
+
+
 # ---- API ----
 
 @router.get("/sessions")
@@ -82,9 +99,7 @@ async def trigger_sync(group_id: int):
     from services.weflow_client import WeFlowClient, WeFlowError
     from services.weflow_sync import sync_messages_incremental
 
-    group = get_group(group_id)
-    if not group:
-        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    group = _require_wechat_group(group_id)
 
     wxid = group.get("wxid", "")
     if not wxid:
@@ -116,6 +131,7 @@ async def trigger_sync(group_id: int):
                 target=group["name"], status=task.status,
                 total_duration_ms=task.duration_ms, model_used="",
                 steps_json="[]", error_summary="",
+                message_count=added,
             )
         except Exception as e:
             logger.error(f"[WeFlow Sync] {group['name']} 失败: {e}")
@@ -144,9 +160,7 @@ async def link_group(req: LinkRequest):
     from services.weflow_client import WeFlowClient, WeFlowError
     from services.weflow_sync import link_group_to_weflow
 
-    group = get_group(req.group_id)
-    if not group:
-        raise HTTPException(404, f"群不存在: group_id={req.group_id}")
+    group = _require_wechat_group(req.group_id)
 
     if not req.chatroom_id:
         raise HTTPException(400, "chatroom_id 不能为空")
@@ -214,9 +228,7 @@ async def get_status():
 async def unlink_group(group_id: int):
     """取消群与 WeFlow 会话的关联"""
     from models.database import get_conn
-    group = get_group(group_id)
-    if not group:
-        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    group = _require_wechat_group(group_id)
     conn = None
     try:
         conn = get_conn()
@@ -243,9 +255,7 @@ class AutoSyncToggle(BaseModel):
 async def toggle_auto_sync(group_id: int, body: AutoSyncToggle):
     """按群开关 WeFlow 自动同步"""
     from models.database import get_conn
-    group = get_group(group_id)
-    if not group:
-        raise HTTPException(404, f"群不存在: group_id={group_id}")
+    group = _require_wechat_group(group_id)
     conn = None
     try:
         conn = get_conn()

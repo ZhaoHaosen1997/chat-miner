@@ -259,7 +259,7 @@ def _reload_weflow_scheduler():
         from services.scheduler import reload_scheduler
         reload_scheduler()
     except Exception as e:
-        logger.debug("WeFlow 调度器重载跳过: %s", e)
+        logger.warning("WeFlow 调度器重载跳过: %s", e)
 
 
 def _reload_pond_scheduler():
@@ -268,7 +268,7 @@ def _reload_pond_scheduler():
         from services.scheduler import reload_pond_scheduler
         reload_pond_scheduler()
     except Exception as e:
-        logger.debug("鱼塘调度器重载跳过: %s", e)
+        logger.warning("鱼塘调度器重载跳过: %s", e)
 
 
 @router.put("/app-settings")

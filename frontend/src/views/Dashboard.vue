@@ -720,7 +720,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         </div>
         <div class="flex gap-1.5 ml-auto">
           <button @click="showUpload = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors flex items-center gap-1"><Upload :size="12" />导入</button>
-          <button @click="showWeFlow = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 border border-slate-200 transition-colors flex items-center gap-1"><Radio :size="12" />同步</button>
+          <button v-if="currentGroup?.platform !== 'qq'" @click="showWeFlow = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 border border-slate-200 transition-colors flex items-center gap-1"><Radio :size="12" />同步</button>
           <button v-if="(stats?.total_days_with_data - (stats?.analyzed_count || 0)) > 1" @click="startAnalyzeAll" :disabled="analyzing"
             :class="['px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1', !analyzing ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-300']"><Zap :size="12" />一键分析</button>
           <button @click="analyzeLatest" :disabled="analyzing || !latestUnanalyzed"

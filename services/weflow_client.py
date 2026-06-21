@@ -98,8 +98,19 @@ class WeFlowClient:
         Returns:
             ChatLab 格式: {meta, members, messages, sync}
         """
+        import time
         params = {"limit": limit, "since": since, "offset": offset}
-        return self._get(f"/api/v1/sessions/{session_id}/messages", params)
+        t0 = time.time()
+        logger.debug(f"[WeFlow API] GET /sessions/{session_id}/messages "
+                     f"limit={limit} since={since} offset={offset}")
+        result = self._get(f"/api/v1/sessions/{session_id}/messages", params)
+        elapsed_ms = int((time.time() - t0) * 1000)
+        msgs = result.get("messages", [])
+        sync = result.get("sync", {})
+        logger.debug(f"[WeFlow API] 响应 {len(msgs)} 条消息, "
+                     f"hasMore={sync.get('hasMore')}, nextOffset={sync.get('nextOffset')}, "
+                     f"耗时 {elapsed_ms}ms")
+        return result
 
     # ---- 群成员 ----
 
