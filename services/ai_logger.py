@@ -18,13 +18,16 @@ class AILogger:
             error: str = "") -> int:
         """记录一次 AI 调用。返回日志 ID"""
         token_estimate = len(system_prompt) + len(user_prompt) + len(response_raw)
+        input_chars = len(system_prompt) + len(user_prompt)
+        output_chars = len(response_raw)
         try:
             log_id = add_ai_call_log(
                 task_id=task_id, pipeline=pipeline, group_id=group_id,
                 model_name=model_name, system_prompt=system_prompt,
                 user_prompt=user_prompt, response_raw=response_raw,
-                token_estimate=token_estimate, duration_ms=duration_ms,
-                success=success, error=error,
+                token_estimate=token_estimate,
+                input_chars=input_chars, output_chars=output_chars,
+                duration_ms=duration_ms, success=success, error=error,
             )
             return log_id
         except Exception as e:

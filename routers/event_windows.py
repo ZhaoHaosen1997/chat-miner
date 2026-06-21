@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from models.database import (
     get_group, get_window, get_windows, update_window_status,
-    get_pending_windows_count, insert_events,
+    get_pending_windows_count, insert_events, save_task_record,
 )
 from routers.groups import get_chat_cache
 from services.task_manager import task_manager
@@ -104,11 +104,32 @@ async def api_analyze_single_window(group_id: int, window_id: int):
     # 标记为 analyzing
     update_window_status(window_id, "analyzing")
 
+    # v1.19.x: 创建事件分析任务记录
+    import time as _time
+    _t0 = _time.time()
+    task = task_manager.create("event_window", group_id,
+                                {"window_id": window_id})
+    task.update("inference", f"分析事件窗口 {window_id}...")
+    group_name = group.get("display_name") or group.get("name", "")
+
+    def _finish_and_save(success=True, error=None):
+        task.finish(success=success, error=error)
+        save_task_record(
+            task_id=task.task_id, group_id=group_id, task_type="event_window",
+            target=f"{group_name}/window_{window_id}",
+            status="done" if success else "failed",
+            total_duration_ms=task.duration_ms,
+            model_used=task.model_used,
+            steps_json=json.dumps(task.steps, ensure_ascii=False),
+            error_summary=error.get("detail", "") if error else "",
+        )
+
     try:
         # 加载窗口消息 — 需要从 chat 缓存中获取
         window_msgs = _load_window_messages(chat, window)
         if not window_msgs:
             update_window_status(window_id, "empty", event_count=0)
+            _finish_and_save()
             return {
                 "code": 200,
                 "message": "窗口无有效消息",
@@ -122,6 +143,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
         if isinstance(event_data, dict) and event_data.get("no_event_reason"):
             ai_reason = event_data["no_event_reason"]
             update_window_status(window_id, "empty", event_count=0)
+            _finish_and_save()
             logger.info("窗口 %d 分析完成: AI 判断无事件 — %s", window_id, ai_reason[:80])
             return {
                 "code": 200,
@@ -144,6 +166,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
 
             update_window_status(window_id, "analyzed",
                                 event_count=1, event_id=new_event_id)
+            _finish_and_save()
             logger.info("窗口 %d 分析完成: 发现事件 '%s' (id=%s)",
                         window_id, event_data.get("title", ""), new_event_id)
 
@@ -159,6 +182,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
             }
         else:
             update_window_status(window_id, "empty", event_count=0)
+            _finish_and_save()
             logger.info("窗口 %d 分析完成: 无事件", window_id)
 
             return {
@@ -170,6 +194,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
     except Exception as e:
         # 恢复到 pending 状态以便重试
         update_window_status(window_id, "pending", event_count=0)
+        _finish_and_save(success=False, error={"type": "ai_failed", "detail": str(e)})
         logger.error("窗口 %d 分析失败: %s", window_id, e, exc_info=True)
         raise HTTPException(500, detail=f"AI 分析失败: {str(e)}")
 
@@ -188,6 +213,7 @@ async def api_analyze_all_windows(group_id: int):
     if not chat:
         raise HTTPException(404, detail="群数据未加载")
 
+    group_name = group.get("display_name") or group.get("name", "")
     pending_count = get_pending_windows_count(group_id)
     if pending_count == 0:
         return {
@@ -222,6 +248,14 @@ async def api_analyze_all_windows(group_id: int):
                                 f"已取消（完成 {done}/{len(all_pending)}，失败 {failed}）")
                     task.finish(success=False,
                                 error={"type": "cancelled", "detail": "用户取消"})
+                    save_task_record(
+                        task_id=task.task_id, group_id=group_id, task_type="event_window_batch",
+                        target=f"{group_name}/batch", status="cancelled",
+                        total_duration_ms=task.duration_ms,
+                        model_used=task.model_used,
+                        steps_json=json.dumps(task.steps, ensure_ascii=False),
+                        error_summary="用户取消",
+                    )
                     return
 
                 wid = w["id"]
@@ -273,12 +307,27 @@ async def api_analyze_all_windows(group_id: int):
 
             task.update("done", f"批量分析完成: {done} 个窗口 (失败 {failed})")
             task.finish(success=True)
+            save_task_record(
+                task_id=task.task_id, group_id=group_id, task_type="event_window_batch",
+                target=f"{group_name}/batch", status="done",
+                total_duration_ms=task.duration_ms,
+                model_used=task.model_used,
+                steps_json=json.dumps(task.steps, ensure_ascii=False),
+            )
             logger.info("批量分析完成 group=%d: %d done, %d failed", group_id, done, failed)
 
         except Exception as e:
             logger.error("批量分析失败 group=%d: %s", group_id, e, exc_info=True)
             task.finish(success=False,
                         error={"type": "batch_error", "detail": str(e)})
+            save_task_record(
+                task_id=task.task_id, group_id=group_id, task_type="event_window_batch",
+                target=f"{group_name}/batch", status="failed",
+                total_duration_ms=task.duration_ms,
+                model_used=task.model_used,
+                steps_json=json.dumps(task.steps, ensure_ascii=False),
+                error_summary=str(e),
+            )
 
     import asyncio
     asyncio.create_task(_batch_run())
@@ -359,7 +408,8 @@ async def _analyze_window_with_ai(chat, group_id: int,
 
     try:
         result = await _call_ai_for_events(system_prompt, user_prompt,
-            chat=chat, window_msgs=window_msgs, group_name=group_name)
+            chat=chat, window_msgs=window_msgs, group_name=group_name,
+            group_id=group_id)
     except Exception as e:
         logger.warning("窗口 AI 调用失败: %s", e, exc_info=True)
         raise

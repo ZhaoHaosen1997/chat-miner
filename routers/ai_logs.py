@@ -2,7 +2,7 @@
 v1.19.0 AI 调用日志 API
 """
 from fastapi import APIRouter, Query
-from models.database import get_ai_call_logs, get_ai_call_log
+from models.database import get_ai_call_logs, get_ai_call_log, get_ai_call_logs_count
 from services.ai_logger import AILogger
 
 router = APIRouter(prefix="/api/ai-logs", tags=["AI调用日志"])
@@ -20,7 +20,10 @@ async def api_list_logs(
         task_id=task_id, pipeline=pipeline, group_id=group_id,
         limit=limit, offset=offset,
     )
-    return {"code": 200, "message": "ok", "data": logs}
+    total = get_ai_call_logs_count(
+        task_id=task_id, pipeline=pipeline, group_id=group_id,
+    )
+    return {"code": 200, "message": "ok", "data": {"logs": logs, "total": total}}
 
 
 @router.get("/{log_id}")

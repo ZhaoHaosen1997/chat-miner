@@ -512,6 +512,15 @@ export function deleteGroupMeme(gid, mid) { return request(`/groups/${gid}/memes
 export function scanGroupMemes(gid) { return request(`/groups/${gid}/memes/scan`, { method: 'POST' }) }
 
 // ── v1.19.0 AI 调用日志 ──────────────────────────────────────────
-export function getAiCallLogs(params = {}) { return apiGet('/ai-logs', params) }
+export function getAiCallLogs(params = {}) {
+  const qs = new URLSearchParams()
+  if (params.task_id) qs.set('task_id', params.task_id)
+  if (params.pipeline) qs.set('pipeline', params.pipeline)
+  if (params.group_id) qs.set('group_id', params.group_id)
+  if (params.limit) qs.set('limit', params.limit)
+  if (params.offset) qs.set('offset', params.offset)
+  const query = qs.toString() ? '?' + qs.toString() : ''
+  return apiGet(`/ai-logs${query}`)
+}
 export function getAiCallLog(logId) { return apiGet(`/ai-logs/${logId}`) }
 export function cleanupAiCallLogs() { return request('/ai-logs/cleanup', { method: 'POST' }) }

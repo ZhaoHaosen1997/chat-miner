@@ -1,4 +1,5 @@
 <template>
+<div>
   <div class="p-6 max-w-6xl mx-auto">
     <!-- 页面标题 -->
     <div class="mb-6">
@@ -25,6 +26,8 @@
         <option value="generate_monthly">月报生成</option>
         <option value="generate_all_monthly">批量月报</option>
         <option value="generate_annual">年报生成</option>
+        <option value="event_window">事件分析</option>
+        <option value="event_window_batch">批量事件</option>
       </select>
       <select v-model="filterStatus" @change="refresh" class="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-300">
         <option value="">全部状态</option>
@@ -82,9 +85,9 @@
             <div><span class="text-slate-400">任务ID：</span><code class="text-slate-600">{{ r.task_id }}</code></div>
             <div><span class="text-slate-400">模型：</span><span class="text-slate-600">{{ r.model_used || '-' }}</span></div>
             <div class="col-span-2 flex gap-3">
-              <router-link v-if="hasAiLogs(r)" :to="`/ai-logs?task_id=${r.id}`" class="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition-colors">
-                <ExternalLink class="w-3 h-3" />查看 AI 调用日志
-              </router-link>
+              <a v-if="hasAiLogs(r)" @click.prevent="openAiLogs(r)" class="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition-colors cursor-pointer">
+                <Zap class="w-3 h-3" />查看 AI 调用日志
+              </a>
             </div>
             <div v-if="r.error_summary" class="col-span-2 text-red-500">错误：{{ r.error_summary }}</div>
           </div>
@@ -113,18 +116,108 @@
       </button>
     </div>
   </div>
+
+  <!-- AI 调用日志弹窗 -->
+  <Teleport to="body">
+    <div v-if="showAiLogsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="closeAiLogsModal">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col mx-4">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h3 class="text-sm font-semibold text-slate-700">AI 调用日志 · {{ aiLogsTaskLabel }}</h3>
+          <button @click="closeAiLogsModal" class="p-1 rounded-lg hover:bg-slate-100"><X class="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div class="overflow-y-auto flex-1 p-4 space-y-1.5">
+          <div v-if="aiLogsLoading" class="flex justify-center py-8"><Loader2 class="w-5 h-5 animate-spin text-slate-300" /></div>
+          <div v-else-if="!aiLogs.length" class="py-8 text-center text-sm text-slate-400">暂无 AI 调用日志</div>
+          <div v-else class="space-y-1.5">
+          <div v-for="log in aiLogs" :key="log.id" class="border rounded-lg overflow-hidden">
+            <div @click="toggleAiLogDetail(log.id)" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 text-xs">
+              <component :is="aiLogsExpandedId === log.id ? ChevronDown : ChevronRight" class="w-3 h-3 text-slate-300 shrink-0" />
+              <span class="font-medium" :class="log.success ? 'text-emerald-600' : 'text-red-500'">{{ log.success ? '✅' : '❌' }}</span>
+              <span class="text-slate-500">{{ log.pipeline }}</span>
+              <span class="text-slate-400">{{ log.model_name }}</span>
+              <span class="text-slate-300">入{{ formatCharsModal(log.input_chars) }} / 出{{ formatCharsModal(log.output_chars) }}</span>
+              <span class="text-slate-300 ml-auto">{{ formatDurationModal(log.duration_ms) }}</span>
+            </div>
+            <div v-if="aiLogsExpandedId === log.id" class="border-t bg-slate-50/50">
+              <div v-if="aiLogsDetailLoading" class="flex justify-center py-4"><Loader2 class="w-3 h-3 animate-spin text-slate-300" /></div>
+              <div v-else-if="aiLogsDetail" class="p-3 space-y-3 text-xs">
+                <div v-if="aiLogsDetail.error" class="p-2 rounded bg-red-50 text-red-500">{{ aiLogsDetail.error }}</div>
+                <details><summary class="text-slate-500 cursor-pointer py-1">System Prompt（{{ aiLogsDetail.system_prompt?.length || 0 }} 字）</summary>
+                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-32 overflow-y-auto font-sans">{{ aiLogsDetail.system_prompt }}</pre>
+                </details>
+                <details><summary class="text-slate-500 cursor-pointer py-1">User Prompt（{{ aiLogsDetail.user_prompt?.length || 0 }} 字）</summary>
+                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto font-sans">{{ aiLogsDetail.user_prompt }}</pre>
+                </details>
+                <details open><summary class="text-slate-500 cursor-pointer py-1">Response</summary>
+                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto font-mono">{{ aiLogsDetail.success ? formatJSONModal(aiLogsDetail.response_raw) : (aiLogsDetail.error || aiLogsDetail.response_raw) }}</pre>
+                </details>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</div>
 </template>
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { getTaskHistoryAll } from '../api/index.js'
-import { Loader2, ClipboardList, Upload, FileText, RefreshCw, Users, MessageSquare, Fish, Settings, ChevronRight, Zap, Clock, Calendar, ExternalLink } from 'lucide-vue-next'
+import { getTaskHistoryAll, getAiCallLogs } from '../api/index.js'
+import { Loader2, ClipboardList, Upload, FileText, RefreshCw, Users, MessageSquare, Fish, Settings, ChevronRight, ChevronDown, ChevronLeft, Zap, Clock, Calendar, X } from 'lucide-vue-next'
 
-// v1.19.0: 只有 AI 分析类任务显示查看日志链接
-const AI_TASK_TYPES = ['analyze_day', 'analyze_all', 'generate_weekly', 'generate_monthly', 'generate_annual', 'full_portrait', 'analyze_all_portraits']
+// v1.19.x: AI 分析类 + 事件分析类任务显示查看日志链接
+const AI_TASK_TYPES = ['analyze_day', 'analyze_all', 'generate_weekly', 'generate_monthly', 'generate_annual', 'full_portrait', 'analyze_all_portraits', 'event_window', 'event_window_batch']
 function hasAiLogs(r) { return AI_TASK_TYPES.includes(r.task_type) }
+
+// v1.19.x: AI 日志弹窗状态
+const showAiLogsModal = ref(false)
+const aiLogsTaskId = ref(0)
+const aiLogsTaskLabel = ref('')
+const aiLogs = ref([])
+const aiLogsLoading = ref(false)
+const aiLogsExpandedId = ref(null)
+const aiLogsDetail = ref(null)
+const aiLogsDetailLoading = ref(false)
+
+async function openAiLogs(r) {
+  aiLogsTaskId.value = r.id
+  aiLogsTaskLabel.value = `${r.task_type} · ${r.target || ''}`
+  showAiLogsModal.value = true
+  aiLogsLoading.value = true
+  try {
+    const res = await getAiCallLogs({ task_id: r.id, limit: 100 })
+    aiLogs.value = res.logs || []
+  } catch { aiLogs.value = [] }
+  finally { aiLogsLoading.value = false }
+}
+
+async function toggleAiLogDetail(logId) {
+  if (aiLogsExpandedId.value === logId) { aiLogsExpandedId.value = null; aiLogsDetail.value = null; return }
+  aiLogsExpandedId.value = logId
+  aiLogsDetailLoading.value = true
+  try {
+    const { getAiCallLog } = await import('../api/index.js')
+    aiLogsDetail.value = await getAiCallLog(logId)
+  } catch { aiLogsDetail.value = null }
+  finally { aiLogsDetailLoading.value = false }
+}
+
+function closeAiLogsModal() {
+  showAiLogsModal.value = false
+  aiLogsExpandedId.value = null
+  aiLogsDetail.value = null
+}
+
+function formatJSONModal(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2) }
+  catch { return text }
+}
+function formatDurationModal(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms` }
+function formatCharsModal(n) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}` }
 
 const router = useRouter()
 
@@ -153,6 +246,8 @@ const TYPE_MAP = {
   generate_monthly:       { label: '月报生成', icon: FileText,    bg: 'bg-orange-50',  color: 'text-orange-500' },
   generate_all_monthly:   { label: '批量月报', icon: FileText,    bg: 'bg-orange-50',  color: 'text-orange-500' },
   generate_annual:        { label: '年报生成', icon: FileText,    bg: 'bg-red-50',     color: 'text-red-500' },
+  event_window:           { label: '事件分析', icon: Zap,         bg: 'bg-purple-50',  color: 'text-purple-500' },
+  event_window_batch:     { label: '批量事件', icon: Zap,         bg: 'bg-purple-50',  color: 'text-purple-500' },
 }
 
 function typeStyle(type) {

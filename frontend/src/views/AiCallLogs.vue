@@ -1,11 +1,10 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted, inject, watch } from 'vue'
 import { getAiCallLogs, getAiCallLog } from '../api/index.js'
-import { Loader2, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle, Clock, Zap, ArrowLeft } from 'lucide-vue-next'
+import { Loader2, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-vue-next'
 
-const route = useRoute()
-const router = useRouter()
+const currentGroup = inject('currentGroup', ref(null))
+
 const logs = ref([])
 const loading = ref(false)
 const expandedId = ref(null)
@@ -13,22 +12,43 @@ const detailLoading = ref(false)
 const detail = ref(null)
 
 // 筛选
-const filterTaskId = ref(route.query.task_id ? Number(route.query.task_id) : 0)
-const filterPipeline = ref(route.query.pipeline || '')
-
+const filterTaskId = ref(0)
+const filterPipeline = ref('')
+const filterGroupId = ref(0)
 const pipelines = ['', 'daily', 'weekly', 'monthly', 'annual', 'event', 'meme', 'portrait']
 const pipelineLabels = { daily: '日报', weekly: '周报', monthly: '月报', annual: '年报', event: '事件', meme: '梗百科', portrait: '画像' }
+
+// 分页
+const pageSize = 50
+const currentPage = ref(1)
+const total = ref(0)
+const totalPages = ref(0)
 
 async function load() {
   loading.value = true
   try {
-    logs.value = await getAiCallLogs({
+    const offset = (currentPage.value - 1) * pageSize
+    const gid = filterGroupId.value || (currentGroup.value?.id) || 0
+    const res = await getAiCallLogs({
       task_id: filterTaskId.value || undefined,
       pipeline: filterPipeline.value || undefined,
-      limit: 50,
+      group_id: gid || undefined,
+      limit: pageSize,
+      offset,
     })
-  } catch { logs.value = [] }
+    logs.value = res.logs || []
+    total.value = res.total || 0
+    totalPages.value = Math.ceil(total.value / pageSize)
+  } catch { logs.value = []; total.value = 0; totalPages.value = 0 }
   finally { loading.value = false }
+}
+
+// 切换群时自动刷新
+watch(() => currentGroup.value?.id, () => { currentPage.value = 1; load() })
+
+function goPage(n) {
+  currentPage.value = n
+  load()
 }
 
 async function toggleDetail(logId) {
@@ -46,36 +66,21 @@ function formatJSON(text) {
 }
 
 function formatDuration(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms` }
-
-watch(() => route.query, (q) => {
-  filterTaskId.value = q.task_id ? Number(q.task_id) : 0
-  filterPipeline.value = q.pipeline || ''
-  load()
-})
+function formatChars(n) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}` }
 
 onMounted(load)
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto px-4 py-6 space-y-5">
-    <!-- 头部 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-xl font-bold text-slate-800">AI 调用日志</h2>
-        <p class="text-sm text-slate-400 mt-0.5">每次 AI 调用的输入输出记录</p>
-      </div>
-      <button @click="router.push('/')" class="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600">
-        <ArrowLeft class="w-4 h-4" />返回仪表盘
-      </button>
-    </div>
-
+  <div class="space-y-4">
     <!-- 筛选栏 -->
     <div class="flex items-center gap-3">
-      <input v-model.number="filterTaskId" @keyup.enter="load" type="number" placeholder="任务 ID" class="w-28 px-3 py-1.5 text-sm border rounded-lg" />
-      <select v-model="filterPipeline" @change="load" class="px-3 py-1.5 text-sm border rounded-lg">
+      <input v-model.number="filterTaskId" @keyup.enter="(currentPage=1, load())" type="number" placeholder="任务 ID" class="w-28 px-3 py-1.5 text-sm border rounded-lg" />
+      <select v-model="filterPipeline" @change="(currentPage=1, load())" class="px-3 py-1.5 text-sm border rounded-lg">
         <option v-for="p in pipelines" :key="p" :value="p">{{ p ? pipelineLabels[p] : '全部管线' }}</option>
       </select>
-      <button @click="load" class="px-3 py-1.5 text-sm bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">筛选</button>
+      <button @click="(currentPage=1, load())" class="px-3 py-1.5 text-sm bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">筛选</button>
+      <span class="text-xs text-slate-400 ml-auto">{{ total }} 条记录</span>
     </div>
 
     <!-- 日志列表 -->
@@ -93,7 +98,7 @@ onMounted(load)
           <span class="text-xs font-medium px-2 py-0.5 rounded-full" :class="log.success ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'">{{ log.success ? '成功' : '失败' }}</span>
           <span class="text-xs font-medium text-slate-500">{{ pipelineLabels[log.pipeline] || log.pipeline }}</span>
           <span class="text-xs text-slate-400">{{ log.model_name }}</span>
-          <span v-if="log.task_id" class="text-xs text-indigo-400 cursor-pointer hover:underline" @click.stop="router.push(`/ai-logs?task_id=${log.task_id}`)">#{{ log.task_id }}</span>
+          <span class="text-xs text-slate-300">入{{ formatChars(log.input_chars) }} / 出{{ formatChars(log.output_chars) }}</span>
           <span class="text-xs text-slate-300 ml-auto">{{ formatDuration(log.duration_ms) }}</span>
           <span class="text-[10px] text-slate-300">{{ log.created_at?.slice(5, 16) }}</span>
         </div>
@@ -104,26 +109,30 @@ onMounted(load)
           <div v-else-if="detail" class="p-4 space-y-4">
             <div v-if="detail.error" class="p-3 rounded-lg bg-red-50 text-red-600 text-sm">{{ detail.error }}</div>
 
-            <!-- System Prompt -->
             <details class="group" open>
               <summary class="text-xs font-semibold text-slate-500 cursor-pointer py-1">System Prompt（{{ detail.system_prompt?.length || 0 }} 字）</summary>
               <pre class="mt-2 p-3 rounded-lg bg-white border text-xs text-slate-600 whitespace-pre-wrap max-h-48 overflow-y-auto font-sans">{{ detail.system_prompt }}</pre>
             </details>
 
-            <!-- User Prompt -->
             <details class="group">
               <summary class="text-xs font-semibold text-slate-500 cursor-pointer py-1">User Prompt（{{ detail.user_prompt?.length || 0 }} 字）</summary>
               <pre class="mt-2 p-3 rounded-lg bg-white border text-xs text-slate-600 whitespace-pre-wrap max-h-80 overflow-y-auto font-sans">{{ detail.user_prompt }}</pre>
             </details>
 
-            <!-- Response -->
             <details class="group" open>
-              <summary class="text-xs font-semibold text-slate-500 cursor-pointer py-1">AI 响应（{{ detail.token_estimate || 0 }} 估字）</summary>
+              <summary class="text-xs font-semibold text-slate-500 cursor-pointer py-1">AI 响应（输入 {{ formatChars(detail.input_chars) }} 字 / 输出 {{ formatChars(detail.output_chars) }} 字）</summary>
               <pre class="mt-2 p-3 rounded-lg bg-white border text-xs whitespace-pre-wrap max-h-80 overflow-y-auto font-mono" :class="detail.success ? 'text-slate-600' : 'text-red-600'">{{ detail.success ? formatJSON(detail.response_raw) : (detail.error || detail.response_raw) }}</pre>
             </details>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 分页 -->
+    <div v-if="totalPages > 1" class="flex items-center justify-center gap-2 pt-2">
+      <button @click="goPage(currentPage-1)" :disabled="currentPage<=1" class="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border disabled:opacity-30 hover:bg-slate-50"><ChevronLeft class="w-4 h-4" />上一页</button>
+      <span class="text-sm text-slate-400">{{ currentPage }} / {{ totalPages }}</span>
+      <button @click="goPage(currentPage+1)" :disabled="currentPage>=totalPages" class="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border disabled:opacity-30 hover:bg-slate-50">下一页<ChevronRight class="w-4 h-4" /></button>
     </div>
   </div>
 </template>

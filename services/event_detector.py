@@ -621,12 +621,13 @@ def _truncate_densest_segment(msgs: list[dict], max_count: int = 200) -> list[di
 
 async def _call_ai_for_events(system_prompt: str, user_prompt: str,
                               chat=None, window_msgs: list[dict] | None = None,
-                              group_name: str = "") -> dict | None:
+                              group_name: str = "", group_id: int = 0) -> dict | None:
     """调用 AI 分析单个窗口，返回事件 dict / None / 含 no_event_reason 的 dict。
 
     v1.18.1: 一个事件组 = 一个 AI 调用 = 一个事件或空。
     v1.18.3: 补齐 online→local 降级链路。
     v1.18.5: AI 自然语言"无事件"时返回 {"no_event_reason": str}，不再误报错。
+    v1.19.x: 新增 group_id 参数，用于 AI 调用日志。
     """
     from services.model_config import resolve_model_with_fallback
     from services.online_model import call_online_chat
@@ -681,7 +682,7 @@ null"""
             thinking=False,
             max_tokens=4096,
             timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
-            pipeline="event",
+            pipeline="event", group_id=group_id,
         )
     except Exception as e:
         last_error = str(e)
@@ -701,6 +702,7 @@ null"""
                 thinking=False,
                 max_tokens=4096,
                 timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
+                pipeline="event", group_id=group_id,
             )
         except Exception as fb_e:
             logger.warning("在线备用模型也失败: %s", fb_e)

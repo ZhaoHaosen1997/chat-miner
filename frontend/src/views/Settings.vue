@@ -14,12 +14,13 @@ import {
   Fish,
 } from 'lucide-vue-next'
 import TaskHistory from './TaskHistory.vue'
+import AiCallLogs from './AiCallLogs.vue'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt, getDefaultPrompt } from '../api/index.js'
 
 const router = useRouter()
 
 // ---- v1.5.4: Tab 切换 ----
-const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks' | 'pond'
+const activeTab = ref('basic')  // 'basic' | 'advanced' | 'tasks' | 'pond' | 'aiLogs'
 
 // v1.5.4: 折叠面板 (key → true=展开)
 const collapsedSections = ref(loadCollapsed())
@@ -646,6 +647,16 @@ onMounted(async () => {
           activeTab==='pond' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
         🐟 鱼塘设置
       </button>
+      <button @click="activeTab='aiLogs'"
+        :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
+          activeTab==='aiLogs' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
+        <Zap class="w-4 h-4" />AI日志
+      </button>
+    </div>
+
+    <!-- ====== AI 调用日志 ====== -->
+    <div v-if="activeTab==='aiLogs'">
+      <AiCallLogs />
     </div>
 
     <!-- ====== 群梗百科（已迁移至独立页面 /memes）====== -->

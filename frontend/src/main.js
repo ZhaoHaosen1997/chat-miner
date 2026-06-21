@@ -17,8 +17,6 @@ import TaskHistory from './views/TaskHistory.vue'
 import ComprehensivePortrait from './views/ComprehensivePortrait.vue'
 import EventDetail from './views/EventDetail.vue'
 import MemeEncyclopedia from './views/MemeEncyclopedia.vue'
-import AiCallLogs from './views/AiCallLogs.vue'
-
 const routes = [
   { path: '/', component: Dashboard },
   { path: '/report/:date', component: DailyReport, props: true },
@@ -34,7 +32,6 @@ const routes = [
   { path: '/event/:eventId', component: EventDetail, props: true },
   { path: '/events', redirect: '/' },
   { path: '/memes', component: MemeEncyclopedia },
-  { path: '/ai-logs', component: AiCallLogs },
   { path: '/comprehensive/:personaId', component: ComprehensivePortrait, props: true },
 ]
 

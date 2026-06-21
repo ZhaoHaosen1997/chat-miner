@@ -470,6 +470,8 @@ def init_db():
                 user_prompt TEXT DEFAULT '',
                 response_raw TEXT DEFAULT '',
                 token_estimate INTEGER DEFAULT 0,
+                input_chars INTEGER DEFAULT 0,
+                output_chars INTEGER DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
                 success INTEGER NOT NULL DEFAULT 1,
                 error TEXT DEFAULT '',
@@ -1037,15 +1039,17 @@ def _migrate_v1_19_0(conn):
 def add_ai_call_log(task_id: int | None, pipeline: str, group_id: int,
                     model_name: str, system_prompt: str, user_prompt: str,
                     response_raw: str, token_estimate: int,
-                    duration_ms: int, success: bool, error: str = "") -> int:
+                    input_chars: int = 0, output_chars: int = 0,
+                    duration_ms: int = 0, success: bool = True, error: str = "") -> int:
     with db() as conn:
         cur = conn.execute(
             """INSERT INTO ai_call_logs (task_id, pipeline, group_id, model_name,
                system_prompt, user_prompt, response_raw, token_estimate,
-               duration_ms, success, error)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               input_chars, output_chars, duration_ms, success, error)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (task_id, pipeline, group_id, model_name,
              system_prompt, user_prompt, response_raw, token_estimate,
+             input_chars, output_chars,
              duration_ms, 1 if success else 0, error)
         )
         return cur.lastrowid
@@ -1065,6 +1069,21 @@ def get_ai_call_logs(task_id: int = 0, pipeline: str = "",
         sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def get_ai_call_logs_count(task_id: int = 0, pipeline: str = "",
+                           group_id: int = 0) -> int:
+    """统计符合条件的 AI 调用日志总数"""
+    with db() as conn:
+        sql = "SELECT COUNT(*) FROM ai_call_logs WHERE 1=1"
+        params = []
+        if task_id:
+            sql += " AND task_id=?"; params.append(task_id)
+        if pipeline:
+            sql += " AND pipeline=?"; params.append(pipeline)
+        if group_id:
+            sql += " AND group_id=?"; params.append(group_id)
+        return conn.execute(sql, params).fetchone()[0]
 
 
 def get_ai_call_log(log_id: int) -> dict | None:
@@ -1355,6 +1374,17 @@ def _migrate_db(conn):
         conn.execute("ALTER TABLE member_portraits ADD COLUMN data_start_date TEXT")
     if "data_end_date" not in cols:
         conn.execute("ALTER TABLE member_portraits ADD COLUMN data_end_date TEXT")
+
+    # v1.19.x ai_call_logs 新列
+    try:
+        cur = conn.execute("PRAGMA table_info(ai_call_logs)")
+        ai_cols = {row[1] for row in cur.fetchall()}
+        if "input_chars" not in ai_cols:
+            conn.execute("ALTER TABLE ai_call_logs ADD COLUMN input_chars INTEGER DEFAULT 0")
+        if "output_chars" not in ai_cols:
+            conn.execute("ALTER TABLE ai_call_logs ADD COLUMN output_chars INTEGER DEFAULT 0")
+    except Exception:
+        pass  # ai_call_logs 表不存在（极旧的数据库）
 
     # group_members v0.5 迁移：唯一键从 sender_id 改为 wxid
     cur = conn.execute("PRAGMA index_list(group_members)")
