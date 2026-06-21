@@ -62,24 +62,16 @@ def get_chat_cache(group_id: int) -> ParsedChat | None:
 
 
 def _find_merged_data(group: dict) -> Path | None:
-    """查找 merged_data.json（WeFlow 同步/导入合并后的数据文件）"""
-    # 1. 与原始文件同目录
+    """查找 merged_data.json（WeFlow 同步/导入合并后的数据文件）
+
+    v1.18.5: 仅在该群自己的 file_path 目录下查找，不再跨目录扫描。
+    """
     if group.get("file_path"):
         candidate = Path(group["file_path"]).parent / "merged_data.json"
         if not candidate.is_absolute():
             candidate = config.BASE_DIR / candidate  # v1.5.7
         if candidate.exists():
             return candidate
-    # 2. data 目录下按群名匹配查找（避免跨群污染）
-    group_name = (group.get("name") or "").strip()
-    for subdir in config.DATA_DIR.iterdir():
-        if subdir.is_dir() and subdir.name.startswith("import_"):
-            # 群名需匹配目录名，防止加载其他群的 merged_data
-            if group_name and group_name not in subdir.name:
-                continue
-            candidate = subdir / "merged_data.json"
-            if candidate.exists():
-                return candidate
     return None
 
 
@@ -171,6 +163,24 @@ async def api_upload_group(file: UploadFile = File(...)):
             recovered_chat = ParsedChat(new_dest).load()
             _chat_cache[existing["id"]] = recovered_chat
             logger.info(f"JSON 已恢复: {new_dest}, 缓存已更新")
+
+            # v1.18.6: 恢复文件后同步更新数据库（消息数、日期范围、文件路径）
+            new_start, new_end = recovered_chat.get_date_range()
+            real_sender_count = len([
+                s for s in recovered_chat.senders
+                if not ("@chatroom" in recovered_chat.group_wxid and s.get("wxid") == recovered_chat.group_wxid)
+            ])
+            with db() as conn:
+                conn.execute(
+                    """UPDATE chat_groups SET
+                       message_count=?, sender_count=?,
+                       date_range_start=?, date_range_end=?, file_path=?
+                       WHERE id=?""",
+                    (recovered_chat.message_count, real_sender_count,
+                     new_start, new_end, str(new_dest), existing["id"])
+                )
+            logger.info(f"数据库已同步: {recovered_chat.message_count}条消息, "
+                       f"日期={new_start}~{new_end}")
         else:
             # 已有群的 JSON 完好，清理新上传的临时文件
             try:

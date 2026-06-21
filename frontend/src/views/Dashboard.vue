@@ -1025,7 +1025,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         </div>
       </Teleport>
     </template>
-    <UploadModal v-if="showUpload" @close="showUpload = false" @uploaded="showUpload = false; loadAll(); loadPeriods()" />
+    <UploadModal v-if="showUpload" :group="currentGroup" @close="showUpload = false" @uploaded="showUpload = false; loadAll(); loadPeriods()" />
     <WeFlowImportModal v-if="showWeFlow" :group="currentGroup" @close="showWeFlow = false" />
 
     <!-- 年报：月报不足确认弹窗 -->

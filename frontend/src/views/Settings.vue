@@ -153,6 +153,15 @@ async function toggleLocalLlm() {
   await updateAppSetting('local_llm_enabled', String(localLlmEnabled.value))
 }
 
+// v1.18.5: WeFlow 开关（乐观更新模式，修复 boolean/string 比较 bug）
+async function toggleWeFlowEnabled() {
+  weflowSettings.value.weflow_enabled = !weflowSettings.value.weflow_enabled
+  await updateAppSetting('weflow_enabled', String(weflowSettings.value.weflow_enabled))
+  if (weflowSettings.value.weflow_enabled) {
+    await loadAppSettings()  // 启用后刷新配置，确保其他 WeFlow 字段同步
+  }
+}
+
 // v1.17.0: Provider 预设
 const PROVIDER_PRESETS = [
   { label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1/chat/completions', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
@@ -1078,7 +1087,7 @@ onMounted(async () => {
         <div class="p-5 space-y-4">
           <div class="flex items-center justify-between">
             <label class="text-sm text-slate-700 font-medium">启用自动同步</label>
-            <button @click="saveWeFlowSetting('weflow_enabled', !weflowSettings.weflow_enabled)"
+            <button @click="toggleWeFlowEnabled"
               :class="['w-10 h-5 rounded-full transition-colors', weflowSettings.weflow_enabled ? 'bg-sky-500' : 'bg-slate-200']">
               <div :class="['w-4 h-4 rounded-full bg-white shadow-sm transition-transform', weflowSettings.weflow_enabled ? 'translate-x-5' : 'translate-x-0.5']" />
             </button>

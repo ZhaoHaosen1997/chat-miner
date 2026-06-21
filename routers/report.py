@@ -88,7 +88,7 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
         task.finish(success=False, error={"type": "too_few", "detail": f"仅 {len(text_msgs)} 条文本消息"})
         return
 
-    # v0.12.0: 解析模型配置 — 日报允许本地或在线
+    # v1.18.5: 默认使用在线模型（与周报/年报一致）
     if model_id is not None:
         db_config = get_model_config(model_id)
         if not db_config or not db_config.get("is_enabled", 1):
@@ -96,7 +96,7 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
             return
         model_config = _row_to_config(db_config)
     else:
-        model_config = get_effective_model("local")
+        model_config = get_effective_model("online")
 
     # 根据模型类型决定格式化方式
     model_name = model_config.get("model_name", config.OLLAMA_MODEL)
@@ -284,7 +284,7 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
         task.finish(success=False, error={"type": "data_missing", "detail": "群数据未加载"})
         return
 
-    # v0.12.0: 批量分析统一使用同一个模型
+    # v1.18.5: 默认使用在线模型（与周报/年报一致）
     if model_id is not None:
         db_config = get_model_config(model_id)
         if not db_config or not db_config.get("is_enabled", 1):
@@ -292,7 +292,7 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
             return
         model_config = _row_to_config(db_config)
     else:
-        model_config = get_effective_model("local")
+        model_config = get_effective_model("online")
     model_name = model_config.get("model_name", config.OLLAMA_MODEL)
 
     all_dates = chat.all_dates()
