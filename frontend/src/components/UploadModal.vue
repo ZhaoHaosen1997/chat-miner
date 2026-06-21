@@ -12,14 +12,31 @@ const preview = ref(null)
 const jsonGroupName = ref('')
 const renameGroup = ref(false)
 const isZipFile = ref(false)
+const isDragOver = ref(false)
 
 const isGroupImport = computed(() => !!props.group)
 const groupName = computed(() => props.group?.display_name || props.group?.name || '')
 const showRenameOption = computed(() => isGroupImport.value && jsonGroupName.value && jsonGroupName.value !== groupName.value)
 
+function onDragOver(e) { e.preventDefault(); isDragOver.value = true }
+function onDragLeave() { isDragOver.value = false }
+function onDrop(e) {
+  e.preventDefault()
+  isDragOver.value = false
+  const f = e.dataTransfer?.files?.[0]
+  if (!f) return
+  fileRef.value = f
+  processFile(f)
+}
+
 function onFileChange(e) {
   const f = e.target.files?.[0]
   if (!f) return
+  fileRef.value = f
+  processFile(f)
+}
+
+function processFile(f) {
   const isJson = f.name.endsWith('.json')
   const isZip = f.name.endsWith('.zip')
   if (!isJson && !isZip) {
@@ -30,14 +47,11 @@ function onFileChange(e) {
   }
   error.value = ''
   preview.value = { name: f.name, size: (f.size / 1024 / 1024).toFixed(1) + ' MB' }
-  fileRef.value = f
   renameGroup.value = false
   jsonGroupName.value = ''
   isZipFile.value = isZip
 
   if (isZip) {
-    // ZIP 文件：尝试读取 manifest.json 获取群名
-    // 简单扫描：ZIP local file header 中包含文件名，manifest 一般在末尾
     tryReadZipManifest(f)
     return
   }
@@ -54,7 +68,7 @@ function onFileChange(e) {
       }
     } catch (_) { /* JSON parse error, ignore */ }
   }
-  reader.readAsText(f.slice(0, 1024 * 1024)) // 只读前 1MB 就够了
+  reader.readAsText(f.slice(0, 1024 * 1024))
 }
 
 function tryReadZipManifest(file) {
@@ -169,8 +183,11 @@ async function handleUpload() {
         <label
           :class="[
             'flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed rounded-xl cursor-pointer transition-colors',
-            fileRef ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50',
+            isDragOver ? 'border-indigo-500 bg-indigo-100' : fileRef ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50',
           ]"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
         >
           <input type="file" accept=".json,.zip" class="hidden" @change="onFileChange" />
           <template v-if="!fileRef">
