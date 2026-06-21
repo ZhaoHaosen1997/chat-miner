@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, computed } from 'vue'
+import { ref, inject, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWeeklyReport, generateWeekly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, TrendingUp, Calendar, MessageSquare, Users, Flame, Trophy, BookOpen, Hash, Zap } from 'lucide-vue-next'
@@ -105,6 +105,10 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goWeek(key) { if (key) router.push(`/weekly/${key}`) }
+
+function onEsc(e) { if (e.key === 'Escape' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') goBack() }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 // ---- 情绪自适应配色系统 ----
 const moodPalettes = {

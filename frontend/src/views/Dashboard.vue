@@ -32,21 +32,24 @@ const gid = computed(() => currentGroup.value?.id)
 
 // 批量任务运行时定时刷新（逐个标绿）— v1.5.2: 10s间隔 + 仅刷新关键数据
 let _refreshTimer = null
+const pendingRedirect = ref('')  // v1.18.8: 报告生成完成后跳转目标
 watch(activeTaskId, (newVal, oldVal) => {
   if (newVal) {
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
-    // v1.5.12: 提高到 30s 默认间隔，减少长时间运行时的磁盘 I/O 压力
     const interval = Math.max(5000, parseInt(localStorage.getItem('poll_interval_dashboard_ms')) || 30000)
     _refreshTimer = setInterval(() => loadTaskProgress(), interval)
   } else if (oldVal) {
-    // 任务结束时清理状态 + 刷新数据
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null }
-    analyzing.value = false
+    aiBusy.value = false
     batchTotal.value = 0
-    generatingPeriod.value = ''
     loadAll()
     loadPeriods()
     triggerRefresh?.()
+    // 报告生成完成后自动跳转
+    if (pendingRedirect.value) {
+      router.push(pendingRedirect.value)
+      pendingRedirect.value = ''
+    }
   }
 })
 onUnmounted(() => { if (_refreshTimer) clearInterval(_refreshTimer) })
@@ -55,7 +58,8 @@ const stats = ref(null)
 const dates = ref([])
 const recentReports = ref([])
 const loading = ref(false)
-const analyzing = ref(false)
+// v1.18.8: 全局 AI 操作互斥锁——所有调用大模型的分析操作单线程执行
+const aiBusy = ref(false)
 const portraits = ref([])
 const taskHistory = ref([])
 const trending = ref(null)
@@ -64,7 +68,7 @@ const memeStats = ref({ total: 0, pending: 0 })
 const showUpload = ref(false)
 const showWeFlow = ref(false)
 const dayPopup = ref(null)
-const dayPopupLoading = ref('')
+const dayPopupLoading = ref('')  // 弹窗内部加载状态（加载报告/结算），非全局锁
 const dayPopupError = ref('')
 const monthOffset = ref(0)
 
@@ -72,10 +76,8 @@ const monthOffset = ref(0)
 const dashboardEvents = ref([])
 const dashboardWindows = ref([])
 const eventsLoading = ref(false)
-const eventsScanning = ref(false)
 const eventShowCount = ref(8)
-const analyzingWindowId = ref(null)
-const analyzingTarget = ref('')  // 事件操作互斥锁（scan/reanalyze/analyze/all）
+const analyzingWindowId = ref(null)  // 仅用于单窗口按钮视觉反馈
 const showRescanConfirm = ref(false)
 const showPrivacyConfirm = ref(false)
 const privacyDontShow = ref(false)
@@ -114,7 +116,6 @@ const monthlyPeriods = ref([])
 const annualPeriods = ref([])
 const periodsLoading = ref(false)
 const periodsLoaded = ref(false)
-const generatingPeriod = ref('')
 
 // v1.0.3: Hero cards — latest generated report previews
 const latestWeekly = ref(null)
@@ -221,37 +222,37 @@ watch(dates, (d) => {
 })
 
 async function analyzeLatest() {
-  if (!latestUnanalyzed.value || analyzing.value || activeTaskId.value) return
-  analyzing.value = true
+  if (!latestUnanalyzed.value || aiBusy.value || activeTaskId.value) return
+  aiBusy.value = true
   const date = latestUnanalyzed.value.date
   try {
     const result = await analyzeDateAsync(currentGroup.value.id, date, getDailyModelId())
     if (result.skipped) {
       skippedDates.value.add(date)
-      analyzing.value = false
+      aiBusy.value = false
       await loadAll()
     } else if (result.task_id) {
       activeTaskId.value = result.task_id
     } else if (result.cached) {
-      await loadAll(); triggerRefresh?.(); analyzing.value = false
+      await loadAll(); triggerRefresh?.(); aiBusy.value = false
     }
-  } catch (e) { showError?.('分析失败', e.message, e.stack, '仪表盘·分析最新'); analyzing.value = false }
+  } catch (e) { showError?.('分析失败', e.message, e.stack, '仪表盘·分析最新'); aiBusy.value = false }
 }
 
 const batchTotal = ref(0)
 
 async function startAnalyzeAll() {
-  if (analyzing.value || activeTaskId.value) return
-  analyzing.value = true
+  if (aiBusy.value || activeTaskId.value) return
+  aiBusy.value = true
   try {
     const result = await analyzeAll(currentGroup.value.id, getDailyModelId())
     if (result.task_id) {
       activeTaskId.value = result.task_id
       batchTotal.value = result.total_unanalyzed || 0
     } else if (result.total_unanalyzed === 0) {
-      analyzing.value = false
+      aiBusy.value = false
     }
-  } catch (e) { showError?.('批量分析失败', e.message, e.stack, '仪表盘·一键分析全部'); analyzing.value = false }
+  } catch (e) { showError?.('批量分析失败', e.message, e.stack, '仪表盘·一键分析全部'); aiBusy.value = false }
 }
 
 function goReport(date) {
@@ -282,8 +283,9 @@ async function openDayPopup(day) {
 }
 
 async function handleGenerateReport() {
-  if (!dayPopup.value || dayPopupLoading.value) return  // v1.0.6: 防重复调用
+  if (!dayPopup.value || dayPopupLoading.value || aiBusy.value) return
   dayPopupLoading.value = 'report'
+  aiBusy.value = true
   try {
     const force = dayPopup.value.analyzed
     const result = await analyzeDateAsync(gid.value, dayPopup.value.date, getDailyModelId(), force)
@@ -295,7 +297,7 @@ async function handleGenerateReport() {
       if (gid.value) loadAll(true)
     }, 2000)
   } catch (e) { dayPopupError.value = e.message }
-  finally { dayPopupLoading.value = '' }
+  finally { dayPopupLoading.value = ''; aiBusy.value = false }
 }
 
 async function handleResettleDay() {
@@ -427,16 +429,15 @@ async function loadDashboardEvents() {
 }
 
 async function handleScanEvents(force = false) {
-  if (!gid.value || analyzingTarget.value || eventsScanning.value) return
-  analyzingTarget.value = 'scan'
-  eventsScanning.value = true
+  if (!gid.value || aiBusy.value) return
+  aiBusy.value = true
   try {
     await detectEvents(gid.value, '', '', force)
     eventShowCount.value = 8
     await loadDashboardEvents()
   } catch (e) {
     showError?.('事件扫描失败', e.message, e.stack, '仪表盘·扫描事件')
-  } finally { analyzingTarget.value = ''; eventsScanning.value = false }
+  } finally { aiBusy.value = false }
 }
 
 function handleRescanConfirm() { showRescanConfirm.value = true }
@@ -447,10 +448,10 @@ async function handleRescanExecute() {
 }
 
 async function handleReanalyzeEvent(event) {
-  if (!gid.value || analyzingTarget.value) return
+  if (!gid.value || aiBusy.value) return
   const useEventId = !event.window_id
   const idForTracking = useEventId ? event.id : event.window_id
-  analyzingTarget.value = 'reanalyze:' + idForTracking
+  aiBusy.value = true
   analyzingWindowId.value = idForTracking
   try {
     let result
@@ -467,24 +468,28 @@ async function handleReanalyzeEvent(event) {
     await loadDashboardEvents()
   } catch (e) {
     showError?.('重新分析失败', e.message, e.stack, '仪表盘·重新分析事件')
-  } finally { analyzingTarget.value = ''; analyzingWindowId.value = null }
+  } finally { aiBusy.value = false; analyzingWindowId.value = null }
 }
 
 async function handleAnalyzeAllEvents() {
-  if (!gid.value || analyzingTarget.value || activeTaskId.value) return
-  analyzingTarget.value = 'all'
+  if (!gid.value || aiBusy.value || activeTaskId.value) return
+  aiBusy.value = true
   try {
     const { analyzeAllWindows: analyzeAll } = await import('../api/index.js')
     const result = await analyzeAll(gid.value)
-    if (result?.task_id) activeTaskId.value = result.task_id
+    if (result?.task_id) {
+      activeTaskId.value = result.task_id
+      // 锁由 activeTaskId watcher 在任务完成时释放
+    }
   } catch (e) {
     showError?.('一键分析失败', e.message, e.stack, '仪表盘·一键分析全部')
-  } finally { analyzingTarget.value = '' }
+  }
+  if (!activeTaskId.value) { aiBusy.value = false }
 }
 
 async function handleAnalyzeWindow(windowId) {
-  if (!gid.value || analyzingTarget.value) return
-  analyzingTarget.value = 'analyze:' + windowId
+  if (!gid.value || aiBusy.value) return
+  aiBusy.value = true
   analyzingWindowId.value = windowId
   try {
     const result = await analyzeWindow(gid.value, windowId)
@@ -499,7 +504,7 @@ async function handleAnalyzeWindow(windowId) {
     }
   } catch (e) {
     showError?.('窗口分析失败', e.message, e.stack, '仪表盘·分析窗口')
-  } finally { analyzingTarget.value = ''; analyzingWindowId.value = null }
+  } finally { aiBusy.value = false; analyzingWindowId.value = null }
 }
 
 // ISO 周标识 → 日期范围（如 2026-W25 → 6/15-6/21）
@@ -582,59 +587,63 @@ async function loadLatestReportPreviews() {
 }
 
 async function doGenerateWeekly(periodKey, force = false) {
-  if (generatingPeriod.value || activeTaskId.value) return
-  generatingPeriod.value = periodKey
+  if (aiBusy.value || activeTaskId.value) return
+  aiBusy.value = true
   try {
     const result = await generateWeekly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+      pendingRedirect.value = `/weekly/${periodKey}`
     } else {
-      generatingPeriod.value = ''
+      aiBusy.value = false
+      router.push(`/weekly/${periodKey}`)
     }
-  } catch (e) { showError?.('周报生成失败', e.message, e.stack, '仪表盘·生成周报'); generatingPeriod.value = '' }
+  } catch (e) { showError?.('周报生成失败', e.message, e.stack, '仪表盘·生成周报'); aiBusy.value = false }
 }
 
 async function doGenerateMonthly(periodKey, force = false) {
-  if (generatingPeriod.value || activeTaskId.value) return
-  generatingPeriod.value = periodKey
+  if (aiBusy.value || activeTaskId.value) return
+  aiBusy.value = true
   try {
     const result = await generateMonthly(currentGroup.value.id, periodKey, force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+      pendingRedirect.value = `/monthly/${periodKey}`
     } else {
-      generatingPeriod.value = ''
+      aiBusy.value = false
+      router.push(`/monthly/${periodKey}`)
     }
-  } catch (e) { showError?.('月报生成失败', e.message, e.stack, '仪表盘·生成月报'); generatingPeriod.value = '' }
+  } catch (e) { showError?.('月报生成失败', e.message, e.stack, '仪表盘·生成月报'); aiBusy.value = false }
 }
 
 async function doGenerateAllWeekly() {
-  if (generatingPeriod.value || activeTaskId.value) return
+  if (aiBusy.value || activeTaskId.value) return
   const ready = weeklyPeriods.value.filter(p => p.status === 'ready')
   if (!ready.length) return
-  generatingPeriod.value = 'weekly-all'
+  aiBusy.value = true
   try {
     const result = await generateAllWeekly(currentGroup.value.id)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     } else {
-      generatingPeriod.value = ''
+      aiBusy.value = false
     }
-  } catch (e) { showError?.('批量周报生成失败', e.message, e.stack, '仪表盘·一键生成周报'); generatingPeriod.value = '' }
+  } catch (e) { showError?.('批量周报生成失败', e.message, e.stack, '仪表盘·一键生成周报'); aiBusy.value = false }
 }
 
 async function doGenerateAllMonthly() {
-  if (generatingPeriod.value || activeTaskId.value) return
+  if (aiBusy.value || activeTaskId.value) return
   const ready = monthlyPeriods.value.filter(p => p.status === 'ready')
   if (!ready.length) return
-  generatingPeriod.value = 'monthly-all'
+  aiBusy.value = true
   try {
     const result = await generateAllMonthly(currentGroup.value.id)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
     } else {
-      generatingPeriod.value = ''
+      aiBusy.value = false
     }
-  } catch (e) { showError?.('批量月报生成失败', e.message, e.stack, '仪表盘·一键生成月报'); generatingPeriod.value = '' }
+  } catch (e) { showError?.('批量月报生成失败', e.message, e.stack, '仪表盘·一键生成月报'); aiBusy.value = false }
 }
 
 function goWeekly(key) { router.push(`/weekly/${key}`) }
@@ -642,7 +651,7 @@ function goMonthly(key) { router.push(`/monthly/${key}`) }
 function goAnnual(key) { router.push(`/annual/${key}`) }
 
 async function doGenerateAnnual(periodKey, force = false) {
-  if (generatingPeriod.value || activeTaskId.value) return
+  if (aiBusy.value || activeTaskId.value) return
   const yearMonthly = monthlyPeriods.value.filter(p => {
     const pYear = p.period_key.split('-')[0]
     return pYear === periodKey && p.status === 'generated'
@@ -657,15 +666,17 @@ async function doGenerateAnnual(periodKey, force = false) {
 
 async function _executeAnnualGenerate(periodKey, force = false) {
   showAnnualConfirm.value = false
-  generatingPeriod.value = periodKey
+  aiBusy.value = true
   try {
     const result = await generateAnnual(currentGroup.value.id, parseInt(periodKey), force)
     if (result?.task_id) {
       activeTaskId.value = result.task_id
+      pendingRedirect.value = `/annual/${periodKey}`
     } else {
-      generatingPeriod.value = ''
+      aiBusy.value = false
+      router.push(`/annual/${periodKey}`)
     }
-  } catch (e) { showError?.('年报生成失败', e.message, e.stack, '仪表盘·生成年报'); generatingPeriod.value = '' }
+  } catch (e) { showError?.('年报生成失败', e.message, e.stack, '仪表盘·生成年报'); aiBusy.value = false }
 }
 
 </script>
@@ -732,9 +743,9 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         <div class="flex gap-1.5 ml-auto">
           <button @click="showUpload = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors flex items-center gap-1"><Upload :size="12" />导入</button>
           <button v-if="currentGroup?.platform !== 'qq'" @click="showWeFlow = true" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 border border-slate-200 transition-colors flex items-center gap-1"><Radio :size="12" />同步</button>
-          <button v-if="(stats?.total_days_with_data - (stats?.analyzed_count || 0)) > 1" @click="startAnalyzeAll" :disabled="analyzing"
-            :class="['px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1', !analyzing ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-300']"><Zap :size="12" />一键分析</button>
-          <button @click="analyzeLatest" :disabled="analyzing || !latestUnanalyzed"
+          <button v-if="(stats?.total_days_with_data - (stats?.analyzed_count || 0)) > 1" @click="startAnalyzeAll" :disabled="aiBusy"
+            :class="['px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1', !aiBusy ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-300']"><Zap :size="12" />一键分析</button>
+          <button @click="analyzeLatest" :disabled="aiBusy || !latestUnanalyzed"
             class="px-2.5 py-1 rounded-lg font-medium bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-slate-100 disabled:text-slate-300 transition-colors">分析最新</button>
         </div>
       </div>
@@ -782,17 +793,17 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                 <span class="text-xs text-slate-400 font-normal">{{ dashboardEvents.length + dashboardWindows.filter(w=>w.status==='pending').length }}</span>
               </h3>
               <div class="flex items-center gap-1.5">
-                <button @click="checkPrivacyConsent(() => handleScanEvents(false))" :disabled="!!analyzingTarget || showPrivacyConfirm || eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleScanEvents(false))" :disabled="aiBusy || showPrivacyConfirm"
                   class="text-[10px] bg-emerald-500 text-white px-2 py-1 rounded-full hover:bg-emerald-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Search :size="10" />扫描新事件
                 </button>
-                <button @click="checkPrivacyConsent(() => handleRescanConfirm())" :disabled="!!analyzingTarget || showPrivacyConfirm || eventsScanning"
+                <button @click="checkPrivacyConsent(() => handleRescanConfirm())" :disabled="aiBusy || showPrivacyConfirm"
                   class="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full hover:bg-red-600 disabled:opacity-40 flex items-center gap-0.5"
                   title="删除全部窗口后重新检测">
                   <RefreshCw :size="10" />重新扫描
                 </button>
                 <button v-if="dashboardWindows.some(w=>w.status==='pending')" @click="checkPrivacyConsent(() => handleAnalyzeAllEvents())"
-                  :disabled="!!analyzingTarget || showPrivacyConfirm || !!activeTaskId || eventsScanning"
+                  :disabled="aiBusy || showPrivacyConfirm || !!activeTaskId"
                   class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5">
                   <Zap :size="10" />一键分析
                 </button>
@@ -819,7 +830,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-400 w-16 flex-shrink-0">{{ (w.start_time||'').slice(5,10) }}</span>
                     <span class="flex-1 text-slate-500 truncate">{{ (w.summary?.preview||[])[0]?.content || '候选事件' }}</span>
                     <button @click.stop="checkPrivacyConsent(() => handleAnalyzeWindow(w.id))"
-                      :disabled="!!analyzingTarget || showPrivacyConfirm || analyzingWindowId === w.id"
+                      :disabled="aiBusy || showPrivacyConfirm || analyzingWindowId === w.id"
                       class="bg-indigo-500 text-white px-2 py-0.5 rounded-full text-[10px] hover:bg-indigo-600 disabled:opacity-40 flex-shrink-0">
                       {{ analyzingWindowId === w.id ? '...' : '分析' }}
                     </button>
@@ -834,7 +845,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                     <span class="text-slate-400 text-[10px] flex-shrink-0">{{ e.message_count || 0 }}条</span>
                     <span class="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0">已分析</span>
                     <button @click.stop="checkPrivacyConsent(() => handleReanalyzeEvent(e))"
-                      :disabled="!!analyzingTarget || showPrivacyConfirm || (analyzingWindowId != null && analyzingWindowId === e.window_id)"
+                      :disabled="aiBusy || showPrivacyConfirm || (analyzingWindowId != null && analyzingWindowId === e.window_id)"
                       class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full text-[10px] hover:bg-amber-100 disabled:opacity-40 flex-shrink-0">
                       ↻
                     </button>
@@ -908,7 +919,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
           <div v-if="weeklyPeriods.length > 0" class="card p-5">
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-semibold text-slate-700 flex items-center gap-2 text-sm"><span class="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center"><FileText class="w-3.5 h-3.5 text-indigo-600" /></span>周报 <span class="text-xs text-slate-400 font-normal">{{ weeklyPeriods.filter(p=>p.status==='generated').length }}/{{ weeklyPeriods.length }}</span></h3>
-              <button v-if="weeklyPeriods.some(p=>p.status==='ready')" @click="doGenerateAllWeekly" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5"><Zap :size="10" />一键生成</button>
+              <button v-if="weeklyPeriods.some(p=>p.status==='ready')" @click="doGenerateAllWeekly" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-indigo-500 text-white px-2 py-1 rounded-full hover:bg-indigo-600 disabled:opacity-40 flex items-center gap-0.5"><Zap :size="10" />一键生成</button>
             </div>
             <div ref="weeklyListRef" class="space-y-1 max-h-72 overflow-y-auto">
               <div v-for="p in weeklyPeriods.slice(0, weeklyShowCount)" :key="'w'+p.period_key"
@@ -917,8 +928,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    @click="p.status === 'generated' ? goWeekly(p.period_key) : null">
                 <span class="font-mono font-medium text-slate-600 flex-shrink-0" style="min-width:7rem">{{ p.period_key }} <span class="text-slate-400 font-normal text-[10px]">{{ isoWeekToRange(p.period_key) }}</span></span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateWeekly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
-                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateWeekly(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full hover:bg-indigo-600 disabled:opacity-40">生成</button>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateWeekly(p.period_key, true)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateWeekly(p.period_key)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full hover:bg-indigo-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>
             </div>
@@ -930,7 +941,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
           <div v-if="monthlyPeriods.length > 0" class="card p-5">
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-semibold text-slate-700 flex items-center gap-2 text-sm"><span class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center"><FileText class="w-3.5 h-3.5 text-purple-600" /></span>月报 <span class="text-xs text-slate-400 font-normal">{{ monthlyPeriods.filter(p=>p.status==='generated').length }}/{{ monthlyPeriods.length }}</span></h3>
-              <button v-if="monthlyPeriods.some(p=>p.status==='ready')" @click="doGenerateAllMonthly" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-purple-500 text-white px-2 py-1 rounded-full hover:bg-purple-600 disabled:opacity-40 flex items-center gap-0.5"><Zap :size="10" />一键生成</button>
+              <button v-if="monthlyPeriods.some(p=>p.status==='ready')" @click="doGenerateAllMonthly" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-purple-500 text-white px-2 py-1 rounded-full hover:bg-purple-600 disabled:opacity-40 flex items-center gap-0.5"><Zap :size="10" />一键生成</button>
             </div>
             <div ref="monthlyListRef" class="space-y-1 max-h-72 overflow-y-auto">
               <div v-for="p in monthlyPeriods.slice(0, monthlyShowCount)" :key="'m'+p.period_key"
@@ -939,8 +950,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    @click="p.status === 'generated' ? goMonthly(p.period_key) : null">
                 <span class="font-mono font-medium text-slate-600 flex-shrink-0" style="min-width:7rem">{{ p.period_key }} <span class="text-slate-400 font-normal text-[10px]">{{ monthToRange(p.period_key) }}</span></span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateMonthly(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
-                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateMonthly(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-purple-500 text-white px-2 py-0.5 rounded-full hover:bg-purple-600 disabled:opacity-40">生成</button>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateMonthly(p.period_key, true)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateMonthly(p.period_key)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-purple-500 text-white px-2 py-0.5 rounded-full hover:bg-purple-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>
             </div>
@@ -958,8 +969,8 @@ async function _executeAnnualGenerate(periodKey, force = false) {
                    @click="p.status === 'generated' ? goAnnual(p.period_key) : null">
                 <span class="font-mono font-medium text-slate-600 w-20 flex-shrink-0">{{ p.period_key }}年</span>
                 <span class="flex-1 text-slate-400">{{ p.day_count }}天</span>
-                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateAnnual(p.period_key, true)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
-                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateAnnual(p.period_key)" :disabled="!!generatingPeriod || !!activeTaskId" class="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full hover:bg-amber-600 disabled:opacity-40">生成</button>
+                <template v-if="p.status === 'generated'"><span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">已生成</span><span v-if="p.has_new_data" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">有新数据</span><button @click.stop="doGenerateAnnual(p.period_key, true)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full hover:bg-amber-100 disabled:opacity-40">↻</button></template>
+                <button v-else-if="p.status === 'ready'" @click.stop="doGenerateAnnual(p.period_key)" :disabled="aiBusy || !!activeTaskId" class="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full hover:bg-amber-600 disabled:opacity-40">生成</button>
                 <span v-else class="text-[10px] text-slate-300">不足</span>
               </div>
             </div>
@@ -1041,7 +1052,7 @@ async function _executeAnnualGenerate(periodKey, force = false) {
             <div class="space-y-3">
               <div class="grid grid-cols-2 gap-2 text-xs"><div class="bg-slate-50 rounded-lg p-2"><span class="text-slate-400">消息数</span><br><strong>{{ dayPopup.count }}</strong></div><div class="bg-slate-50 rounded-lg p-2"><span class="text-slate-400">活跃成员</span><br><strong>{{ dayPopup.active_members || '—' }}</strong></div></div>
               <div v-if="dayPopup.analyzed && dayPopup.report" class="bg-indigo-50 rounded-xl p-4"><div class="text-2xl mb-1">{{ dayPopup.report.mood_emoji }}</div><p class="text-sm font-medium text-slate-800">{{ dayPopup.report.one_line }}</p><p class="text-xs text-slate-500 mt-2">{{ dayPopup.report.mood }}</p><button @click="viewReportFromPopup()" class="mt-3 text-xs bg-indigo-500 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-600 transition-colors">查看完整报告 →</button></div>
-              <div v-else-if="dayPopup.hasData" class="bg-amber-50 rounded-xl p-4 text-center"><p class="text-sm text-amber-700">该日期尚未分析</p><button @click="handleGenerateReport()" class="mt-2 text-xs bg-amber-500 text-white px-3 py-1.5 rounded-lg hover:bg-amber-600 transition-colors">立即分析</button></div>
+              <div v-else-if="dayPopup.hasData" class="bg-amber-50 rounded-xl p-4 text-center"><p class="text-sm text-amber-700">该日期尚未分析</p><button @click="handleGenerateReport()" :disabled="aiBusy || dayPopupLoading" class="mt-2 text-xs bg-amber-500 text-white px-3 py-1.5 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-40">立即分析</button></div>
             </div>
           </div>
         </div>

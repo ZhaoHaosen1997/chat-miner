@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, onMounted } from 'vue'
+import { ref, inject, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAnnualReport, generateAnnual, getPeriods } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Trophy, Star, Calendar, MessageSquare, Users, TrendingUp } from 'lucide-vue-next'
@@ -104,6 +104,10 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goYear(key) { if (key) router.push(`/annual/${key}`) }
+
+function onEsc(e) { if (e.key === 'Escape' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') goBack() }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 // 页面挂载时清除残留的 activeTaskId，防止按钮被禁用
 onMounted(() => { activeTaskId.value = '' })

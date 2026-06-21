@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, computed } from 'vue'
+import { ref, inject, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMonthlyReport, generateMonthly, getPeriods } from '../api/index.js'
 import { ArrowLeft, ArrowRight, Sparkles, Loader2, TrendingUp, Calendar, MessageSquare, Users, Brain, GitBranch, Telescope, Activity, Film, Hash } from 'lucide-vue-next'
@@ -98,6 +98,10 @@ watch(activeTaskId, (newVal, oldVal) => {
 
 function goBack() { router.push('/') }
 function goMonth(key) { if (key) router.push(`/monthly/${key}`) }
+
+function onEsc(e) { if (e.key === 'Escape' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') goBack() }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 // ===== 人格/情绪自适应主题 =====
 const personalityThemes = [

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, watch, onMounted } from 'vue'
+import { ref, inject, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getReport, analyzeDateAsync, deleteReport, getAnalyzedDates } from '../api/index.js'
 import { ArrowLeft, Sparkles, Loader2, Clock, MessageSquare, Users, Hash, RefreshCw } from 'lucide-vue-next'
@@ -124,6 +124,10 @@ watch(activeTaskId, (newVal, oldVal) => {
 })
 
 function goBack() { router.push('/') }
+
+function onEsc(e) { if (e.key === 'Escape' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') goBack() }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 // 活跃时段
 const hourLabels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)

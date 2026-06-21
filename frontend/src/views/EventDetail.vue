@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Calendar, MessageSquare, Users, Clock, Loader2, Flag, Quote } from 'lucide-vue-next'
 import FloatingNav from '../components/FloatingNav.vue'
@@ -60,6 +60,10 @@ function formatTime(ts) {
 
 function goBack() { router.push('/') }
 function goEvent(id) { if (id) router.push(`/event/${id}`) }
+
+function onEsc(e) { if (e.key === 'Escape' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') goBack() }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 async function load() {
   const gid = currentGroup.value?.id
