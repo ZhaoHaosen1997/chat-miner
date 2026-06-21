@@ -154,6 +154,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
         thinking=True,
         model_config=model_config,
         group_id=group_id,
+        pipeline="annual",
     )
 
     if not ai_result["success"]:

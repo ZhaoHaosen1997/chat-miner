@@ -630,11 +630,16 @@ async def _call_ai_for_events(system_prompt: str, user_prompt: str,
     v1.19.x: 新增 group_id 参数，用于 AI 调用日志。
     """
     from services.model_config import resolve_model_with_fallback
-    from services.online_model import call_online_chat
+    from services.pipeline_context import PipelineContext
 
     primary, fallback = resolve_model_with_fallback("online")
     if not primary:
         raise RuntimeError("没有可用的在线模型")
+
+    ctx = PipelineContext(
+        pipeline="event", group_id=group_id, group_name=group_name,
+        model_config=primary,
+    )
 
     json_instruction = """
 请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）。
@@ -673,16 +678,14 @@ null"""
 
     # ── 尝试主模型 ──
     try:
-        result = await call_online_chat(
+        result = await ctx.call_ai(
             system_prompt=full_system,
             user_prompt=user_prompt,
-            model_config=primary,
             temperature=0.8,
             json_mode=True,
             thinking=False,
             max_tokens=4096,
             timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
-            pipeline="event", group_id=group_id,
         )
     except Exception as e:
         last_error = str(e)
@@ -692,17 +695,19 @@ null"""
     # ── 主模型失败 → 尝试 fallback（仅当 fallback 也是在线模型时） ──
     if result is None and fallback and fallback.get("model_type") == "online":
         logger.info("尝试在线备用模型: %s", fallback.get("model_name", ""))
+        fallback_ctx = PipelineContext(
+            pipeline="event", group_id=group_id, group_name=group_name,
+            model_config=fallback,
+        )
         try:
-            result = await call_online_chat(
+            result = await fallback_ctx.call_ai(
                 system_prompt=full_system,
                 user_prompt=user_prompt,
-                model_config=fallback,
                 temperature=0.8,
                 json_mode=True,
                 thinking=False,
                 max_tokens=4096,
                 timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
-                pipeline="event", group_id=group_id,
             )
         except Exception as fb_e:
             logger.warning("在线备用模型也失败: %s", fb_e)

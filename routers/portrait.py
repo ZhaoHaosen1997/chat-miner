@@ -458,6 +458,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
             portrait_data = await run_portrait_pipeline_online(
                 chat_text, sender_name, group["name"], len(all_msgs),
                 model_config=model_config, task=task, is_private=is_private,
+                group_id=group_id,
             )
         except Exception as e:
             logger.error(f"在线画像管线失败: {sender_name}: {e}")

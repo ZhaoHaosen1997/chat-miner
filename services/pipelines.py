@@ -705,15 +705,19 @@ async def run_daily_pipeline_online(
 
     logger.info(f"在线模型日报: {group_name} {date}, 模型={model_config.get('model_name')}")
 
+    from services.pipeline_context import PipelineContext
+    ctx = PipelineContext(
+        pipeline="daily", group_id=group_id, group_name=group_name,
+        model_config=model_config,
+    )
+
     try:
-        result = await call_online_chat(
+        result = await ctx.call_ai(
             system_prompt=get_default_prompt("daily") or DAILY_ONLINE_SYSTEM,
             user_prompt=user_prompt,
-            model_config=model_config,
             temperature=0.3,
             json_mode=True,
             max_tokens=4096,
-            pipeline="daily", group_id=group_id,
         )
 
         if result["success"] and result["data"]:
@@ -1073,6 +1077,7 @@ async def run_portrait_pipeline_online(
     model_config: dict,
     task=None,
     is_private: bool = False,
+    group_id: int = 0,
 ) -> dict:
     """在线模型单次调用画像管线 v0.12.2
 
@@ -1096,13 +1101,18 @@ async def run_portrait_pipeline_online(
 
     logger.info(f"在线模型画像: {sender_name}, 模型={model_config.get('model_name')}")
 
+    from services.pipeline_context import PipelineContext
+    ctx = PipelineContext(
+        pipeline="portrait", group_id=group_id, group_name=group_name,
+        model_config=model_config,
+    )
+
     try:
-        result = await call_online_chat(
+        result = await ctx.call_ai(
             system_prompt=get_default_prompt("portrait") or PORTRAIT_ONLINE_SYSTEM,
             user_prompt=user_prompt,
-            model_config=model_config,
             temperature=0.4,
-            json_mode=True, pipeline="portrait",
+            json_mode=True,
             max_tokens=4096,
         )
 
