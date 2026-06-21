@@ -184,6 +184,7 @@ async def api_scan_memes(group_id: int):
         json_mode=True,
         max_tokens=2048,
         timeout=60,
+        pipeline="meme", group_id=group_id,
     )
 
     if not result.get("success"):

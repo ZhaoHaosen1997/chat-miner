@@ -122,6 +122,7 @@ class Config:
     LOG_DIR = BASE_DIR / "logs"
     LOG_LEVEL = "INFO"
     LOG_RETENTION_DAYS = 90     # 分析日志保留天数
+    AI_LOG_RETENTION_DAYS = 7   # AI 调用日志保留天数
     LOG_MAX_RECORDS = 500       # 任务记录最多保留条数
 
     # ==================== 默认停用词（v1.0.2：从此常量初始化 DB，不再读取 stopwords.txt） ====================

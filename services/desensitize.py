@@ -21,12 +21,13 @@ _PII_PATTERNS = [
 ]
 
 # senderID → 昵称 替换正则
-_SID_BRACKET = re.compile(r'\[(\d+)\]')   # [13]
-_SID_HAO = re.compile(r'\b(\d+)号\b')      # 13号（中文语境常见）
+_SID_BRACKET = re.compile(r'\[(\d+)\]')     # [13] 半角
+_SID_BRACKET_FULL = re.compile(r'【(\d+)】')  # 【13】全角（AI 偶尔用全角括号）
+_SID_HAO = re.compile(r'\b(\d+)号\b')        # 13号（中文语境常见）
 
 
 def _resolve_all(text: str, name_map: dict[int, str]) -> str:
-    """将文本中所有 [N]、N号 格式替换为昵称"""
+    """将文本中所有 [N]、【N】、N号 格式替换为昵称"""
     if not text or not name_map:
         return text
 
@@ -40,6 +41,7 @@ def _resolve_all(text: str, name_map: dict[int, str]) -> str:
         return name if name else match.group(0)
 
     text = _SID_BRACKET.sub(_by_bracket, text)
+    text = _SID_BRACKET_FULL.sub(_by_bracket, text)
     text = _SID_HAO.sub(_by_hao, text)
     return text
 

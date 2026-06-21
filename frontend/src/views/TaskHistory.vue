@@ -82,7 +82,7 @@
             <div><span class="text-slate-400">任务ID：</span><code class="text-slate-600">{{ r.task_id }}</code></div>
             <div><span class="text-slate-400">模型：</span><span class="text-slate-600">{{ r.model_used || '-' }}</span></div>
             <div class="col-span-2 flex gap-3">
-              <router-link :to="`/ai-logs?task_id=${r.task_id}`" class="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition-colors">
+              <router-link v-if="hasAiLogs(r)" :to="`/ai-logs?task_id=${r.id}`" class="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition-colors">
                 <ExternalLink class="w-3 h-3" />查看 AI 调用日志
               </router-link>
             </div>
@@ -121,6 +121,10 @@ import { inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { getTaskHistoryAll } from '../api/index.js'
 import { Loader2, ClipboardList, Upload, FileText, RefreshCw, Users, MessageSquare, Fish, Settings, ChevronRight, Zap, Clock, Calendar, ExternalLink } from 'lucide-vue-next'
+
+// v1.19.0: 只有 AI 分析类任务显示查看日志链接
+const AI_TASK_TYPES = ['analyze_day', 'analyze_all', 'generate_weekly', 'generate_monthly', 'generate_annual', 'full_portrait', 'analyze_all_portraits']
+function hasAiLogs(r) { return AI_TASK_TYPES.includes(r.task_type) }
 
 const router = useRouter()
 

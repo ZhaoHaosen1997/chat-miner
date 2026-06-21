@@ -349,7 +349,7 @@ async def api_portrait_stats(group_id: int, member_id: int):
                 member_names.add(name)
         sender_msgs = [m for m in chat.messages if m.get("wxid") == wxid]
         from services.stats_engine import compute_recent_status
-        recent_status = compute_recent_status([], member_names=member_names, sender_msgs=sender_msgs)
+        recent_status = compute_recent_status([], member_names=member_names, sender_msgs=sender_msgs, group_id=group_id)
 
     return {
         "code": 200,
@@ -501,7 +501,7 @@ async def _do_run_full_portrait_analysis(group_id: int, member_id: int, task, mo
     from services.social import analyze_social_relations
 
     activity = compute_activity_stats(chat.messages, wxid)
-    language = compute_language_stats(chat.messages, wxid, member_names)
+    language = compute_language_stats(chat.messages, wxid, member_names, group_id=group_id)
     social_relations = await analyze_social_relations(
         chat.messages, wxid, sender_name, chat.get_sender_name, chat.get_name_by_wxid,
         model_config=model_config if is_online else None,

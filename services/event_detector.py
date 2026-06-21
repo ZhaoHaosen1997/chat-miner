@@ -681,6 +681,7 @@ null"""
             thinking=False,
             max_tokens=4096,
             timeout=getattr(config, "DEEPSEEK_TIMEOUT", 120),
+            pipeline="event",
         )
     except Exception as e:
         last_error = str(e)

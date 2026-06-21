@@ -713,6 +713,7 @@ async def run_daily_pipeline_online(
             temperature=0.3,
             json_mode=True,
             max_tokens=4096,
+            pipeline="daily", group_id=group_id,
         )
 
         if result["success"] and result["data"]:
@@ -1101,7 +1102,7 @@ async def run_portrait_pipeline_online(
             user_prompt=user_prompt,
             model_config=model_config,
             temperature=0.4,
-            json_mode=True,
+            json_mode=True, pipeline="portrait",
             max_tokens=4096,
         )
 

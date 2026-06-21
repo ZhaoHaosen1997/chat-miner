@@ -35,7 +35,8 @@ class AILogger:
     def cleanup():
         """清理过期的成功日志"""
         try:
-            days_str = get_app_setting("ai_log_retention_days") or "7"
+            setting = get_app_setting("ai_log_retention_days")
+            days_str = setting["value"] if isinstance(setting, dict) and setting.get("value") else "7"
             retention_days = int(days_str)
             cleanup_ai_call_logs(retention_days)
         except Exception as e:
