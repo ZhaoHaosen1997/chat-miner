@@ -147,7 +147,7 @@ def resolve_sender_ids_deep(data, name_map: dict[int, str]):
     if isinstance(data, str):
         return _try_resolve_digit(_resolve_all(data, name_map), name_map)
     if isinstance(data, dict):
-        # 处理 sender_id / name 等字段的值（裸数字 → 昵称）
+        # 处理 sender_id / name / alias 字段的值（裸数字 → 昵称）
         for key in ("sender_id", "name", "alias"):
             if key in data and isinstance(data[key], str):
                 data[key] = _try_resolve_digit(

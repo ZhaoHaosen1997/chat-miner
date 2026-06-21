@@ -321,15 +321,15 @@ const healthItems = [
         <!-- ===== SECTION 4: 成员快照条 ===== -->
         <div v-if="report.top_speakers?.length" class="flex flex-wrap items-center justify-center gap-3 text-xs text-slate-400 py-2">
           <span v-if="report.top_speakers?.length" class="flex items-center gap-1">
-            💬 TOP3: <span class="text-slate-600 font-medium">{{ report.top_speakers.slice(0,3).map(s=>s.alias).join('、') }}</span>
+            💬 TOP3: <span class="text-slate-600 font-medium">{{ report.top_speakers.slice(0,3).map(s=>s.sender_id).join('、') }}</span>
           </span>
           <span class="text-slate-200">|</span>
           <span v-if="report.night_owls?.length" class="flex items-center gap-1">
-            🦉 <span class="text-slate-600 font-medium">{{ report.night_owls.map(n=>n.alias).join('、') }}</span>
+            🦉 <span class="text-slate-600 font-medium">{{ report.night_owls.map(n=>n.sender_id).join('、') }}</span>
           </span>
           <span class="text-slate-200">|</span>
           <span v-if="report.emoji_kings?.length" class="flex items-center gap-1">
-            😂 <span class="text-slate-600 font-medium">{{ report.emoji_kings.map(e=>e.alias).join('、') }}</span>
+            😂 <span class="text-slate-600 font-medium">{{ report.emoji_kings.map(e=>e.sender_id).join('、') }}</span>
           </span>
         </div>
 

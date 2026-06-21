@@ -117,7 +117,16 @@ async def api_scan_memes(group_id: int):
 
     from services.desensitize import filter_pii
     gname = group.get("display_name") or group.get("name", "")
-    lines = [f'以下是群聊"{gname}"的近期消息。识别自有梗：']
+
+    # v1.18.8: 获取已有梗，作为去重参考传入 AI
+    existing = get_group_memes(group_id)
+    approved_terms = [m["term"] for m in existing if m.get("status") == "approved"]
+    pending_terms = [m["term"] for m in existing if m.get("status") == "pending"]
+    existing_terms = approved_terms + pending_terms
+    logger.info("梗扫描已有梗: group=%d approved=%d pending=%d",
+                group_id, len(approved_terms), len(pending_terms))
+
+    lines = [f'以下是群聊"{gname}"的近期消息。请仔细观察，发现其中可能的自有梗：']
     char_count = 0
     for m in sampled:
         c = filter_pii((m.get("content") or "").strip())
@@ -125,7 +134,7 @@ async def api_scan_memes(group_id: int):
             lines.append(f"[{m.get('senderID','?')}]: {c}")
             char_count += len(c)
 
-    # v1.18.8: 注入近期事件作为扫描线索
+    # 注入近期事件作为扫描线索
     event_count = 0
     try:
         from models.database import get_events
@@ -142,6 +151,11 @@ async def api_scan_memes(group_id: int):
                     event_count += 1
     except Exception as e:
         logger.warning("梗扫描事件线索失败: %s", e)
+
+    # 已知梗提醒（放末尾，避免开局打压积极性）
+    if existing_terms:
+        lines.append("")
+        lines.append(f"💡 以下梗已有记录，无需再报：{', '.join(existing_terms)}")
 
     logger.info("梗扫描采样: group=%d sender=%d 消息字符=%d 事件线索=%d",
                 group_id, len(sampled), char_count, event_count)

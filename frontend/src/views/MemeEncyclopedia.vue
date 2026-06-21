@@ -2,7 +2,7 @@
 import { ref, inject, onMounted, watch, computed } from 'vue'
 import {
   getGroupMemes, addGroupMeme, updateGroupMeme, deleteGroupMeme,
-  approveGroupMeme, rejectGroupMeme, scanGroupMemes,
+  rejectGroupMeme, scanGroupMemes,
 } from '../api/index.js'
 import {
   Sparkles, Plus, Pencil, Trash2, Check, X, Loader2,
@@ -56,13 +56,12 @@ function startApprove(m) {
   editDesc.value = m.description
 }
 
-// 确认通过：保存描述 + 审核通过
+// 确认通过：保存描述（DB 层 update_group_meme 自动 pending→approved）
 async function confirmApprove() {
   const mid = approvingId.value
   if (!mid) return
   try {
     await updateGroupMeme(currentGroup.value.id, mid, editDesc.value)
-    await approveGroupMeme(currentGroup.value.id, mid)
     editingId.value = null
     approvingId.value = null
     await load()

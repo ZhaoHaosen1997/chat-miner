@@ -329,7 +329,7 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
                   <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
                     :class="i === 0 ? 'bg-amber-400 text-white' : i === 1 ? 'bg-slate-300 text-white' : i === 2 ? 'bg-orange-300 text-white' : 'bg-slate-100 text-slate-400'"
                   >{{ i + 1 }}</span>
-                  <span class="flex-1 text-slate-700 truncate text-xs">{{ s.alias }}</span>
+                  <span class="flex-1 text-slate-700 truncate text-xs">{{ s.sender_id }}</span>
                   <span class="font-semibold text-slate-500 text-xs stat-ticker">{{ s.count }}条</span>
                 </div>
               </div>
@@ -339,17 +339,17 @@ const moodIcons = { '欢乐':'😄','温馨':'🥰','严肃':'🧐','吐槽':'�
               <div v-if="report.night_owls?.length" class="rounded-xl p-3 card text-center">
                 <div class="text-lg mb-0.5">🦉</div>
                 <div class="text-[10px] text-slate-400 mb-0.5">深夜守群</div>
-                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.night_owls[0]?.alias }}</div>
+                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.night_owls[0]?.sender_id }}</div>
               </div>
               <div v-if="report.emoji_kings?.length" class="rounded-xl p-3 card text-center">
                 <div class="text-lg mb-0.5">😂</div>
                 <div class="text-[10px] text-slate-400 mb-0.5">表情达人</div>
-                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.emoji_kings[0]?.alias }}</div>
+                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.emoji_kings[0]?.sender_id }}</div>
               </div>
               <div v-if="report.lurkers?.length" class="rounded-xl p-3 card text-center">
                 <div class="text-lg mb-0.5">🤿</div>
                 <div class="text-[10px] text-slate-400 mb-0.5">潜水观察</div>
-                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.lurkers[0]?.alias }}</div>
+                <div class="text-[11px] font-medium text-slate-600 truncate">{{ report.lurkers[0]?.sender_id }}</div>
               </div>
             </div>
           </div>
