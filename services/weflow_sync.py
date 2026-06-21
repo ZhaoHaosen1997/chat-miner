@@ -202,11 +202,7 @@ def _get_last_message_timestamp(group_id: int) -> int:
 
 
 def _get_merged_data_path(group_id: int) -> Optional[Path]:
-    """根据 group_id 获取 merged_data.json 路径
-
-    优先直接从 group 的 file_path 目录查找，不要求原始文件一定存在
-    （原始文件可能被清理但 merged_data.json 仍在同目录）。
-    """
+    """根据 group_id 获取 merged_data.json 路径（纯路径计算，不检查文件是否存在）"""
     from models.database import get_group
     group = get_group(group_id)
     if not group or not group.get("file_path"):
@@ -214,9 +210,7 @@ def _get_merged_data_path(group_id: int) -> Optional[Path]:
     merged_path = Path(group["file_path"]).parent / "merged_data.json"
     if not merged_path.is_absolute():
         merged_path = config.BASE_DIR / merged_path
-    if merged_path.exists():
-        return merged_path
-    return None
+    return merged_path
 
 
 def sync_messages_incremental(client: WeFlowClient, group_id: int,
