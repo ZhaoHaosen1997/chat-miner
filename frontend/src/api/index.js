@@ -517,6 +517,7 @@ export function getAiCallLogs(params = {}) {
   if (params.task_id) qs.set('task_id', params.task_id)
   if (params.pipeline) qs.set('pipeline', params.pipeline)
   if (params.group_id) qs.set('group_id', params.group_id)
+  if (params.status) qs.set('status', params.status)
   if (params.limit) qs.set('limit', params.limit)
   if (params.offset) qs.set('offset', params.offset)
   const query = qs.toString() ? '?' + qs.toString() : ''

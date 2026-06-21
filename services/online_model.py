@@ -9,10 +9,31 @@ Usage:
 """
 import json
 import logging
+import re
 import time
 import httpx
 
 from config import config
+
+
+def _parse_json_safe(content: str) -> tuple:
+    """尝试将 AI 响应解析为 JSON。返回 (is_valid, error_message)。"""
+    text = content.strip()
+    # 1. 直接解析
+    try:
+        json.loads(text)
+        return True, ""
+    except json.JSONDecodeError:
+        pass
+    # 2. 尝试从 markdown 代码块提取 ```json ... ```
+    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if m:
+        try:
+            json.loads(m.group(1).strip())
+            return True, ""
+        except json.JSONDecodeError:
+            pass
+    return False, f"JSON 解析失败，内容前100字符: {text[:100]}"
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +161,11 @@ async def call_online_chat(
         duration_ms = int((time.time() - start_time) * 1000)
 
         if resp.status_code == 401:
-            ret = {"success": False, "data": None, "error": f"API Key 无效 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+            ret = {"success": False, "data": None, "status": "error", "error": f"API Key 无效 ({model_name})", "model": model_name, "duration_ms": duration_ms}
         elif resp.status_code == 402:
-            ret = {"success": False, "data": None, "error": f"API 余额不足 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+            ret = {"success": False, "data": None, "status": "error", "error": f"API 余额不足 ({model_name})", "model": model_name, "duration_ms": duration_ms}
         elif resp.status_code == 429:
-            ret = {"success": False, "data": None, "error": f"API 请求太频繁，请稍后重试 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+            ret = {"success": False, "data": None, "status": "error", "error": f"API 请求太频繁，请稍后重试 ({model_name})", "model": model_name, "duration_ms": duration_ms}
         else:
             resp.raise_for_status()
             resp_json = resp.json()
@@ -160,19 +181,30 @@ async def call_online_chat(
                 logger.warning(f"在线模型返回空/空白内容, 原始响应: {json.dumps(resp_json, ensure_ascii=False)[:800]}")
             logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
             if content.strip():
-                ret = {"success": True, "data": content.strip(), "error": None, "model": model_name, "duration_ms": duration_ms}
+                status = "success"
+                error_msg = None
+                if json_mode:
+                    ok, err = _parse_json_safe(content)
+                    if not ok:
+                        status = "parse_error"
+                        error_msg = err
+                        logger.warning(f"在线模型 JSON 解析失败 ({model_name}): {err}")
+                ret = {"success": status == "success", "data": content.strip(),
+                       "status": status, "error": error_msg,
+                       "model": model_name, "duration_ms": duration_ms}
             else:
-                ret = {"success": False, "data": None, "error": f"{model_name} 返回空内容", "model": model_name, "duration_ms": duration_ms}
+                ret = {"success": False, "data": None, "status": "error",
+                       "error": f"{model_name} 返回空内容", "model": model_name, "duration_ms": duration_ms}
     except httpx.TimeoutException:
         duration_ms = int((time.time() - start_time) * 1000)
-        ret = {"success": False, "data": None, "error": f"在线模型请求超时 ({timeout}s)", "model": model_name, "duration_ms": duration_ms}
+        ret = {"success": False, "data": None, "status": "error", "error": f"在线模型请求超时 ({timeout}s)", "model": model_name, "duration_ms": duration_ms}
     except httpx.ConnectError:
         duration_ms = int((time.time() - start_time) * 1000)
-        ret = {"success": False, "data": None, "error": f"无法连接到 API 端点 ({endpoint})", "model": model_name, "duration_ms": duration_ms}
+        ret = {"success": False, "data": None, "status": "error", "error": f"无法连接到 API 端点 ({endpoint})", "model": model_name, "duration_ms": duration_ms}
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         logger.error("在线模型调用异常: %s", e, exc_info=True)
-        ret = {"success": False, "data": None, "error": str(e), "model": model_name, "duration_ms": duration_ms}
+        ret = {"success": False, "data": None, "status": "error", "error": str(e), "model": model_name, "duration_ms": duration_ms}
 
     # v1.19.0: 记录 AI 调用日志
     if ret and (pipeline or task_id):
@@ -186,6 +218,7 @@ async def call_online_chat(
                 duration_ms=ret.get("duration_ms", 0),
                 success=ret.get("success", False),
                 error=ret.get("error") or "",
+                status=ret.get("status", ""),
             )
         except Exception:
             pass

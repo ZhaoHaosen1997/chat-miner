@@ -13,15 +13,17 @@ async def api_list_logs(
     task_id: str = Query("", description="按任务 ID 筛选（int 或 UUID 字符串）"),
     pipeline: str = Query("", description="按管线筛选"),
     group_id: int = Query(0, description="按群 ID 筛选"),
+    status: str = Query("", description="按状态筛选: success / error / parse_error"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     logs = get_ai_call_logs(
         task_id=task_id, pipeline=pipeline, group_id=group_id,
-        limit=limit, offset=offset,
+        status=status, limit=limit, offset=offset,
     )
     total = get_ai_call_logs_count(
         task_id=task_id, pipeline=pipeline, group_id=group_id,
+        status=status,
     )
     return {"code": 200, "message": "ok", "data": {"logs": logs, "total": total}}
 

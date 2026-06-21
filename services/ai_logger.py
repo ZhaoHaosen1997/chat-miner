@@ -15,7 +15,7 @@ class AILogger:
     def log(task_id: int | None, pipeline: str, group_id: int,
             model_name: str, system_prompt: str, user_prompt: str,
             response_raw: str, duration_ms: int, success: bool,
-            error: str = "") -> int:
+            error: str = "", status: str = "") -> int:
         """记录一次 AI 调用。返回日志 ID"""
         token_estimate = len(system_prompt) + len(user_prompt) + len(response_raw)
         input_chars = len(system_prompt) + len(user_prompt)
@@ -28,6 +28,7 @@ class AILogger:
                 token_estimate=token_estimate,
                 input_chars=input_chars, output_chars=output_chars,
                 duration_ms=duration_ms, success=success, error=error,
+                status=status,
             )
             return log_id
         except Exception as e:
@@ -75,7 +76,8 @@ class AICallContext:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def finish(self, response_raw: str, success: bool, error: str = "") -> int:
+    def finish(self, response_raw: str, success: bool, error: str = "",
+               status: str = "") -> int:
         """记录调用结果"""
         duration_ms = int((time.time() - self.start_time) * 1000) if self.start_time else 0
         self.log_id = AILogger.log(
@@ -83,5 +85,6 @@ class AICallContext:
             model_name=self.model_name, system_prompt=self.system_prompt,
             user_prompt=self.user_prompt, response_raw=response_raw,
             duration_ms=duration_ms, success=success, error=error,
+            status=status,
         )
         return self.log_id

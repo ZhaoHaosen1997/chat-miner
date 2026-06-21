@@ -132,7 +132,7 @@
           <div v-for="log in aiLogs" :key="log.id" class="border rounded-lg overflow-hidden">
             <div @click="toggleAiLogDetail(log.id)" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 text-xs">
               <component :is="aiLogsExpandedId === log.id ? ChevronDown : ChevronRight" class="w-3 h-3 text-slate-300 shrink-0" />
-              <span class="font-medium" :class="log.success ? 'text-emerald-600' : 'text-red-500'">{{ log.success ? '✅' : '❌' }}</span>
+              <span class="font-medium" :class="log.status === 'parse_error' ? 'text-amber-500' : (log.success ? 'text-emerald-600' : 'text-red-500')">{{ log.status === 'parse_error' ? '⚠️' : (log.success ? '✅' : '❌') }}</span>
               <span class="text-slate-500">{{ log.pipeline }}</span>
               <span class="text-slate-400">{{ log.model_name }}</span>
               <span class="text-slate-300">入{{ formatCharsModal(log.input_chars) }} / 出{{ formatCharsModal(log.output_chars) }}</span>
@@ -142,14 +142,32 @@
               <div v-if="aiLogsDetailLoading" class="flex justify-center py-4"><Loader2 class="w-3 h-3 animate-spin text-slate-300" /></div>
               <div v-else-if="aiLogsDetail" class="p-3 space-y-3 text-xs">
                 <div v-if="aiLogsDetail.error" class="p-2 rounded bg-red-50 text-red-500">{{ aiLogsDetail.error }}</div>
-                <details><summary class="text-slate-500 cursor-pointer py-1">System Prompt（{{ aiLogsDetail.system_prompt?.length || 0 }} 字）</summary>
-                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-32 overflow-y-auto font-sans">{{ aiLogsDetail.system_prompt }}</pre>
+                <details :open="aiLogs.length === 1"><summary class="text-slate-500 cursor-pointer py-1">系统提示词（{{ aiLogsDetail.system_prompt?.length || 0 }} 字）</summary>
+                  <div class="relative mt-1 group/copy">
+                    <pre class="p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-32 overflow-y-auto font-sans" v-html="highlightContent(aiLogsDetail.system_prompt)"></pre>
+                    <button @click.stop="copyText(aiLogsDetail.system_prompt, 'system')" class="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/80 hover:bg-white border border-slate-200 opacity-0 group-hover/copy:opacity-100 transition-opacity" title="复制">
+                      <Check v-if="copied === 'system'" class="w-3 h-3 text-emerald-500" />
+                      <Copy v-else class="w-3 h-3 text-slate-400" />
+                    </button>
+                  </div>
                 </details>
-                <details><summary class="text-slate-500 cursor-pointer py-1">User Prompt（{{ aiLogsDetail.user_prompt?.length || 0 }} 字）</summary>
-                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto font-sans">{{ aiLogsDetail.user_prompt }}</pre>
+                <details :open="aiLogs.length === 1"><summary class="text-slate-500 cursor-pointer py-1">用户提示词（{{ aiLogsDetail.user_prompt?.length || 0 }} 字）</summary>
+                  <div class="relative mt-1 group/copy">
+                    <pre class="p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto font-sans" v-html="highlightContent(aiLogsDetail.user_prompt)"></pre>
+                    <button @click.stop="copyText(aiLogsDetail.user_prompt, 'user')" class="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/80 hover:bg-white border border-slate-200 opacity-0 group-hover/copy:opacity-100 transition-opacity" title="复制">
+                      <Check v-if="copied === 'user'" class="w-3 h-3 text-emerald-500" />
+                      <Copy v-else class="w-3 h-3 text-slate-400" />
+                    </button>
+                  </div>
                 </details>
-                <details open><summary class="text-slate-500 cursor-pointer py-1">Response</summary>
-                  <pre class="mt-1 p-2 rounded bg-white border text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto font-mono">{{ aiLogsDetail.success ? formatJSONModal(aiLogsDetail.response_raw) : (aiLogsDetail.error || aiLogsDetail.response_raw) }}</pre>
+                <details open><summary class="text-slate-500 cursor-pointer py-1">AI 响应</summary>
+                  <div class="relative mt-1 group/copy">
+                    <pre class="p-2 rounded bg-white border whitespace-pre-wrap max-h-40 overflow-y-auto font-mono" :class="aiLogsDetail.status === 'parse_error' ? 'text-amber-600' : (aiLogsDetail.success ? 'text-slate-600' : 'text-red-600')" v-html="highlightContent(aiLogsDetail.error || aiLogsDetail.response_raw)"></pre>
+                    <button @click.stop="copyText(aiLogsDetail.error || aiLogsDetail.response_raw, 'response')" class="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/80 hover:bg-white border border-slate-200 opacity-0 group-hover/copy:opacity-100 transition-opacity" title="复制">
+                      <Check v-if="copied === 'response'" class="w-3 h-3 text-emerald-500" />
+                      <Copy v-else class="w-3 h-3 text-slate-400" />
+                    </button>
+                  </div>
                 </details>
               </div>
             </div>
@@ -167,7 +185,8 @@ import { ref, onMounted, watch } from 'vue'
 import { inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { getTaskHistoryAll, getAiCallLogs } from '../api/index.js'
-import { Loader2, ClipboardList, Upload, FileText, RefreshCw, Users, MessageSquare, Fish, Settings, ChevronRight, ChevronDown, ChevronLeft, Zap, Clock, Calendar, X } from 'lucide-vue-next'
+import { highlightContent } from '../utils/highlight.js'
+import { Loader2, ClipboardList, Upload, FileText, RefreshCw, Users, MessageSquare, Fish, Settings, ChevronRight, ChevronDown, ChevronLeft, Zap, Clock, Calendar, X, Copy, Check } from 'lucide-vue-next'
 
 // v1.19.x: AI 分析类 + 事件分析类任务显示查看日志链接
 const AI_TASK_TYPES = ['analyze_day', 'analyze_all', 'generate_weekly', 'generate_monthly', 'generate_annual', 'full_portrait', 'analyze_all_portraits', 'event_window', 'event_window_batch']
@@ -183,6 +202,12 @@ const aiLogsExpandedId = ref(null)
 const aiLogsDetail = ref(null)
 const aiLogsDetailLoading = ref(false)
 
+// 复制
+const copied = ref('')
+async function copyText(text, key) {
+  try { await navigator.clipboard.writeText(text); copied.value = key; setTimeout(() => { copied.value = '' }, 1500) } catch { /* noop */ }
+}
+
 async function openAiLogs(r) {
   aiLogsTaskId.value = r.id
   aiLogsTaskLabel.value = `${r.task_type} · ${r.target || ''}`
@@ -191,6 +216,16 @@ async function openAiLogs(r) {
   try {
     const res = await getAiCallLogs({ task_id: r.task_id, limit: 100 })
     aiLogs.value = res.logs || []
+    // 只有 1 条日志时默认展开
+    if (aiLogs.value.length === 1) {
+      aiLogsExpandedId.value = aiLogs.value[0].id
+      aiLogsDetailLoading.value = true
+      try {
+        const { getAiCallLog } = await import('../api/index.js')
+        aiLogsDetail.value = await getAiCallLog(aiLogs.value[0].id)
+      } catch { aiLogsDetail.value = null }
+      finally { aiLogsDetailLoading.value = false }
+    }
   } catch { aiLogs.value = [] }
   finally { aiLogsLoading.value = false }
 }
@@ -212,10 +247,6 @@ function closeAiLogsModal() {
   aiLogsDetail.value = null
 }
 
-function formatJSONModal(text) {
-  try { return JSON.stringify(JSON.parse(text), null, 2) }
-  catch { return text }
-}
 function formatDurationModal(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms` }
 function formatCharsModal(n) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}` }
 

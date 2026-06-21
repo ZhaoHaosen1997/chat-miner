@@ -474,6 +474,7 @@ def init_db():
                 output_chars INTEGER DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
                 success INTEGER NOT NULL DEFAULT 1,
+                status TEXT DEFAULT '',
                 error TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE SET NULL
@@ -1039,23 +1040,25 @@ def add_ai_call_log(task_id: str | None, pipeline: str, group_id: int,
                     model_name: str, system_prompt: str, user_prompt: str,
                     response_raw: str, token_estimate: int,
                     input_chars: int = 0, output_chars: int = 0,
-                    duration_ms: int = 0, success: bool = True, error: str = "") -> int:
+                    duration_ms: int = 0, success: bool = True, error: str = "",
+                    status: str = "") -> int:
     with db() as conn:
         cur = conn.execute(
             """INSERT INTO ai_call_logs (task_id, pipeline, group_id, model_name,
                system_prompt, user_prompt, response_raw, token_estimate,
-               input_chars, output_chars, duration_ms, success, error)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               input_chars, output_chars, duration_ms, success, status, error)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (task_id, pipeline, group_id, model_name,
              system_prompt, user_prompt, response_raw, token_estimate,
              input_chars, output_chars,
-             duration_ms, 1 if success else 0, error)
+             duration_ms, 1 if success else 0, status, error)
         )
         return cur.lastrowid
 
 
 def get_ai_call_logs(task_id: str = "", pipeline: str = "",
-                     group_id: int = 0, limit: int = 50, offset: int = 0) -> list[dict]:
+                     group_id: int = 0, status: str = "",
+                     limit: int = 50, offset: int = 0) -> list[dict]:
     with db() as conn:
         sql = "SELECT * FROM ai_call_logs WHERE 1=1"
         params = []
@@ -1065,13 +1068,15 @@ def get_ai_call_logs(task_id: str = "", pipeline: str = "",
             sql += " AND pipeline=?"; params.append(pipeline)
         if group_id:
             sql += " AND group_id=?"; params.append(group_id)
+        if status:
+            sql += " AND status=?"; params.append(status)
         sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 def get_ai_call_logs_count(task_id: str = "", pipeline: str = "",
-                           group_id: int = 0) -> int:
+                           group_id: int = 0, status: str = "") -> int:
     """统计符合条件的 AI 调用日志总数"""
     with db() as conn:
         sql = "SELECT COUNT(*) FROM ai_call_logs WHERE 1=1"
@@ -1082,6 +1087,8 @@ def get_ai_call_logs_count(task_id: str = "", pipeline: str = "",
             sql += " AND pipeline=?"; params.append(pipeline)
         if group_id:
             sql += " AND group_id=?"; params.append(group_id)
+        if status:
+            sql += " AND status=?"; params.append(status)
         return conn.execute(sql, params).fetchone()[0]
 
 
@@ -1092,10 +1099,10 @@ def get_ai_call_log(log_id: int) -> dict | None:
 
 
 def cleanup_ai_call_logs(retention_days: int = 7):
-    """删除超过保留天数的成功日志"""
+    """删除超过保留天数的成功日志。格式异常和失败日志永久保留。"""
     with db() as conn:
         cur = conn.execute(
-            "DELETE FROM ai_call_logs WHERE success=1 AND "
+            "DELETE FROM ai_call_logs WHERE status='success' AND "
             "created_at < datetime('now','localtime',?)",
             (f'-{retention_days} days',)
         )
@@ -1382,6 +1389,11 @@ def _migrate_db(conn):
             conn.execute("ALTER TABLE ai_call_logs ADD COLUMN input_chars INTEGER DEFAULT 0")
         if "output_chars" not in ai_cols:
             conn.execute("ALTER TABLE ai_call_logs ADD COLUMN output_chars INTEGER DEFAULT 0")
+        if "status" not in ai_cols:
+            conn.execute("ALTER TABLE ai_call_logs ADD COLUMN status TEXT DEFAULT ''")
+            # 存量数据回填
+            conn.execute("UPDATE ai_call_logs SET status = 'success' WHERE success = 1")
+            conn.execute("UPDATE ai_call_logs SET status = 'error' WHERE success = 0")
     except Exception:
         pass  # ai_call_logs 表不存在（极旧的数据库）
 
@@ -1407,6 +1419,7 @@ def _migrate_db(conn):
                         output_chars INTEGER DEFAULT 0,
                         duration_ms INTEGER DEFAULT 0,
                         success INTEGER NOT NULL DEFAULT 1,
+                        status TEXT DEFAULT '',
                         error TEXT DEFAULT '',
                         created_at TEXT DEFAULT (datetime('now','localtime')),
                         FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE SET NULL
@@ -1416,7 +1429,9 @@ def _migrate_db(conn):
                     INSERT INTO ai_call_logs_new SELECT
                         id, task_id, pipeline, group_id, model_name,
                         system_prompt, user_prompt, response_raw, token_estimate,
-                        input_chars, output_chars, duration_ms, success, error, created_at
+                        input_chars, output_chars, duration_ms, success,
+                        CASE WHEN success THEN 'success' ELSE 'error' END,
+                        error, created_at
                     FROM ai_call_logs
                 """)
                 conn.execute("DROP TABLE ai_call_logs")
