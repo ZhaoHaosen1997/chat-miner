@@ -510,3 +510,8 @@ export function approveGroupMeme(gid, mid) { return request(`/groups/${gid}/meme
 export function rejectGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}/reject`, { method: 'POST' }) }
 export function deleteGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}`, { method: 'DELETE' }) }
 export function scanGroupMemes(gid) { return request(`/groups/${gid}/memes/scan`, { method: 'POST' }) }
+
+// ── v1.19.0 AI 调用日志 ──────────────────────────────────────────
+export function getAiCallLogs(params = {}) { return apiGet('/ai-logs', params) }
+export function getAiCallLog(logId) { return apiGet(`/ai-logs/${logId}`) }
+export function cleanupAiCallLogs() { return request('/ai-logs/cleanup', { method: 'POST' }) }

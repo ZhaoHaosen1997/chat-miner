@@ -1071,10 +1071,11 @@ onMounted(async () => {
       <!-- 其他设置 -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-slate-100"><div class="w-1 h-5 rounded-full bg-slate-400"></div><Settings2 :size="16" class="text-slate-500" /><span class="text-sm font-semibold text-slate-700">其他设置</span></div>
-        <div class="p-5 grid grid-cols-3 gap-4">
+        <div class="p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
           <div><label class="text-xs text-slate-500">画像刷新 (天)</label><input type="number" :value="appSettings.portrait_refresh_days?.value || 7" @change="saveAdvancedSetting('portrait_refresh_days', $event.target.value)" min="1" max="365" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">日志保留 (天)</label><input type="number" :value="appSettings.log_retention_days?.value || 90" @change="saveAdvancedSetting('log_retention_days', $event.target.value)" min="1" max="365" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
           <div><label class="text-xs text-slate-500">任务记录上限</label><input type="number" :value="appSettings.log_max_records?.value || 500" @change="saveAdvancedSetting('log_max_records', $event.target.value)" min="10" max="99999" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
+          <div><label class="text-xs text-slate-500">AI 日志保留 (天)</label><input type="number" :value="appSettings.ai_log_retention_days?.value || 7" @change="saveAdvancedSetting('ai_log_retention_days', $event.target.value)" min="1" max="365" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none mt-1" /></div>
         </div>
       </div>
 

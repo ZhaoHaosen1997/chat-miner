@@ -62,6 +62,10 @@ async def call_online_chat(
     thinking: bool = False,
     max_tokens: int = 0,
     timeout: int = 0,
+    # v1.19.0: 日志记录参数
+    task_id: int = 0,
+    pipeline: str = "",
+    group_id: int = 0,
 ) -> dict:
     """通用在线模型调用（OpenAI 兼容 API）
 
@@ -129,78 +133,64 @@ async def call_online_chat(
         payload["response_format"] = {"type": "json_object"}
 
     start_time = time.time()
+    ret = None  # v1.19.0: 统一返回点，便于记录日志
     try:
         client = _get_online_client(endpoint, api_key, timeout)
         resp = await client.post(api_url, json=payload)
         duration_ms = int((time.time() - start_time) * 1000)
 
         if resp.status_code == 401:
-            return {
-                "success": False, "data": None,
-                "error": f"API Key 无效 ({model_name})",
-                "model": model_name, "duration_ms": duration_ms,
-            }
-        if resp.status_code == 402:
-            return {
-                "success": False, "data": None,
-                "error": f"API 余额不足 ({model_name})",
-                "model": model_name, "duration_ms": duration_ms,
-            }
-        if resp.status_code == 429:
-            return {
-                "success": False, "data": None,
-                "error": f"API 请求太频繁，请稍后重试 ({model_name})",
-                "model": model_name, "duration_ms": duration_ms,
-            }
-
-        resp.raise_for_status()
-        result = resp.json()
-        msg = result.get("choices", [{}])[0].get("message", {})
-        content = msg.get("content", "")
-        # v1.18.5: 空白内容也要尝试降级字段
-        if not content or not content.strip():
-            # SenseNova deepseek-v4-flash 可能把回复放 reasoning_content
-            rc = msg.get("reasoning_content", "")
-            if rc and rc.strip():
-                content = rc
-        if not content or not content.strip():
-            content = result.get("choices", [{}])[0].get("text", "")
-        if not content or not content.strip():
-            logger.warning(f"在线模型返回空/空白内容 (len={len(content)}), 原始响应: {json.dumps(result, ensure_ascii=False)[:800]}")
-        logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
-
-        if content.strip():
-            return {
-                "success": True, "data": content.strip(),
-                "error": None, "model": model_name, "duration_ms": duration_ms,
-            }
-        return {
-            "success": False, "data": None,
-            "error": f"{model_name} 返回空内容",
-            "model": model_name, "duration_ms": duration_ms,
-        }
-
+            ret = {"success": False, "data": None, "error": f"API Key 无效 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+        elif resp.status_code == 402:
+            ret = {"success": False, "data": None, "error": f"API 余额不足 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+        elif resp.status_code == 429:
+            ret = {"success": False, "data": None, "error": f"API 请求太频繁，请稍后重试 ({model_name})", "model": model_name, "duration_ms": duration_ms}
+        else:
+            resp.raise_for_status()
+            resp_json = resp.json()
+            msg = resp_json.get("choices", [{}])[0].get("message", {})
+            content = msg.get("content", "")
+            if not content or not content.strip():
+                rc = msg.get("reasoning_content", "")
+                if rc and rc.strip():
+                    content = rc
+            if not content or not content.strip():
+                content = resp_json.get("choices", [{}])[0].get("text", "")
+            if not content or not content.strip():
+                logger.warning(f"在线模型返回空/空白内容, 原始响应: {json.dumps(resp_json, ensure_ascii=False)[:800]}")
+            logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
+            if content.strip():
+                ret = {"success": True, "data": content.strip(), "error": None, "model": model_name, "duration_ms": duration_ms}
+            else:
+                ret = {"success": False, "data": None, "error": f"{model_name} 返回空内容", "model": model_name, "duration_ms": duration_ms}
     except httpx.TimeoutException:
         duration_ms = int((time.time() - start_time) * 1000)
-        return {
-            "success": False, "data": None,
-            "error": f"在线模型请求超时 ({timeout}s)",
-            "model": model_name, "duration_ms": duration_ms,
-        }
+        ret = {"success": False, "data": None, "error": f"在线模型请求超时 ({timeout}s)", "model": model_name, "duration_ms": duration_ms}
     except httpx.ConnectError:
         duration_ms = int((time.time() - start_time) * 1000)
-        return {
-            "success": False, "data": None,
-            "error": f"无法连接到 API 端点 ({endpoint})",
-            "model": model_name, "duration_ms": duration_ms,
-        }
+        ret = {"success": False, "data": None, "error": f"无法连接到 API 端点 ({endpoint})", "model": model_name, "duration_ms": duration_ms}
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         logger.error("在线模型调用异常: %s", e, exc_info=True)
-        return {
-            "success": False, "data": None,
-            "error": str(e), "model": model_name, "duration_ms": duration_ms,
-        }
+        ret = {"success": False, "data": None, "error": str(e), "model": model_name, "duration_ms": duration_ms}
+
+    # v1.19.0: 记录 AI 调用日志
+    if ret and (pipeline or task_id):
+        try:
+            from services.ai_logger import AILogger
+            AILogger.log(
+                task_id=task_id or None, pipeline=pipeline, group_id=group_id,
+                model_name=model_name, system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_raw=(ret.get("data") or ret.get("error") or ""),
+                duration_ms=ret.get("duration_ms", 0),
+                success=ret.get("success", False),
+                error=ret.get("error") or "",
+            )
+        except Exception:
+            pass
+
+    return ret
 
 
 async def call_deepseek_chat(

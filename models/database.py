@@ -458,6 +458,28 @@ def init_db():
                 UNIQUE(group_id, term),
                 FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
             );
+
+            -- v1.19.0 AI 调用日志
+            CREATE TABLE IF NOT EXISTS ai_call_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER,
+                pipeline TEXT NOT NULL,
+                group_id INTEGER,
+                model_name TEXT DEFAULT '',
+                system_prompt TEXT DEFAULT '',
+                user_prompt TEXT DEFAULT '',
+                response_raw TEXT DEFAULT '',
+                token_estimate INTEGER DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                success INTEGER NOT NULL DEFAULT 1,
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (task_id) REFERENCES task_records(id) ON DELETE SET NULL,
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_call_logs_task ON ai_call_logs(task_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_call_logs_group ON ai_call_logs(group_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_call_logs_created ON ai_call_logs(created_at);
         """)
         # 向后兼容：为已有数据库添加新列
         _migrate_db(conn)
@@ -525,6 +547,7 @@ def init_db():
         _migrate_v1_18_5(conn)
         _migrate_v1_18_7(conn)
         _migrate_v1_18_8(conn)
+        _migrate_v1_19_0(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -1005,6 +1028,63 @@ def _migrate_v1_18_8(conn):
         logger.info("DB migrate v1.18.8: added group_memes.status")
 
 
+def _migrate_v1_19_0(conn):
+    """v1.19.0: ai_call_logs 表由 CREATE TABLE IF NOT EXISTS 自动创建"""
+
+
+# ── AI 调用日志 CRUD ──────────────────────────────────────────────
+
+def add_ai_call_log(task_id: int | None, pipeline: str, group_id: int,
+                    model_name: str, system_prompt: str, user_prompt: str,
+                    response_raw: str, token_estimate: int,
+                    duration_ms: int, success: bool, error: str = "") -> int:
+    with db() as conn:
+        cur = conn.execute(
+            """INSERT INTO ai_call_logs (task_id, pipeline, group_id, model_name,
+               system_prompt, user_prompt, response_raw, token_estimate,
+               duration_ms, success, error)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (task_id, pipeline, group_id, model_name,
+             system_prompt, user_prompt, response_raw, token_estimate,
+             duration_ms, 1 if success else 0, error)
+        )
+        return cur.lastrowid
+
+
+def get_ai_call_logs(task_id: int = 0, pipeline: str = "",
+                     group_id: int = 0, limit: int = 50, offset: int = 0) -> list[dict]:
+    with db() as conn:
+        sql = "SELECT * FROM ai_call_logs WHERE 1=1"
+        params = []
+        if task_id:
+            sql += " AND task_id=?"; params.append(task_id)
+        if pipeline:
+            sql += " AND pipeline=?"; params.append(pipeline)
+        if group_id:
+            sql += " AND group_id=?"; params.append(group_id)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def get_ai_call_log(log_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute("SELECT * FROM ai_call_logs WHERE id=?", (log_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def cleanup_ai_call_logs(retention_days: int = 7):
+    """删除超过保留天数的成功日志"""
+    with db() as conn:
+        cur = conn.execute(
+            "DELETE FROM ai_call_logs WHERE success=1 AND "
+            "created_at < datetime('now','localtime',?)",
+            (f'-{retention_days} days',)
+        )
+        if cur.rowcount:
+            logger.info("AI 调用日志清理: 删除 %d 条旧记录", cur.rowcount)
+
+
 # ── 群梗百科 CRUD ─────────────────────────────────────────────────
 
 def get_group_memes(group_id: int, status: str = "") -> list[dict]:
@@ -1245,6 +1325,9 @@ _SETTINGS_DEFS = [
          "分析日志保留天数"),
         ("log_max_records", str(config.LOG_MAX_RECORDS), "int",
          "任务记录最多保留条数"),
+        # v1.19.0: AI 调用日志
+        ("ai_log_retention_days", "7", "int",
+         "AI 调用日志保留天数（成功调用自动清理）"),
         # v1.18.0: 事件探测（event_window_size/overlap/ai_concurrency 已在 v1.18.1 废弃）
         ("event_active_group_threshold", str(config.EVENT_ACTIVE_GROUP_THRESHOLD), "int",
          "活跃群判定阈值(条/小时)"),
@@ -2694,6 +2777,7 @@ def load_app_settings_to_config():
         # 日志清理
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_records": "LOG_MAX_RECORDS",
+        "ai_log_retention_days": "AI_LOG_RETENTION_DAYS",
         # v1.18.0: 事件探测
         # v1.18.0 配置项（event_window_size/overlap/ai_concurrency 已在 v1.18.1 废弃）
         "event_active_group_threshold": "EVENT_ACTIVE_GROUP_THRESHOLD",
