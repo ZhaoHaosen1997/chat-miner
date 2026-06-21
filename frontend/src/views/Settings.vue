@@ -153,12 +153,18 @@ async function toggleLocalLlm() {
   await updateAppSetting('local_llm_enabled', String(localLlmEnabled.value))
 }
 
-// v1.18.5: WeFlow 开关（乐观更新模式，修复 boolean/string 比较 bug）
+// v1.18.7: WeFlow 开关（乐观更新 + 失败回滚）
 async function toggleWeFlowEnabled() {
-  weflowSettings.value.weflow_enabled = !weflowSettings.value.weflow_enabled
-  await updateAppSetting('weflow_enabled', String(weflowSettings.value.weflow_enabled))
-  if (weflowSettings.value.weflow_enabled) {
-    await loadAppSettings()  // 启用后刷新配置，确保其他 WeFlow 字段同步
+  const prev = weflowSettings.value.weflow_enabled
+  weflowSettings.value.weflow_enabled = !prev
+  try {
+    await updateAppSetting('weflow_enabled', String(weflowSettings.value.weflow_enabled))
+    if (weflowSettings.value.weflow_enabled) {
+      await loadAppSettings()
+    }
+  } catch (e) {
+    weflowSettings.value.weflow_enabled = prev  // 回滚
+    alert('保存失败: ' + (e.message || e))
   }
 }
 

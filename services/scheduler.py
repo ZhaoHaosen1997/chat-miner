@@ -81,7 +81,6 @@ def reload_scheduler():
 def _update_sync_status(group_id: int, result: str):
     """更新群的上次同步时间和结果"""
     from models.database import get_conn
-    from datetime import datetime
     conn = None
     try:
         conn = get_conn()
@@ -172,7 +171,6 @@ async def run_scheduled_sync():
 
     client.close()
 
-    auto_count = synced + failed + (len(groups) - synced - failed - skipped)
     logger.info(f"[WeFlow Scheduler] 完成: {synced} 群有新消息, "
                 f"{failed} 失败, {skipped} 未开启, "
                 f"{len(groups) - synced - failed - skipped} 无变化")
@@ -180,8 +178,9 @@ async def run_scheduled_sync():
     # 如果所有开启自动同步的群都返回 0 条消息（可能是 WeFlow 未完全就绪），重试最多 3 次
     MAX_RETRIES = 3
     RETRY_DELAY = 60
+    auto_count = sum(1 for g in groups if g.get("wxid") and g.get("weflow_auto_sync", 0))
     if synced == 0 and failed == 0 and auto_count > 0:
-        logger.warning(f"[WeFlow Scheduler] 所有群均无新消息，可能 WeFlow 未就绪，开始重试（最多 {MAX_RETRIES} 次）...")
+        logger.warning(f"[WeFlow Scheduler] 所有 {auto_count} 个群均无新消息，可能 WeFlow 未就绪，开始重试（最多 {MAX_RETRIES} 次）...")
         for retry in range(1, MAX_RETRIES + 1):
             await asyncio.sleep(RETRY_DELAY)
             client2 = WeFlowClient(base_url=base_url, access_token=token)
@@ -194,16 +193,33 @@ async def run_scheduled_sync():
                 if not g.get("wxid") or not g.get("weflow_auto_sync", 0):
                     continue
                 try:
+                    t0 = asyncio.get_event_loop().time()
                     result = await asyncio.to_thread(
                         sync_messages_incremental, client2, g["id"]
                     )
+                    duration = int((asyncio.get_event_loop().time() - t0) * 1000)
                     added = result.get("added", 0)
                     if added > 0:
                         retry_synced += 1
                         _update_sync_status(g["id"], f"+{added} 条（重试{retry}）")
                         logger.info(f"[WeFlow Scheduler] 重试{retry} {g['name']}: +{added} 条")
+                        save_task_record(
+                            task_id=f"auto_{g['id']}_retry{retry}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                            group_id=g["id"], task_type="weflow_auto_sync",
+                            target=g["name"], status="done",
+                            total_duration_ms=duration, model_used="",
+                            steps_json="[]", error_summary="",
+                            message_count=added,
+                        )
                 except Exception as e:
                     logger.error(f"[WeFlow Scheduler] 重试{retry} {g['name']} 失败: {e}")
+                    save_task_record(
+                        task_id=f"auto_{g['id']}_retry{retry}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                        group_id=g["id"], task_type="weflow_auto_sync",
+                        target=g["name"], status="failed",
+                        total_duration_ms=0, model_used="",
+                        steps_json="[]", error_summary=str(e)[:200],
+                    )
             client2.close()
             if retry_synced > 0:
                 logger.info(f"[WeFlow Scheduler] 重试{retry} 完成: {retry_synced} 群有新消息，停止重试")
