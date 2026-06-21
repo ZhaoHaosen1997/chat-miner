@@ -6,8 +6,9 @@ import {
   getTaskHistory, getTrending, getPeriods, generateWeekly, generateMonthly, generateAnnual,
   generateAllWeekly, generateAllMonthly, getWeeklyReport, getMonthlyReport, getReport,
   getEvents, getEventWindows, detectEvents, analyzeWindow, reanalyzeEvent,
+  getGroupMemes,
 } from '../api/index.js'
-import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle, Info, X } from 'lucide-vue-next'
+import { MessageSquare, Users, Calendar, Sparkles, Loader2, Upload, Zap, CheckCircle2, XCircle, Clock, FileText, RefreshCw, ArrowRight, Radio, Search, PartyPopper, AlertTriangle, Info, X, BookOpen } from 'lucide-vue-next'
 import UploadModal from '../components/UploadModal.vue'
 import WeFlowImportModal from '../components/WeFlowImportModal.vue'
 
@@ -58,6 +59,8 @@ const analyzing = ref(false)
 const portraits = ref([])
 const taskHistory = ref([])
 const trending = ref(null)
+// v1.18.8: 梗百科统计
+const memeStats = ref({ total: 0, pending: 0 })
 const showUpload = ref(false)
 const showWeFlow = ref(false)
 const dayPopup = ref(null)
@@ -185,15 +188,23 @@ async function loadAll(silent = false) {
       getPortraits(gid),
       getTaskHistory(gid, 8),
       getTrending(gid, 7),
+      getGroupMemes(gid),
     ])
     if (version !== _loadVersion) return
-    const [s, d, r, p, h, t] = results.map(r => r.status === 'fulfilled' ? r.value : null)
+    const [s, d, r, p, h, t, memes] = results.map(r => r.status === 'fulfilled' ? r.value : null)
     stats.value = s
     dates.value = Array.isArray(d) ? d : []
     recentReports.value = Array.isArray(r) ? r : []
     portraits.value = Array.isArray(p) ? p : []
     taskHistory.value = Array.isArray(h) ? h : []
     trending.value = t
+    // v1.18.8: 梗百科统计
+    if (Array.isArray(memes)) {
+      memeStats.value = {
+        total: memes.filter(m => m.status === 'approved').length,
+        pending: memes.filter(m => m.status === 'pending').length,
+      }
+    }
   } catch (e) { console.error(e) }
   finally {
     if (version === _loadVersion) loading.value = false
@@ -728,12 +739,23 @@ async function _executeAnnualGenerate(periodKey, force = false) {
         </div>
       </div>
 
-      <!-- 快捷统计 4 卡片 -->
-      <div class="grid grid-cols-4 gap-3 mb-5">
+      <!-- 快捷统计 6 卡片 -->
+      <div class="grid grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
         <div class="card p-3 flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0"><MessageSquare class="w-4 h-4 text-indigo-600" /></div><div><div class="text-lg font-bold text-slate-800">{{ (stats?.group?.message_count || 0).toLocaleString() }}</div><div class="text-[10px] text-slate-400">总消息</div></div></div>
         <div class="card p-3 flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0"><Calendar class="w-4 h-4 text-emerald-600" /></div><div><div class="text-lg font-bold text-slate-800">{{ stats?.analyzed_count || 0 }}</div><div class="text-[10px] text-slate-400">已分析天</div></div></div>
         <div class="card p-3 flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0"><FileText class="w-4 h-4 text-amber-600" /></div><div><div class="text-lg font-bold text-slate-800">{{ weeklyPeriods.filter(p=>p.status==='generated').length + monthlyPeriods.filter(p=>p.status==='generated').length }}</div><div class="text-[10px] text-slate-400">周期报告</div></div></div>
         <div class="card p-3 flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center flex-shrink-0"><Users class="w-4 h-4 text-rose-600" /></div><div><div class="text-lg font-bold text-slate-800">{{ stats?.member_count || 0 }}</div><div class="text-[10px] text-slate-400">成员</div></div></div>
+        <!-- v1.18.8: 事件统计卡片 -->
+        <div class="card p-3 flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center flex-shrink-0"><Zap class="w-4 h-4 text-cyan-600" /></div><div><div class="text-lg font-bold text-slate-800">{{ dashboardEvents.length }}</div><div class="text-[10px] text-slate-400">事件</div></div></div>
+        <!-- v1.18.8: 梗百科卡片（可点击，待审核徽标） -->
+        <div @click="router.push('/memes')" class="card p-3 flex items-center gap-2.5 cursor-pointer hover:border-violet-400 hover:shadow-md transition-all relative" :class="memeStats.pending > 0 ? 'border-amber-300' : ''">
+          <div class="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0"><BookOpen class="w-4 h-4 text-violet-600" /></div>
+          <div>
+            <div class="text-lg font-bold text-slate-800">{{ memeStats.total }}</div>
+            <div class="text-[10px] text-slate-400 flex items-center gap-1">梗百科<span v-if="memeStats.pending > 0" class="text-amber-500">·{{ memeStats.pending }}待审</span></div>
+          </div>
+          <span v-if="memeStats.pending > 0" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-white" title="有待审核的梗"></span>
+        </div>
       </div>
 
       <!-- 主体：左(周期报告主舞台) 右(日历+排行) -->

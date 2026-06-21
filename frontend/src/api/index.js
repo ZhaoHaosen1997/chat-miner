@@ -503,8 +503,10 @@ export async function reanalyzeEvent(gid, eventId) {
 }
 
 // ── v1.18.3 群梗百科 ──────────────────────────────────────────────
-export function getGroupMemes(gid) { return apiGet(`/groups/${gid}/memes`) }
+export function getGroupMemes(gid, status = '') { return apiGet(`/groups/${gid}/memes${status ? '?status=' + status : ''}`) }
 export async function addGroupMeme(gid, term, desc) { return request(`/groups/${gid}/memes`, { method: 'POST', body: JSON.stringify({ term, description: desc }) }) }
 export async function updateGroupMeme(gid, mid, desc) { return request(`/groups/${gid}/memes/${mid}`, { method: 'PUT', body: JSON.stringify({ description: desc }) }) }
+export function approveGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}/approve`, { method: 'POST' }) }
+export function rejectGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}/reject`, { method: 'POST' }) }
 export function deleteGroupMeme(gid, mid) { return request(`/groups/${gid}/memes/${mid}`, { method: 'DELETE' }) }
 export function scanGroupMemes(gid) { return request(`/groups/${gid}/memes/scan`, { method: 'POST' }) }

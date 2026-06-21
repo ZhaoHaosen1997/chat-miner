@@ -16,6 +16,7 @@ import Settings from './views/Settings.vue'
 import TaskHistory from './views/TaskHistory.vue'
 import ComprehensivePortrait from './views/ComprehensivePortrait.vue'
 import EventDetail from './views/EventDetail.vue'
+import MemeEncyclopedia from './views/MemeEncyclopedia.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -31,6 +32,7 @@ const routes = [
   { path: '/tasks', component: TaskHistory },
   { path: '/event/:eventId', component: EventDetail, props: true },
   { path: '/events', redirect: '/' },
+  { path: '/memes', component: MemeEncyclopedia },
   { path: '/comprehensive/:personaId', component: ComprehensivePortrait, props: true },
 ]
 

@@ -11,10 +11,9 @@ import {
   Plus, Pencil, Trash2, Check, X, Loader2,
   Monitor, Cloud, Wifi, Star, Zap, Globe, Users, Sparkles,
   ChevronDown, ChevronRight, Filter, Shield, Thermometer, Clock, Radio, FileText, Settings2, ClipboardList,
-  Fish, BookOpen,
+  Fish,
 } from 'lucide-vue-next'
 import TaskHistory from './TaskHistory.vue'
-import MemeManager from '../components/MemeManager.vue'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, setDefaultPrompt, getDefaultPrompt } from '../api/index.js'
 
 const router = useRouter()
@@ -647,17 +646,9 @@ onMounted(async () => {
           activeTab==='pond' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
         🐟 鱼塘设置
       </button>
-      <button @click="activeTab='memes'"
-        :class="['flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-all',
-          activeTab==='memes' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600']">
-        <BookOpen class="w-4 h-4" />梗百科
-      </button>
     </div>
 
-    <!-- ====== 群梗百科 ====== -->
-    <div v-if="activeTab==='memes'" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-      <div class="px-5 py-4"><MemeManager /></div>
-    </div>
+    <!-- ====== 群梗百科（已迁移至独立页面 /memes）====== -->
 
     <!-- ====== 任务记录 ====== -->
     <div v-if="activeTab==='tasks'">

@@ -63,3 +63,4 @@ cd frontend && npm install && cd ..
 - **nsi 文件中文需 GBK 编码**，不能用 UTF-8。
 - **Git Bash `/D` 陷阱**：调用 makensis 等 Windows 工具用 `cmd //c "makensis /DVERSION=..."` 包装。
 - **PyInstaller 构建后杀软锁文件**：用 Python `zipfile` 替代 PowerShell，加重试延迟。
+- **`_get_merged_data_path` 是纯路径计算函数，不要加 `.exists()` 检查**。它的调用方 `sync_messages_incremental` 用它决定往哪里**写入** merged_data.json。首次 WeFlow 同步前文件尚不存在，加了存在性检查会导致 `merged_path=None`，整个写磁盘步骤被跳过，合并后的数据全丢。Code Review 时对路径函数的返回值语义要结合所有调用方判断，不能假设它是"查找已有文件"。

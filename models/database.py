@@ -452,6 +452,7 @@ def init_db():
                 term TEXT NOT NULL,
                 description TEXT NOT NULL,
                 source TEXT DEFAULT 'ai',
+                status TEXT DEFAULT 'approved' CHECK(status IN ('pending','approved','rejected')),
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 updated_at TEXT DEFAULT (datetime('now','localtime')),
                 UNIQUE(group_id, term),
@@ -523,6 +524,7 @@ def init_db():
         # v1.18.5: 回填 QQ 群的 platform 字段（旧版本导入的 QQ 群 platform 为空）
         _migrate_v1_18_5(conn)
         _migrate_v1_18_7(conn)
+        _migrate_v1_18_8(conn)
     # 注：cleanup_old_logs()移至 main.py lifespan，在 load_from_db() 之后执行
     # 确保用户通过设置页面配置的保留策略生效
 
@@ -994,22 +996,40 @@ def _migrate_v1_18_7(conn):
         logger.info("DB migrate v1.18.7: added task_records.message_count")
 
 
+def _migrate_v1_18_8(conn):
+    """v1.18.8: group_memes 新增 status 列（审核机制：pending/approved/rejected）"""
+    cur = conn.execute("PRAGMA table_info(group_memes)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "status" not in cols:
+        conn.execute("ALTER TABLE group_memes ADD COLUMN status TEXT DEFAULT 'approved' CHECK(status IN ('pending','approved','rejected'))")
+        logger.info("DB migrate v1.18.8: added group_memes.status")
+
+
 # ── 群梗百科 CRUD ─────────────────────────────────────────────────
 
-def get_group_memes(group_id: int) -> list[dict]:
+def get_group_memes(group_id: int, status: str = "") -> list[dict]:
+    """获取群梗列表。status 为空时返回非 rejected 的全部（兼容旧调用）。"""
     with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM group_memes WHERE group_id=? ORDER BY term", (group_id,)
-        ).fetchall()
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM group_memes WHERE group_id=? AND status=? ORDER BY term",
+                (group_id, status)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM group_memes WHERE group_id=? AND status!='rejected' ORDER BY term",
+                (group_id,)
+            ).fetchall()
     return [dict(r) for r in rows]
 
 
-def add_group_meme(group_id: int, term: str, description: str, source: str = "user") -> int | None:
+def add_group_meme(group_id: int, term: str, description: str,
+                   source: str = "user", status: str = "approved") -> int | None:
     try:
         with db() as conn:
             cur = conn.execute(
-                "INSERT INTO group_memes (group_id, term, description, source) VALUES (?,?,?,?)",
-                (group_id, term.strip(), description.strip(), source)
+                "INSERT INTO group_memes (group_id, term, description, source, status) VALUES (?,?,?,?,?)",
+                (group_id, term.strip(), description.strip(), source, status)
             )
             return cur.lastrowid
     except Exception:
@@ -1017,10 +1037,31 @@ def add_group_meme(group_id: int, term: str, description: str, source: str = "us
 
 
 def update_group_meme(meme_id: int, description: str) -> bool:
+    """更新梗描述。如果原本是 pending 状态，编辑后自动 approved。"""
     with db() as conn:
         cur = conn.execute(
-            "UPDATE group_memes SET description=?, updated_at=datetime('now','localtime') WHERE id=?",
+            "UPDATE group_memes SET description=?, status=CASE WHEN status='pending' THEN 'approved' ELSE status END, updated_at=datetime('now','localtime') WHERE id=?",
             (description.strip(), meme_id)
+        )
+        return cur.rowcount > 0
+
+
+def approve_group_meme(meme_id: int) -> bool:
+    """审核通过一个梗"""
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE group_memes SET status='approved', updated_at=datetime('now','localtime') WHERE id=?",
+            (meme_id,)
+        )
+        return cur.rowcount > 0
+
+
+def reject_group_meme(meme_id: int) -> bool:
+    """驳回一个梗（软删除，状态变 rejected）"""
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE group_memes SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?",
+            (meme_id,)
         )
         return cur.rowcount > 0
 
