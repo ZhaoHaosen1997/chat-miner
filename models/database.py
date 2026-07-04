@@ -3267,6 +3267,58 @@ def insert_events(events: list[dict]) -> list[int]:
     return ids
 
 
+def insert_event_if_new(group_id: int, date: str, event_data: dict) -> int | None:
+    """插入事件，若当天已有相同标题的事件则跳过
+    
+    Args:
+        group_id: 群ID
+        date: 日期 YYYY-MM-DD
+        event_data: 事件数据（与 insert_events 格式一致）
+        
+    Returns:
+        新事件ID，或 None（已存在相似事件）
+    """
+    title = (event_data.get("title") or "").strip()
+    if not title:
+        return None
+    
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT title FROM events WHERE group_id=? AND start_time LIKE ?",
+            (group_id, f"{date}%")
+        ).fetchall()
+        
+        for e in existing:
+            existing_title = (e["title"] or "").strip()
+            if title == existing_title or title in existing_title or existing_title in title:
+                logger.debug("事件已存在，跳过: group=%d date=%s title=%s", group_id, date, title)
+                return None
+        
+        cur = conn.execute("""
+            INSERT INTO events (group_id, title, description, event_type,
+                participant_ids, key_quotes, start_time, end_time,
+                message_start_idx, message_end_idx, message_count,
+                ai_model_used, window_id, report_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            group_id,
+            title,
+            event_data.get("description", ""),
+            event_data["event_type"],
+            event_data.get("participant_ids", "[]"),
+            event_data.get("key_quotes", "[]"),
+            event_data["start_time"],
+            event_data["end_time"],
+            event_data.get("message_start_idx", 0),
+            event_data.get("message_end_idx", 0),
+            event_data.get("message_count", 0),
+            event_data.get("ai_model_used", ""),
+            event_data.get("window_id", None),
+            event_data.get("report_json", ""),
+        ))
+        return cur.lastrowid
+
+
 def get_events(group_id: int, event_type: str = "",
                date_from: str = "", date_to: str = "") -> list[dict]:
     """查询事件列表，支持类型和时间范围筛选"""

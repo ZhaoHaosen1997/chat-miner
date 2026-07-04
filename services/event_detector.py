@@ -974,3 +974,127 @@ def _resolve_participant_ids(names: list[str], chat_or_group_id) -> list[int]:
     return ids
 
 
+# ==================== 日报联动事件探测 ====================
+
+_DAILY_EVENT_SYSTEM = """你是一个群聊历史学家+八卦记者。你的任务是从一天的群聊对话中发掘值得记录的事件——
+无论是重要决定、欢乐时刻、观点交锋、名场面诞生，还是群友之间的默契互动。
+
+事件类型：
+- decision：群内做出了某个决定（讨论→收敛→结论）
+- discussion：对某个话题展开了有意思的讨论
+- social：社交互动（庆祝、欢迎、告别、起哄等）
+- announcement：某人宣布了重要消息
+- meme：梗/文化的诞生或传播
+- driving：开车/内涵段子现场
+
+注意：只要有一点点事件苗头就值得记录，宁可多报不要漏报。只有纯粹的灌水才返回空数组。"""
+
+_DAILY_EVENT_USER = """以下是群聊"{group_name}"在 {date} 的对话记录。
+
+{chat}
+
+请识别其中值得记录的事件。输出 JSON 格式：
+{{
+  "events": [
+    {{
+      "headline": "一句话标题",
+      "narrative": "简要叙述（50字内）",
+      "event_type": "decision|discussion|social|announcement|meme|driving",
+      "time_span": {{ "start": "HH:MM", "end": "HH:MM" }},
+      "participants": [{{ "name": "[1]", "role": "主角" }}],
+      "key_quotes": ["精彩原话 — 发言人"]
+    }}
+  ]
+}}
+
+若无事件返回 {{ "events": [] }}。群友用 [数字] 格式标识。"""
+
+
+async def detect_events_from_daily(
+    chat_text: str,
+    group_id: int,
+    group_name: str,
+    date: str,
+    senders: list[dict],
+    task=None,
+) -> list[dict]:
+    """从日报全量消息中识别事件（不依赖尖峰检测）
+    
+    Args:
+        chat_text: 格式化后的当天消息文本
+        group_id: 群ID
+        group_name: 群名
+        date: 日期 YYYY-MM-DD
+        senders: 发送人列表（用于还原昵称）
+        task: 可选任务对象
+        
+    Returns:
+        识别到的事件列表（已还原昵称）
+    """
+    from services.model_config import get_effective_model
+    from services.online_model import call_online_chat
+    from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
+    
+    model_cfg = get_effective_model("online")
+    if not model_cfg.get("api_key"):
+        logger.warning("在线模型未配置，跳过日报联动事件探测")
+        return []
+    
+    safe_chat = chat_text[:150000] if len(chat_text) > 150000 else chat_text
+    user_prompt = _DAILY_EVENT_USER.format(
+        group_name=group_name,
+        date=date,
+        chat=safe_chat,
+    )
+    
+    try:
+        result = await call_online_chat(
+            system_prompt=_DAILY_EVENT_SYSTEM,
+            user_prompt=user_prompt,
+            model_config=model_cfg,
+            temperature=0.7,
+            json_mode=True,
+            max_tokens=4096,
+            timeout=90,
+            pipeline="daily_event",
+            group_id=group_id,
+        )
+    except Exception as e:
+        logger.warning("日报联动事件探测AI调用失败: %s", e)
+        return []
+    
+    if not result.get("success"):
+        logger.warning("日报联动事件探测失败: %s", result.get("error"))
+        return []
+    
+    raw_data = result.get("data", "")
+    if not raw_data:
+        return []
+    
+    try:
+        data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    except json.JSONDecodeError:
+        import re
+        m = re.search(r'"events"\s*:\s*\[.*?\]', raw_data, re.DOTALL)
+        if m:
+            try:
+                data = json.loads("{" + m.group(0) + "}")
+            except:
+                return []
+        else:
+            return []
+    
+    events = data.get("events", [])
+    if not events:
+        return []
+    
+    _, name_map = build_stable_id_map(senders)
+    for evt in events:
+        evt_resolved = resolve_sender_ids_deep(evt, name_map)
+        evt["participants"] = evt_resolved.get("participants", [])
+        evt["key_quotes"] = evt_resolved.get("key_quotes", [])
+    
+    logger.info("日报联动事件探测: group=%d date=%s 发现 %d 个事件", group_id, date, len(events))
+    return events
+
+

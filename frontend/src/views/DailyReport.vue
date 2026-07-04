@@ -83,7 +83,6 @@ async function load() {
     modelUsed.value = data.model_used || ''
     createdAt.value = data.created_at || ''
   } catch (e) {
-    // 未分析，尝试触发分析
     if (e.message?.includes('404') || e.message?.includes('尚未分析')) {
       error.value = 'not_analyzed'
     } else {

@@ -166,19 +166,18 @@ def resolve_sender_ids_deep(data, name_map: dict[int, str]):
 
 
 def build_meme_prefix(group_id: int) -> str:
-    """构建梗百科注入前缀。仅取已审核通过的梗。群无梗时返回空字符串。"""
+    """构建梗百科注入后缀。仅取已审核通过的梗。群无梗时返回空字符串。"""
     try:
         from models.database import get_group_memes
-        # v1.18.8: 只取 approved，pending/rejected 不参与报告注入
         memes = get_group_memes(group_id, status="approved")
         if not memes:
             return ""
-        lines = ["【群梗百科】以下为群内约定俗成的表达，供你理解消息上下文："]
+        lines = ["【群梗百科·背景资料】以下内容仅供理解上下文参考，不要在输出中直接引用或复述："]
         for m in memes:
             t = (m.get("term") or "").strip()
             d = (m.get("description") or "").strip()
             if t and d:
                 lines.append(f'- "{t}"：{d}')
-        return "\n".join(lines) + "\n" if len(lines) > 1 else ""
+        return "\n".join(lines) if len(lines) > 1 else ""
     except Exception:
         return ""

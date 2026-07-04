@@ -944,10 +944,10 @@ def build_member_name_set(messages: list[dict], senders: list[dict] = None) -> s
 # 模型上下文窗口（安全阈值，留 20% 给 prompt 模板和输出）
 _MODEL_CONTEXT_LIMITS = {
     "14b": 100_000,   # qwen2.5:14b → 128K 上下文
-    "9b": 25_000,     # qwen3.5:9b → 32K 上下文
-    "7b": 25_000,
-    "8b": 25_000,
-    "default": 50_000,
+    "9b": 32_000,     # 本地模型统一 32K
+    "7b": 32_000,
+    "8b": 32_000,
+    "default": 256_000,  # 在线模型 256K
 }
 
 
