@@ -55,15 +55,6 @@ def _adapt_prompt(text: str) -> str:
 
 from services.desensitize import filter_pii
 
-# ---- 消息趣味性评分维度 ----
-_INTERESTING_SIGNALS = [
-    (r'\[捂脸\]|\[破防\]|\[裂开\]|\[笑哭\]|\[狗头\]|\[机智\]|\[坏笑\]', 3),   # 高情绪表情
-    (r'笑死|哈哈|笑死我了|xswl|233|绷不住|救命|离谱|真香', 3),                # 强情绪词
-    (r'\?{2,}|！{2,}|\.{3,}', 2),                                            # 多个标点（情绪激动）
-    (r'@\S+|回复|引用', 2),                                                   # 互动标记
-    (r'[一-鿿]{15,}', 2),                                                     # 长中文消息
-]
-
 # ========== 自然周/月计算 ==========
 
 def iso_week_dates(year: int, week: int) -> tuple[str, str]:
@@ -177,56 +168,32 @@ def compute_available_periods(
 
 # ========== v0.7.2 新数据管道 ==========
 
-def _score_message_interestingness(msg: dict) -> int:
-    """对单条消息打分，用于采样时挑选最有料的
-
-    综合维度：情绪强度、互动性、长度、表情丰富度
-    """
-    content = (msg.get("content") or "").strip()
-    if not content:
-        return 0
-    score = 0
-    # 基础分：消息长度
-    if len(content) >= 10:
-        score += 1
-    if len(content) >= 30:
-        score += 2
-    if len(content) >= 60:
-        score += 1  # 太长不一定有趣，加分递减
-    # 情绪/趣味信号
-    for pattern, points in _INTERESTING_SIGNALS:
-        if re.search(pattern, content):
-            score += points
-            break  # 每个维度只计一次
-    # 微信表情数量
-    emojis = WECHAT_EMOJI_PATTERN.findall(content)
-    if emojis:
-        score += min(len(emojis), 5)  # 最多 +5
-    return score
-
 
 def _extract_period_raw_data(
     chat,  # ParsedChat 对象
     dates: list[str],
     group_id: int,
-    samples_per_day: int = 8,
+    total_limit: int = 1000,  # v1.19.0: 周报采样上限
+    per_day: int = 0,  # v1.19.0: 月报用，每天采样数；0=全量
 ) -> dict:
-    """从原始消息中提取周期数据：Python 统计 + 匿名化采样
+    """从原始消息中提取周期数据：Python 统计 + 采样 + 摘要轨道
 
-    v0.7.2 核心函数。完全不依赖本地模型的日报归纳结果。
+    v1.19.0 重构：
+    - 删除评分筛选，改为均匀采样或全量采样
+    - 新增摘要轨道（日报 one_lines）
 
     Args:
         chat: ParsedChat 实例
         dates: 周期内的日期列表
         group_id: 群 ID
-        samples_per_day: 每天采样消息数（默认 8 条）
+        total_limit: 总采样上限（周报 1000 / 月报 1500）
+        per_day: 每天采样数；0=全量采样（周报），>0=均匀采样（月报）
 
     Returns:
         {
             "stats": {...},            # Python 统计数据
-            "sampled_msgs": [...],     # 匿名化消息样本
-            "member_summary": {...},   # 成员级别汇总
-            "alias_map": {...},        # {真名: 代号}（仅本地使用）
+            "sampled_msgs": [...],     # 格式化的消息样本
+            "daily_summaries": [...],  # 摘要轨道（日报 one_lines）
         }
     """
     # 1. 收集该周期所有消息
@@ -239,11 +206,12 @@ def _extract_period_raw_data(
                      if m.get("type") in ("文本消息", "引用消息")
                      and (m.get("content") or "").strip()]
         all_msgs.extend(text_msgs)
-        by_date_msgs[date] = text_msgs
+        if text_msgs:
+            by_date_msgs[date] = text_msgs
 
     if not all_msgs:
         logger.warning(f"周期内无文本消息: dates={dates}")
-        return {"stats": {}, "sampled_msgs": [], "member_summary": {}}
+        return {"stats": {}, "sampled_msgs": [], "daily_summaries": []}
 
     # 2. 预建成员映射 wxid -> stable_id（基于 wxid 排序，跨数据源一致）
     from services.desensitize import build_wxid_to_stable_id
@@ -305,44 +273,26 @@ def _extract_period_raw_data(
         "member_details": member_stats,
     }
 
-    # 5. PII 过滤 + 采样：每天挑最有料的消息
-    anon_by_date = defaultdict(list)
-    for m in all_msgs:
-        ft = m.get("formattedTime", "")
-        if len(ft) >= 10:
-            # v1.18.5: PII 过滤替代别名
-            content = filter_pii((m.get("content") or "").strip())
-            if content:
-                m_copy = {**m, "content": content}
-                anon_by_date[ft[:10]].append(m_copy)
+    # 5. v1.19.0: 使用新的采样器（删除评分筛选）
+    from services.sampler import sample_full, sample_uniform, format_sampled_messages
+    if per_day > 0:
+        # 月报：均匀采样
+        sampled_raw = sample_uniform(by_date_msgs, per_day=per_day, total_limit=total_limit)
+    else:
+        # 周报：全量采样
+        sampled_raw = sample_full(by_date_msgs, total_limit=total_limit)
 
-    sampled_msgs = []
-    for date in sorted(anon_by_date.keys()):
-        day_anon_msgs = anon_by_date[date]
-        if not day_anon_msgs:
-            continue
-        # 打分排序，取 top N
-        scored = [(m, _score_message_interestingness(m)) for m in day_anon_msgs]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top = [m for m, s in scored[:samples_per_day] if s > 0]
-        sampled_msgs.append({
-            "date": date,
-            "count": len(day_anon_msgs),
-            "highlights": [{"sender_id": str(wxid_to_stable.get(m.get("wxid", ""), m.get("senderID", 0))),
-                           "content": m.get("content", "")[:120],
-                           "time": (m.get("formattedTime") or "")[11:16]}
-                          for m in top],
-        })
+    # 格式化：PII 过滤 + stable_id + 截断
+    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120)
+
+    # 6. v1.19.0: 摘要轨道（日报 one_lines）
+    from services.sampler import get_daily_summary_track
+    daily_summaries = get_daily_summary_track(group_id, dates)
 
     return {
         "stats": stats,
-        "sampled_msgs": sampled_msgs,
-        "member_summary": {
-            "total": total_members,
-            "top5": [m["sender_id"] for m in ranked_members[:5]],
-            "night_owl_count": len(night_owls),
-            "night_owl_names": [m["sender_id"] for m in night_owls[:3]],
-        },
+        "sampled_msgs": sampled,
+        "daily_summaries": daily_summaries,
     }
 
 
@@ -488,7 +438,10 @@ WEEKLY_USER_PROMPT_V2 = """来看看这群人这周都干了什么——
 - 潜水观察名单：{lurkers}
 - 表情包爱好者：{emoji_kings}
 
-【本周聊天精华】（真实对话片段，发言者用数字ID标识）
+【每日摘要线索】（来自日报，帮助定位重点日期）
+{summary_track}
+
+【本周聊天实录】（真实对话片段，发言者用数字ID标识）
 {sampled_chat}
 
 请用 JSON 格式输出以下内容（勿输出其他内容）：
@@ -608,13 +561,16 @@ MONTHLY_USER_PROMPT_V2 = """来看看这群人这个月都发生了些什么—�
 - 潜水观察名单：{lurkers}
 - 表情包爱好者：{emoji_kings}
 
+【每日摘要线索】（来自日报，帮助定位重点日期）
+{summary_track}
+
 【每周话题快照】（用于分析话题演变）
 {weekly_snapshots}
 
 【词频突变检测】（可能是新梗！）
 {bursting_words}
 
-【本月聊天精华】（匿名化采样）
+【本月聊天实录】（匿名化采样）
 {sampled_chat}
 
 【上月对比摘要】
@@ -652,9 +608,13 @@ MONTHLY_USER_PROMPT_V2 = """来看看这群人这个月都发生了些什么—�
 def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
                               prev_month_summary: str, weekly_context: str,
                               bursting_words: str) -> str:
-    """构建 v0.7.2 新版月报 prompt"""
+    """构建 v0.7.2 新版月报 prompt
+
+    v1.19.0: 新增摘要轨道（日报 one_lines + 周报 headlines），采样格式改为扁平列表
+    """
     stats = raw_data.get("stats", {})
     sampled = raw_data.get("sampled_msgs", [])
+    daily_summaries = raw_data.get("daily_summaries", [])
 
     top_speakers = ", ".join(
         f"[{m['sender_id']}]({m['count']}条)" for m in stats.get("top_speakers", [])[:5]
@@ -669,17 +629,13 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
         f"[{m['sender_id']}]({' '.join(m['emojis'][:3])})" for m in stats.get("emoji_kings", [])[:3]
     ) or "暂无"
 
-    # 按天聚合聊天精华（月报每天限5条控制上下文）
-    chat_parts = []
-    for day in sampled:
-        highlights = day.get("highlights", [])
-        if not highlights:
-            continue
-        lines = [f"\n[{day['date']} ({day['count']}条消息)]"]
-        for h in highlights[:5]:
-            lines.append(f"{h.get('speaker','?')} ({h.get('time','')}): {h.get('content','')}")
-        chat_parts.append("\n".join(lines))
-    sampled_chat = "\n".join(chat_parts) if chat_parts else "暂无聊天样本"
+    # v1.19.0: 摘要轨道
+    from services.sampler import format_daily_summary_track
+    summary_track = format_daily_summary_track(daily_summaries)
+
+    # v1.19.0: 聊天实录格式化（扁平列表）
+    from services.sampler import format_sampled_for_prompt
+    sampled_chat = format_sampled_for_prompt(sampled, style="monthly")
 
     return MONTHLY_USER_PROMPT_V2.format(
         date_start=date_start,
@@ -691,6 +647,7 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
         night_owls=night_owls,
         lurkers=lurkers,
         emoji_kings=emoji_kings,
+        summary_track=summary_track,
         weekly_snapshots=weekly_context,
         bursting_words=bursting_words,
         sampled_chat=sampled_chat,
@@ -699,9 +656,13 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
 
 
 def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> str:
-    """构建 v0.7.2 新版周报 prompt（基于原始数据+匿名化采样）"""
+    """构建 v0.7.2 新版周报 prompt（基于原始数据+匿名化采样）
+
+    v1.19.0: 新增摘要轨道，采样格式改为扁平列表
+    """
     stats = raw_data.get("stats", {})
     sampled = raw_data.get("sampled_msgs", [])
+    daily_summaries = raw_data.get("daily_summaries", [])
 
     # 格式化发言 TOP 5
     top_speakers = ", ".join(
@@ -723,21 +684,13 @@ def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> s
         f"[{m['sender_id']}]({' '.join(m['emojis'][:3])})" for m in stats.get("emoji_kings", [])[:3]
     ) or "暂无"
 
-    # 聊天精华格式化（按天组织）
-    chat_parts = []
-    for day in sampled:
-        highlights = day.get("highlights", [])
-        if not highlights:
-            continue
-        lines = [f"\n[{day['date']} ({day['count']}条消息)]"]
-        for h in highlights:
-            speaker = h.get("sender_id", "?")
-            content = h.get("content", "")
-            time_str = h.get("time", "")
-            lines.append(f"[{speaker}] [{time_str}]: {content}")
-        chat_parts.append("\n".join(lines))
+    # v1.19.0: 摘要轨道（日报 one_lines）
+    from services.sampler import format_daily_summary_track
+    summary_track = format_daily_summary_track(daily_summaries)
 
-    sampled_chat = "\n".join(chat_parts) if chat_parts else "暂无聊天样本"
+    # v1.19.0: 聊天实录格式化（扁平列表）
+    from services.sampler import format_sampled_for_prompt
+    sampled_chat = format_sampled_for_prompt(sampled, style="weekly")
 
     return WEEKLY_USER_PROMPT_V2.format(
         date_start=date_start,
@@ -749,6 +702,7 @@ def _build_weekly_prompt_v2(raw_data: dict, date_start: str, date_end: str) -> s
         night_owls=night_owls,
         lurkers=lurkers,
         emoji_kings=emoji_kings,
+        summary_track=summary_track,
         sampled_chat=sampled_chat,
     )
 
@@ -1388,7 +1342,11 @@ async def generate_monthly_report(
     else:
         if task:
             task.update("inference", f"提取 {len(month_dates_list)} 天原始数据...")
-        raw_data = _extract_period_raw_data(chat, month_dates_list, group_id, samples_per_day=5)
+        # v1.19.0: 月报采样参数（每天 5 条，总计上限 1500）
+        raw_data = _extract_period_raw_data(
+            chat, month_dates_list, group_id,
+            total_limit=1500, per_day=5
+        )
         total_msgs = raw_data.get("stats", {}).get("total_messages", 0)
         if total_msgs >= int(config.MONTHLY_MIN_MSGS):
             use_new_pipeline = True

@@ -120,10 +120,14 @@ async def generate_annual_report(group_id: int, year: int, chat,
     # 3. 收集月报摘要作为上下文
     monthly_summaries = _collect_monthly_summaries(group_id, year)
 
-    # 4. 提取年度原始数据（Python统计 + 匿名化采样）
+    # 4. 提取年度原始数据（Python统计 + 均匀采样）
     raw_data = _extract_annual_raw_data(chat, year_dates, group_id)
     if not raw_data:
         return {"success": False, "error": "无法提取年度数据"}
+
+    # v1.19.0: 获取摘要轨道（月报 headlines）
+    from services.sampler import get_monthly_summary_track
+    raw_data["monthly_headlines"] = get_monthly_summary_track(group_id, year)
 
     if raw_data["stats"]["total_messages"] < int(config.ANNUAL_MIN_MSGS):
         if task:
@@ -401,33 +405,10 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
         monthly_msg_counts[month_key] += len(msgs)
     monthly_trend = [{"month": k, "count": v} for k, v in sorted(monthly_msg_counts.items())]
 
-    # 6. 采样消息（每天最多3条，减少 token 消耗）
-    sampled_msgs = []
-    for date_str in sorted(by_date_msgs.keys()):
-        msgs = by_date_msgs[date_str]
-        # 优先选长消息
-        scored = sorted(msgs, key=lambda m: len((m.get("content") or "").strip()), reverse=True)
-        highlights = []
-        for m in scored[:3]:
-            content = (m.get("content") or "").strip()
-            if len(content) > 10:
-                highlights.append({
-                    "speaker": _sid_str(m.get("wxid", "")),
-                    "content": content[:120],
-                    "time": m.get("formattedTime", "")[11:16],
-                })
-        if highlights:
-            sampled_msgs.append({"date": date_str, "count": len(msgs), "highlights": highlights})
-
-    # 控制总采样量（全年最多365天*3条=1095条，太多了；限制到150天）
-    if len(sampled_msgs) > 150:
-        step = len(sampled_msgs) / 150
-        sampled_msgs = [sampled_msgs[int(i * step)] for i in range(150)]
-
-    # 7. PII 过滤消息内容
-    for day in sampled_msgs:
-        for h in day["highlights"]:
-            h["content"] = filter_pii(h["content"])
+    # 6. v1.19.0: 均匀采样（删除"优先长消息"逻辑）
+    from services.sampler import sample_uniform, format_sampled_messages
+    sampled_raw = sample_uniform(by_date_msgs, per_day=3, total_limit=2000)
+    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120)
 
     stats = {
         "total_messages": total_text,
@@ -449,22 +430,28 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
         for wxid, _ in sorted_by_msg
     ]
 
+    # v1.19.0: 摘要轨道（月报 headlines）- 需要传入 year 参数，在调用方获取
+    # 这里先返回空列表，由调用方填充
     return {
         "stats": stats,
-        "sampled_msgs": sampled_msgs,
+        "sampled_msgs": sampled,
         "member_index": member_index,
         "member_map": member_map,
         "name_to_wxid": name_to_wxid,
-        "member_index": member_index,
+        "monthly_headlines": [],  # v1.19.0: 由调用方填充
     }
 
 
 def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: int,
                           award_count: int = 0) -> str:
-    """构建年度报告的用户提示词（v0.13.3: award_count 由调用方传入，避免重复计算）"""
+    """构建年度报告的用户提示词
+
+    v1.19.0: 新增摘要轨道（月报 headlines），采样格式改为扁平列表
+    """
     stats = raw_data["stats"]
-    sampled = raw_data["sampled_msgs"]
-    member_index = raw_data.get("member_index", [])  # [{wxid, alias, detail}]
+    sampled = raw_data.get("sampled_msgs", [])
+    member_index = raw_data.get("member_index", [])
+    monthly_headlines = raw_data.get("monthly_headlines", [])  # v1.19.0 新增
 
     # award_count 由调用方预先计算传入；若未传入则动态计算
     if award_count <= 0:
@@ -472,16 +459,20 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
         award_count = max(3, min(15, active_count // 2))
         award_count = (award_count // 3) * 3
 
-    # 月报摘要
-    monthly_text_parts = []
-    for ms in monthly_summaries:
-        parts = [f"### {ms['month']}月"]
-        if ms.get("headline"):
-            parts.append(f"氛围：{ms['headline']}")
-        if ms.get("meme"):
-            parts.append(f"热梗：{ms['meme']}")
-        monthly_text_parts.append("\n".join(parts))
-    monthly_text = "\n\n".join(monthly_text_parts) if monthly_text_parts else "（暂无月报数据）"
+    # v1.19.0: 摘要轨道（月报 headlines）
+    from services.sampler import format_monthly_summary_track
+    monthly_text = format_monthly_summary_track(monthly_headlines)
+    # 如果摘要轨道为空，使用旧的月报摘要
+    if monthly_text == "暂无月报摘要" and monthly_summaries:
+        monthly_text_parts = []
+        for ms in monthly_summaries:
+            parts = [f"### {ms['month']}月"]
+            if ms.get("headline"):
+                parts.append(f"氛围：{ms['headline']}")
+            if ms.get("meme"):
+                parts.append(f"热梗：{ms['meme']}")
+            monthly_text_parts.append("\n".join(parts))
+        monthly_text = "\n\n".join(monthly_text_parts) if monthly_text_parts else "（暂无月报数据）"
 
     # 成员索引列表（带编号）
     member_index_lines = []
@@ -492,14 +483,9 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
             f"高峰{d['peak_hour']}点，{d['style_label']}，{d['role_label']}"
         )
 
-    # 消息采样
-    sample_parts = []
-    for day in sampled[:80]:
-        lines = [f"[{day['date']}，{day['count']}条]"]
-        for h in day["highlights"]:
-            lines.append(f"  [{h['speaker']}] ({h['time']}): {h['content']}")
-        sample_parts.append("\n".join(lines))
-    sample_text = "\n\n".join(sample_parts)
+    # v1.19.0: 消息采样格式化（扁平列表）
+    from services.sampler import format_sampled_for_prompt
+    sample_text = format_sampled_for_prompt(sampled, style="annual")
 
     prompt = f"""# {year}年 群聊年度颁奖典礼
 
@@ -515,10 +501,10 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
 ## 成员索引（用 #编号 引用获奖者）
 {chr(10).join(member_index_lines)}
 
-## 月度报告
+## 月度主题回顾
 {monthly_text}
 
-## 消息采样
+## 年度消息精选
 {sample_text}
 
 ---

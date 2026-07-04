@@ -96,6 +96,7 @@ async def api_scan_memes(group_id: int):
         raise HTTPException(404, detail="群数据未加载")
 
     total_msgs = len(chat.messages)
+    # v1.19.0: 取最近 500 条有效消息，不再按发送人去重
     recent = [m for m in chat.messages[-2000:] if (m.get("content") or "").strip()]
     logger.info("梗扫描开始: group=%d 总消息=%d 近2000条有效=%d",
                 group_id, total_msgs, len(recent))
@@ -104,16 +105,9 @@ async def api_scan_memes(group_id: int):
         logger.info("梗扫描跳过: group=%d 有效消息不足20条", group_id)
         return {"code": 200, "message": "消息不足", "data": {"memes": [], "new_count": 0}}
 
-    # 去重 sender，限 300 条
-    seen = set()
-    sampled = []
-    for m in recent:
-        sid = str(m.get("senderID", ""))
-        if sid not in seen:
-            seen.add(sid)
-            sampled.append(m)
-        if len(sampled) >= 300:
-            break
+    # v1.19.0: 直接取最近 500 条，不去重
+    from services.sampler import sample_recent
+    sampled = sample_recent(recent, limit=500)
 
     from services.desensitize import filter_pii
     gname = group.get("display_name") or group.get("name", "")
