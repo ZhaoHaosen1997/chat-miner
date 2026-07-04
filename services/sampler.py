@@ -198,19 +198,19 @@ def format_sampled_for_prompt(
             # 周报格式：[2026-06-23 (200条消息)]
             lines.append(f"\n[{date} ({count}条消息)]")
             for m in msgs:
-                lines.append(f"[{m['sender_id']}] [{m['time']}]: {m['content']}")
+                lines.append(f"[{m['time']}] [{m['sender_id']}]: {m['content']}")
 
         elif style == "monthly":
             # 月报格式：[2026-06-23 (200条消息)] + 每条带时间
             lines.append(f"\n[{date} ({count}条消息)]")
             for m in msgs[:5]:  # 月报每天最多显示 5 条
-                lines.append(f"{m['sender_id']} ({m['time']}): {m['content']}")
+                lines.append(f"[{m['time']}] [{m['sender_id']}]: {m['content']}")
 
         elif style == "annual":
             # 年报格式：[2026-06-23，200条]
             lines.append(f"\n[{date}，{count}条]")
             for m in msgs[:3]:  # 年报每天最多显示 3 条
-                lines.append(f"  [{m['sender_id']}] ({m['time']}): {m['content']}")
+                lines.append(f"[{m['time']}] [{m['sender_id']}]: {m['content']}")
 
     return "\n".join(lines)
 

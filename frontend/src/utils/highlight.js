@@ -71,6 +71,19 @@ function highlightMixed(text) {
       return `${timeHtml} ${speakerHtml}${chatMatch[5]}${colorInline(rest)}`
     }
 
+    // 数据子标题: [YYYY-MM-DD (200条消息)] 或 [YYYY-MM-DD，200条]
+    const dateMatch = line.match(/^\[(\d{4}-\d{2}-\d{2})[，,\s]+(\d+)条消息?\]\s*$/)
+    if (dateMatch) {
+      return `<span class="text-amber-600 italic">${line}</span>`
+    }
+
+    // 编号列表: 1. / 2. 开头
+    const nlMatch = line.match(/^(\s*)(\d+)(\.)(\s+)(.+)$/)
+    if (nlMatch) {
+      const numHtml = `<span class="text-slate-400">${nlMatch[2]}${nlMatch[3]}</span>`
+      return `${nlMatch[1]}${numHtml}${nlMatch[4]}${colorInline(nlMatch[5])}`
+    }
+
     // Markdown 标题: # / ## / ### 开头
     const hMatch = line.match(/^(#{1,3}\s+)(.+)$/)
     if (hMatch) {
@@ -102,6 +115,11 @@ function colorInline(text) {
   text = text.replace(
     /(【.+?】)/g,
     '<span class="text-violet-500 font-medium">$1</span>'
+  )
+  // 内联 sender 标注：[N](数据) 如 [1](200条)
+  text = text.replace(
+    /(\[(\d+)\])(\(([^)]+)\))/g,
+    '<span class="text-indigo-500">$1</span><span class="text-slate-400">$3</span>'
   )
   // 中文冒号 key：value（key 为中文/英文词）
   text = text.replace(
