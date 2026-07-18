@@ -13,23 +13,14 @@ Chat-Miner — 微信/QQ 群聊分析工具。用户上传导出 JSON，AI 生�
 
 ## WSL 生产部署
 
-> AI 执行部署时直接复用下方命令，不要改动引号/空格/换行格式（settings.json 已按此格式预授权）。
-
 ```bash
 # 部署前确认无分析任务运行中
-# 此命令格式与 .claude/settings.json 预授权匹配，不得改动引号/空格/换行
-wsl -d DebianDev -- sh -c 'rsync -av --delete \
-  --exclude='\''.git'\'' --exclude='\''node_modules'\'' --exclude='\''frontend/node_modules'\'' \
-  --exclude='\''__pycache__'\'' --exclude='\''data'\'' --exclude='\''logs'\'' --exclude='\''venv'\'' \
-  --exclude='\''config.json'\'' --exclude='\''docs'\'' --exclude='\''*.tar.gz'\'' \
-  /mnt/c/mycode/chat-miner/ /home/zhaohaosen/applications/chat-miner/ && \
-  cd /home/zhaohaosen/applications/chat-miner/frontend && npm run build && \
-  sudo systemctl restart chat-miner && echo '\''Deploy OK'\'''
+wsl -d DebianDev -- bash /mnt/c/mycode/chat-miner/deploy.sh
 
 # 服务管理
-sudo systemctl status chat-miner
-sudo systemctl restart chat-miner
-sudo journalctl -u chat-miner -f
+wsl -d DebianDev -- sudo systemctl status chat-miner
+wsl -d DebianDev -- sudo systemctl restart chat-miner
+wsl -d DebianDev -- sudo journalctl -u chat-miner -f
 ```
 
 访问：`http://localhost:8856`（前后端同端口）

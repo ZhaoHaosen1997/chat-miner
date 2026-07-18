@@ -11,6 +11,7 @@ v0.7.2 架构升级：
 - 自然月：1日~月末，标识如 2026-06
 """
 from models.database import get_default_prompt
+from services.pipelines import MOOD_OPTIONS
 import json
 import re
 import logging
@@ -496,7 +497,7 @@ WEEKLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本周（{date
 请用 JSON 格式输出以下内容（勿输出其他内容）：
 {{
   "overview": "本周综述（150-200字），一周话题全景和氛围总结",
-  "dominant_mood": "本周主导情绪，只输出一个词，从以下选：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 离谱 上头",
+  "dominant_mood": "本周主导情绪，只输出一个词，从以下选：{mood_options}",
   "mood_rollercoaster": "情绪过山车（100-150字），本周的情绪起伏变化",
   "highlight_comments": ["名场面1的10字短评", "名场面2的10字短评", ...],
   "next_week_preview": "下周预告（30-50字），轻松有趣的预测"
@@ -531,7 +532,7 @@ MONTHLY_USER_PROMPT = """请根据以下群聊日报摘要，生成本月（{dat
 请用 JSON 格式输出以下内容（勿输出其他内容）：
 {{
   "overview": "月度综述（250-300字），本月大事记，话题趋势演变",
-  "dominant_mood": "本月主导情绪，只输出一个词，从以下选：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 离谱 上头",
+  "dominant_mood": "本月主导情绪，只输出一个词，从以下选：{mood_options}",
   "atmosphere_diagnosis": "社群氛围诊断（100-150字），本月群氛围特征及对比上月的变化",
   "member_spotlight": "群友聚光灯（100-150字），2-3位本月最值得关注的成员及原因",
   "next_month_preview": "下月展望（40-60字）"
@@ -578,19 +579,19 @@ MONTHLY_USER_PROMPT_V2 = """来看看这群人这个月都发生了些什么—�
 
 请用 JSON 格式输出以下内容（勿输出其他内容）：
 {{
-  "dominant_mood": "本月主导情绪，只输出一个词，从以下选：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 离谱 上头",
+  "dominant_mood": "本月主导情绪，只输出一个词，从以下选：{mood_options}",
   "group_personality": {{
     "type_label": "群聊人格类型标签（8字内），模仿MBTI风格，如'INTJ-A 技术辩论型'",
     "type_explanation": "类型解读（100-150字），解释为什么是这个类型",
     "core_traits": ["特质1", "特质2", "特质3"]
   }},
   "topic_evolution": "月度话题演变（150-200字）：分析本月话题从月初到月末如何演变，发现话题谱系",
-  "meme_archaeology": "梗文化考古（100-150字）：根据词频突变数据，推断本月新诞生的内部梗及其起源",
+  "meme_archaeology": "梗文化考古（100-150字）：根据词频突变数据，推断本月新诞生的内部梗及其起源。如果数据不足以确认某个梗的诞生，直接说'本月未检测到明显新梗'，不要强行编造",
   "community_health": {{
-    "active_score": 3,
-    "density_score": 3,
-    "harmony_score": 4,
-    "nightowl_score": 2,
+    "active_score": 4,
+    "density_score": 2,
+    "harmony_score": 5,
+    "nightowl_score": 3,
     "active_comment": "活跃指数评语（15字内）",
     "density_comment": "信息密度评语（15字内）",
     "harmony_comment": "和谐指数评语（15字内）",
@@ -602,7 +603,7 @@ MONTHLY_USER_PROMPT_V2 = """来看看这群人这个月都发生了些什么—�
   "member_spotlight": "群友聚光灯（100-150字），2-3位本月最值得关注的成员"
 }}
 
-注意：community_health 四个分数是 1-5 的整数。topic_evolution 要结合每周快照分析变化。meme_archaeology 基于词频突变数据，不要凭空编造。"""
+注意：community_health 四个分数是 1-5 的整数（1=极低，5=极高）。topic_evolution 要结合每周快照分析变化。meme_archaeology 基于词频突变数据，不要凭空编造。"""
 
 
 def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
@@ -652,6 +653,7 @@ def _build_monthly_prompt_v2(raw_data: dict, date_start: str, date_end: str,
         bursting_words=bursting_words,
         sampled_chat=sampled_chat,
         prev_month_summary=prev_month_summary,
+        mood_options=MOOD_OPTIONS,
     )
 
 
@@ -740,6 +742,7 @@ def _build_weekly_prompt(aggregated: dict, date_start: str, date_end: str) -> st
         keywords_text=keywords_text,
         mood_text=mood_text,
         quotes_text=quotes_text,
+        mood_options=MOOD_OPTIONS,
     )
 
 
@@ -766,6 +769,7 @@ def _build_monthly_prompt(aggregated: dict, date_start: str, date_end: str,
         topics_text=topics_text,
         keywords_text=keywords_text,
         prev_month_summary=prev_month_summary,
+        mood_options=MOOD_OPTIONS,
     )
 
 
@@ -1077,8 +1081,10 @@ async def generate_weekly_report(
             task.update("inference", f"📋 {model_config.get('model_name', 'AI')} 生成周报中...")
 
         user_prompt = _build_weekly_prompt_v2(raw_data, date_start, date_end)
+        db_prompt = get_default_prompt("weekly")
+        weekly_system = db_prompt or (_adapt_prompt(WEEKLY_SYSTEM_PROMPT_V2) if is_private else WEEKLY_SYSTEM_PROMPT_V2)
         ai_result = await _ai_generate(
-            _adapt_prompt(WEEKLY_SYSTEM_PROMPT_V2) if is_private else WEEKLY_SYSTEM_PROMPT_V2,
+            weekly_system,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.WEEKLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_WEEKLY,
@@ -1152,8 +1158,10 @@ async def generate_weekly_report(
             task.update("inference", f"📋 {model_config.get('model_name', 'AI')} 生成周报中...")
 
         user_prompt = _build_weekly_prompt(aggregated, date_start, date_end)
+        db_prompt = get_default_prompt("weekly")
+        weekly_system = db_prompt or (_adapt_prompt(WEEKLY_SYSTEM_PROMPT) if is_private else WEEKLY_SYSTEM_PROMPT)
         ai_result = await _ai_generate(
-            _adapt_prompt(WEEKLY_SYSTEM_PROMPT) if is_private else WEEKLY_SYSTEM_PROMPT,
+            weekly_system,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             json_mode=True, group_id=group_id, model_config=model_config,
             pipeline="weekly", task=task)
@@ -1412,8 +1420,10 @@ async def generate_monthly_report(
         user_prompt = _build_monthly_prompt_v2(
             raw_data, date_start, date_end, prev_month_summary, weekly_context, bursting_words
         )
+        db_prompt = get_default_prompt("monthly")
+        monthly_system = db_prompt or (_adapt_prompt(MONTHLY_SYSTEM_PROMPT_V2) if is_private else MONTHLY_SYSTEM_PROMPT_V2)
         ai_result = await _ai_generate(
-            _adapt_prompt(MONTHLY_SYSTEM_PROMPT_V2) if is_private else MONTHLY_SYSTEM_PROMPT_V2,
+            monthly_system,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             temperature=config.MONTHLY_TEMPERATURE,
             json_mode=True, max_tokens=config.DEEPSEEK_MAX_TOKENS_MONTHLY,
@@ -1501,8 +1511,10 @@ async def generate_monthly_report(
         user_prompt = _build_monthly_prompt(
             aggregated, date_start, date_end, prev_month_summary, weekly_context
         )
+        db_prompt = get_default_prompt("monthly")
+        monthly_system = db_prompt or (_adapt_prompt(MONTHLY_SYSTEM_PROMPT) if is_private else MONTHLY_SYSTEM_PROMPT)
         ai_result = await _ai_generate(
-            _adapt_prompt(MONTHLY_SYSTEM_PROMPT) if is_private else MONTHLY_SYSTEM_PROMPT,
+            monthly_system,
             _adapt_prompt(user_prompt) if is_private else user_prompt,
             model=config.DEEPSEEK_REASONER_MODEL,
             json_mode=True, group_id=group_id, model_config=model_config,

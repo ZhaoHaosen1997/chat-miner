@@ -393,14 +393,22 @@ async def api_set_default_prompt(profile_id: int):
     return {"code": 200, "message": "已设为默认", "data": profile}
 
 
-# v1.5.4: 各分析类型的硬编码默认 system prompt（供前端预填参考）
+# v1.18.1: 各分析类型的硬编码默认 system prompt（供前端预填参考）
+# 直接引用各 pipeline 的实际 fallback，避免简化版与实际不一致
+from services.pipelines import DAILY_ONLINE_SYSTEM, PORTRAIT_ONLINE_SYSTEM
+from services.weekly_report import WEEKLY_SYSTEM_PROMPT_V2, MONTHLY_SYSTEM_PROMPT_V2
+from services.annual_report import ANNUAL_SYSTEM_PROMPT
+from routers.persona import COMPREHENSIVE_PORTRAIT_SYSTEM
+from services.event_detector import _EVENT_DEFAULT_SYSTEM_PROMPT
+
 _DEFAULT_SYSTEM_PROMPTS = {
-    "daily": "你是一个群聊观察者，善于从对话中提取关键信息。请用简洁有趣的方式总结。",
-    "portrait": "你是一个性格分析师，善于从聊天记录中洞察说话者的性格特征和语言风格。",
-    "weekly": "你是一位喜剧作家+人类学家+小说家。请用幽默深刻的笔触撰写群聊周报。",
-    "monthly": "你是一位人类学家+社区分析师+电影预告片编剧。请用宏大叙事撰写群聊月报。",
-    "annual": "你是一位颁奖典礼主持人+群聊人类学家。请用典礼风格撰写年度报告。",
-    "comprehensive": "你是一位跨群人格分析专家。同一个人在不同群里可能展现不同侧面，你的任务是综合所有群的表现，提炼出核心人格特质和群际差异。",
+    "daily": DAILY_ONLINE_SYSTEM,
+    "portrait": PORTRAIT_ONLINE_SYSTEM,
+    "weekly": WEEKLY_SYSTEM_PROMPT_V2,
+    "monthly": MONTHLY_SYSTEM_PROMPT_V2,
+    "annual": ANNUAL_SYSTEM_PROMPT,
+    "comprehensive": COMPREHENSIVE_PORTRAIT_SYSTEM,
+    "event_detection": _EVENT_DEFAULT_SYSTEM_PROMPT,
 }
 
 
@@ -408,4 +416,6 @@ _DEFAULT_SYSTEM_PROMPTS = {
 async def api_get_default_prompt(analysis_type: str):
     """获取某分析类型的系统默认提示词（供新建时参考）"""
     prompt = _DEFAULT_SYSTEM_PROMPTS.get(analysis_type, "")
+    if analysis_type == "annual" and "{award_count}" in prompt:
+        prompt = prompt.replace("{award_count}", "6")
     return {"code": 200, "message": "ok", "data": {"analysis_type": analysis_type, "system_prompt": prompt}}

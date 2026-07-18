@@ -13,6 +13,10 @@ from services.analyzer import call_ollama_chat
 from services.task_manager import task_manager
 from config import config
 
+# ---- 共享常量 ----
+MOOD_OPTIONS = "欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 凡尔赛 社死 真香 画饼 离谱 上头"
+ACTIVE_HOUR_OPTIONS = "上午摸鱼 午间活跃 下午茶话会 晚间热闹 夜猫子专场 凌晨修仙 全天在线"
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +66,7 @@ PROMPTS = {
     },
     "mood": {
         "system": "你是一个情绪识别工具。只回答一个词。不要输出任何其他内容。",
-        "user": "{chat}\n\n今天群聊的整体氛围是什么？只回答一个词（从以下选）：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 开车 破防 凡尔赛 社死 真香 画饼 CPU 离谱 上头",
+        "user": "{chat}\n\n今天群聊的整体氛围是什么？只回答一个词（从以下选）：" + MOOD_OPTIONS,
     },
     "keywords": {
         "system": "你是一个关键词提取工具。只输出 3-5 个关键词，逗号分隔。不要输出任何其他内容。",
@@ -320,6 +324,7 @@ def _auto_select_emoji(top_emojis: list[dict], peak_hour: int,
 MOOD_MAP = {
     "欢乐":"😄","温馨":"🥰","热闹":"🎉","沙雕":"🤪","吐槽":"😤","摸鱼":"🎣",
     "摆烂":"🫠","内卷":"💪","吃瓜":"🍉","破防":"💔","离谱":"👽","平淡":"😐",
+    "严肃":"🧐","伤感":"😢","凡尔赛":"💅","社死":"🙈","真香":"🤤","画饼":"🥞","上头":"🔥",
 }
 
 
@@ -648,9 +653,8 @@ DAILY_ONLINE_SYSTEM = """你是一个群聊观察员，每天为群聊写日报�
 
 ⚠️ 重要：所有涉及群友的地方，必须用 [数字] 格式引用（如 [1]、[13]），不要用昵称或裸数字。"""
 
-DAILY_ONLINE_USER = """分析以下群聊记录，生成一份完整的日报JSON。
-
-{chat}
+DAILY_ONLINE_USER = f"""## 任务
+分析群聊记录，生成一份完整的日报JSON。
 
 ## 分析步骤
 1. 先浏览全部消息，找出今天的主线话题（2-4个）
@@ -658,18 +662,21 @@ DAILY_ONLINE_USER = """分析以下群聊记录，生成一份完整的日报JSO
 3. 判断整体氛围，从选项中选一个情绪词
 4. 提炼关键词、写总结、找高光时刻
 
+## 群聊记录
+{{chat}}
+
 ## 输出格式（严格按此结构，不要输出任何解释）
 {{
   "topic_summary": ["话题1", "话题2"],
   "funny_quotes": [
     {{"speaker": "[N]", "quote": "原话", "comment": "你的犀利吐槽"}}
   ],
-  "mood": "从以下选一个：欢乐 温馨 热闹 沙雕 吐槽 摸鱼 摆烂 内卷 吃瓜 破防 离谱 平淡",
+  "mood": "从以下选一个：{MOOD_OPTIONS}",
   "mood_emoji": "对应emoji",
   "keywords": ["关键词1", "关键词2", "关键词3"],
   "one_line": "总结今天聊了什么（30字内，要有梗，群友用[N]格式）",
   "highlight": "今天最值得记录的瞬间（群友用[N]格式）",
-  "active_hours": "活跃时段，从以下选一个：上午摸鱼 午间活跃 下午茶话会 晚间热闹 夜猫子专场 凌晨修仙 全天在线",
+  "active_hours": "活跃时段，从以下选一个：{ACTIVE_HOUR_OPTIONS}",
   "headline": "综艺预告片风格的悬念标题，不要总结内容，要吸引人点开看（20字内）",
   "scene_commentary": "对最搞笑的名场面配一句花字吐槽（15字内）"
 }}
@@ -1054,7 +1061,15 @@ async def run_portrait_pipeline(chat_text: str, sender_name: str,
 
 # ---- 在线模型单次调用画像 v0.12.2 ----
 
-PORTRAIT_ONLINE_SYSTEM = """你是一个群聊人物画像分析师。根据发言记录生成一份完整的成员画像JSON。严格按JSON格式输出，不要输出任何其他内容。"""
+PORTRAIT_ONLINE_SYSTEM = """你是一个综艺节目的首席观察员，擅长从只言片语中看透一个人。
+
+风格要求：
+- 画像要像给朋友八卦一样生动，不要像写人事档案
+- 标签要有区分度——"幽默""话痨"几乎适用于所有人，只有确实突出时才用
+- deep_insight 要有"原来如此"的洞察力，不要说正确的废话
+- 根据发言判断性别，不要用性别错位的称呼（如对女生叫大哥、兄弟）
+
+严格按JSON格式输出，不要输出任何其他内容。"""
 
 PORTRAIT_ONLINE_USER = """分析成员 {name} 的发言，生成完整画像JSON。
 
@@ -1072,7 +1087,7 @@ PORTRAIT_ONLINE_USER = """分析成员 {name} 的发言，生成完整画像JSON
   "emoji_label": "标签词（从下面的列表选一个）",
   "emotion_summary": "一句话情绪特征总结",
   "language_notes": "2-3句话的语言风格描述",
-  "deep_insight": "一段话的深度分析：这个人的变化趋势、隐藏特质、在群里的独特价值"
+  "deep_insight": "深度分析，分三句：1)表面上看ta是xxx 2)实际上ta有xxx的隐藏特质 3)在群里ta的独特价值是xxx"
 }}
 
 性格标签参考（可自由发挥）：较真 随和 社恐 自来熟 刀子嘴 老好人 玻璃心 佛系 急性子 细节控 强迫症 摆烂王 卷王 乐子人 吃货 愤青 文艺
@@ -1083,7 +1098,7 @@ PORTRAIT_ONLINE_USER = """分析成员 {name} 的发言，生成完整画像JSON
 
 emoji标签参考：乐天派 整活王 暖心 暴脾气 老学究 派对咖 emo怪 沙雕 吃瓜群众 摸鱼达人 摆烂王 卷王 老司机 玻璃心 凡尔赛 社死选手 夜猫子 游戏宅 美食家 潜水冠军 捧场王 毒舌 话痨 文艺青年
 
-注意：根据发言判断性别，不要用性别错位的称呼。deep_insight 要有洞察力，不要泛泛而谈。"""
+注意：deep_insight 严格按三句结构输出，要有具体依据，不要泛泛而谈。"""
 
 
 async def run_portrait_pipeline_online(
@@ -1275,7 +1290,7 @@ async def _run_monthly_slice(task, month_label: str, chat_text: str,
 
     # 子任务 2：当月情绪
     mood_system = "你是一个情绪识别工具。只回答一个词。"
-    mood_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。ta 这个月的发言情绪是什么？只回答一个词：欢乐 温馨 严肃 吐槽 平淡 热闹 伤感 沙雕 吃瓜 摸鱼 摆烂 内卷 破防 凡尔赛 社死 真香 画饼 离谱 上头"
+    mood_user = f"{safe_chat}\n\n以上是 {safe_name} 在 {month_label} 的发言。ta 这个月的发言情绪是什么？只回答一个词：{MOOD_OPTIONS}"
     mood_result = await _run_sub(task, f"月度情绪 {month_label}", 0, 2,
                                   mood_system, mood_user, model)
 

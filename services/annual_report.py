@@ -53,7 +53,7 @@ ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼
   "annual_awards": [
     {
       "award_name": "奖项名（4-8字，纯奖项标题，不含人名）",
-      "winner": "成员编号（如#1、#3，必须是成员列表中给出的编号）",
+      "winner": "成员编号（如[1]、[3]，必须是成员列表中给出的编号）",
       "award_reason": "颁奖词（20-40字，说明获奖理由，可用别名描述）",
       "award_emoji": "emoji"
     }
@@ -78,7 +78,7 @@ ANNUAL_SYSTEM_PROMPT = """你是一位资深的年度颁奖典礼主持人，兼
 12. AI特别奖 — 值得特别表彰的独特贡献
 
 ## 重要规则
-- winner 字段必须使用 #数字 格式，如 "#1"、#3"，对应成员列表中的编号
+- winner 字段必须使用 [数字] 格式，如 "[1]"、"[3]"，对应成员列表中的编号
 - award_name 是纯奖项标题（如"年度金句王"），不要在里面写人名
 - 每个获奖者只能拿一个奖（一人一奖）
 - 奖项数量 = {award_count} 个，严格按这个数量输出
@@ -147,7 +147,14 @@ async def generate_annual_report(group_id: int, year: int, chat,
     if task:
         task.update(status="running", step="正在调用 DeepSeek 生成年度报告...")
 
-    system_prompt = ANNUAL_SYSTEM_PROMPT.replace("{award_count}", str(award_count))
+    db_prompt = get_default_prompt("annual")
+    if db_prompt:
+        if "{award_count}" in db_prompt:
+            system_prompt = db_prompt.replace("{award_count}", str(award_count))
+        else:
+            system_prompt = db_prompt + f"\n\n重要：奖项数量 = {award_count} 个，严格按这个数量输出。"
+    else:
+        system_prompt = ANNUAL_SYSTEM_PROMPT.replace("{award_count}", str(award_count))
     ai_result = await _ai_generate(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -171,7 +178,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
     if not ai_data:
         return {"success": False, "error": "AI 返回格式异常，无法解析 JSON"}
 
-    # 8. 解析奖项（用 #N 编号映射成员）
+    # 8. 解析奖项（用 [N] 编号映射成员）
     member_index = raw_data["member_index"]  # [{wxid, sender_id, detail}, ...]
     member_map = raw_data["member_map"]  # {wxid: member_id}
     member_names_map = {}
@@ -183,8 +190,8 @@ async def generate_annual_report(group_id: int, year: int, chat,
     skipped_awards = 0
     for award in awards:
         winner_raw = str(award.get("winner", "")).strip()
-        # 解析 #N 格式
-        match = re.match(r'#(\d+)', winner_raw)
+        # 解析 [N] 格式（兼容旧版 #N 格式）
+        match = re.match(r'\[(\d+)\]', winner_raw) or re.match(r'#(\d+)', winner_raw)
         idx = int(match.group(1)) - 1 if match else -1
 
         if 0 <= idx < len(member_index):
@@ -194,7 +201,7 @@ async def generate_annual_report(group_id: int, year: int, chat,
         else:
             member_id = 0
             display_name = winner_raw
-            logger.warning("无法解析获奖者: winner=%s (期望 #N 格式，N=1~%d)", winner_raw, len(member_index))
+            logger.warning("无法解析获奖者: winner=%s (期望 [N] 格式，N=1~%d)", winner_raw, len(member_index))
 
         reason = award.get("award_reason", "")
 
@@ -479,7 +486,7 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
     for i, m in enumerate(member_index[:20]):
         d = m["detail"]
         member_index_lines.append(
-            f"[#{i+1}] [{m['sender_id']}] — {d['msg_count']}条消息，活跃{d['days_active']}天，"
+            f"[{i+1}] [{m['sender_id']}] — {d['msg_count']}条消息，活跃{d['days_active']}天，"
             f"高峰{d['peak_hour']}点，{d['style_label']}，{d['role_label']}"
         )
 
@@ -498,7 +505,7 @@ def _build_annual_prompt(raw_data: dict, monthly_summaries: list[dict], year: in
 ### 月度趋势
 {chr(10).join(f"- {t['month']}：{t['count']}条" for t in stats['monthly_trend'])}
 
-## 成员索引（用 #编号 引用获奖者）
+## 成员索引（用 [编号] 引用获奖者）
 {chr(10).join(member_index_lines)}
 
 ## 月度主题回顾
