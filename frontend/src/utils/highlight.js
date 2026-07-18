@@ -71,8 +71,8 @@ function highlightMixed(text) {
       return `${timeHtml} ${speakerHtml}${chatMatch[5]}${colorInline(rest)}`
     }
 
-    // 数据子标题: [YYYY-MM-DD (200条消息)] 或 [YYYY-MM-DD，200条]
-    const dateMatch = line.match(/^\[(\d{4}-\d{2}-\d{2})[，,\s]+(\d+)条消息?\]\s*$/)
+    // 数据子标题: [YYYY-MM-DD (200条消息)] 或 [YYYY-MM-DD，200条] 或 [YYYY-MM-DD, 200条消息]
+    const dateMatch = line.match(/^\[\d{4}-\d{2}-\d{2}[，,\s(]+\d+条消息?\)?\]\s*$/)
     if (dateMatch) {
       return `<span class="text-amber-600 italic">${line}</span>`
     }
@@ -104,26 +104,50 @@ function highlightMixed(text) {
   return colored.join('\n')
 }
 
-/** 内联着色：粗体、中文冒号键值、方括号标记 */
+/** 内联着色：粗体、书名号、方括号标记、中文冒号键值 */
 function colorInline(text) {
   // **粗体**
   text = text.replace(
     /\*\*(.+?)\*\*/g,
     '<strong class="text-slate-800">$1</strong>'
   )
+  // 《书名号》
+  text = text.replace(
+    /(《.+?》)/g,
+    '<span class="text-violet-500 italic">$1</span>'
+  )
   // 【标记文字】
   text = text.replace(
     /(【.+?】)/g,
     '<span class="text-violet-500 font-medium">$1</span>'
   )
-  // 内联 sender 标注：[N](数据) 如 [1](200条)
+  // 时间戳：[2026-01-01 13:48]
   text = text.replace(
-    /(\[(\d+)\])(\(([^)]+)\))/g,
-    '<span class="text-indigo-500">$1</span><span class="text-slate-400">$3</span>'
+    /(\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\])/g,
+    '<span class="text-amber-600">$1</span>'
   )
+  // 内联 sender 标注：[N](数据) 如 [1](200条)（先用占位符保护）
+  const senderSlots = []
+  text = text.replace(
+    /\[(\d+)\]\(([^)]+)\)/g,
+    function (m) {
+      const idx = senderSlots.length
+      senderSlots.push(`<span class="text-indigo-500">[${arguments[1]}]</span><span class="text-slate-400">(${arguments[2]})</span>`)
+      return `\x00SLOT${idx}\x00`
+    }
+  )
+  // [N] 行内群友引用
+  text = text.replace(
+    /\[(\d+)\]/g,
+    '<span class="text-indigo-500">[$1]</span>'
+  )
+  // 恢复 sender 标注占位符
+  text = text.replace(/\x00SLOT(\d+)\x00/g, function (m, idx) {
+    return senderSlots[idx]
+  })
   // 中文冒号 key：value（key 为中文/英文词）
   text = text.replace(
-    /(\b[一-鿿\w]+)(：)/g,
+    /([一-鿿\w]+)(：)/g,
     '<span class="text-slate-600">$1</span>$2'
   )
   return text
