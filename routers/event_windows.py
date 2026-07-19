@@ -401,8 +401,8 @@ async def _analyze_window_with_ai(chat, group_id: int,
         g = get_group(group_id)
         if g:
             group_name = g.get("display_name") or g.get("name", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("获取群 %d 名称失败: %s", group_id, e)
 
     system_prompt, user_prompt = _build_event_prompt(chat, window_msgs, group_name, group_id)
 
@@ -465,9 +465,9 @@ def _get_participant_map(group_id: int) -> dict:
                     val = m.get(field, "")
                     if val:
                         name_to_id[val] = mid
-    except Exception:
+    except Exception as e:
+        logger.warning("获取群 %d 成员映射失败: %s", group_id, e)
         pass
-    _participant_cache[cache_key] = name_to_id
     return name_to_id
 
 

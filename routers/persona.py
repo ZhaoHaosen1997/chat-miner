@@ -350,5 +350,6 @@ async def _run_comprehensive_portrait(persona: dict, task, model_id: int | None 
         logger.error(f"全面画像生成异常: {e}", exc_info=True)
         try:
             task.finish(success=False, error={"type": "internal_error", "detail": str(e)})
-        except Exception:
+        except Exception as e:
+            logger.error("任务 finish 失败: %s", e)
             pass

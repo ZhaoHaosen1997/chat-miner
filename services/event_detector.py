@@ -561,7 +561,9 @@ def _build_event_prompt(chat, window: list[dict], group_name: str = "",
 
     # v1.19.0: 共享格式化层
     from services.message_formatter import format_messages_for_ai
-    chat_text = format_messages_for_ai(window, senders=chat.senders)
+    from services.parser import build_member_name_set
+    member_names = build_member_name_set(window, chat.senders)
+    chat_text = format_messages_for_ai(window, senders=chat.senders, member_names=member_names)
     if chat_text:
         lines.append(chat_text)
 
@@ -738,8 +740,8 @@ null"""
         from services.model_config import get_effective_model
         try:
             local_cfg = get_effective_model("local")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("获取本地模型配置失败: %s", e)
     if not local_cfg:
         raise RuntimeError(f"未找到本地模型配置: {last_error}")
 
@@ -944,8 +946,8 @@ def _resolve_participant_ids(names: list[str], chat_or_group_id) -> list[int]:
                         val = m.get(field, "")
                         if val:
                             name_to_id[val] = mid
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("加载群成员名称映射失败: group_id=%s, %s", chat_or_group_id, e)
     else:
         chat = chat_or_group_id
         for sender in chat.senders:

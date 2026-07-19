@@ -9,8 +9,9 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import config
@@ -159,6 +160,15 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(CacheControlMiddleware)
+
+from fastapi import HTTPException as _HTTPException
+
+@app.exception_handler(_HTTPException)
+async def http_exception_handler(request: Request, exc: _HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": exc.status_code, "message": exc.detail, "data": None},
+    )
 
 # 版本/健康检查
 @app.get("/api/health")

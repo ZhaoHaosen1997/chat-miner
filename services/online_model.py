@@ -220,8 +220,8 @@ async def call_online_chat(
                 error=ret.get("error") or "",
                 status=ret.get("status", ""),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("AI 调用日志记录失败: %s", e)
 
     return ret
 

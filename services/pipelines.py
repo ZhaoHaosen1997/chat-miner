@@ -653,7 +653,7 @@ DAILY_ONLINE_SYSTEM = """你是一个群聊观察员，每天为群聊写日报�
 
 ⚠️ 重要：所有涉及群友的地方，必须用 [数字] 格式引用（如 [1]、[13]），不要用昵称或裸数字。"""
 
-DAILY_ONLINE_USER = f"""## 任务
+DAILY_ONLINE_USER = """## 任务
 分析群聊记录，生成一份完整的日报JSON。
 
 ## 分析步骤
@@ -663,7 +663,7 @@ DAILY_ONLINE_USER = f"""## 任务
 4. 提炼关键词、写总结、找高光时刻
 
 ## 群聊记录
-{{chat}}
+{chat}
 
 ## 输出格式（严格按此结构，不要输出任何解释）
 {{
@@ -718,7 +718,7 @@ async def run_daily_pipeline_online(
     # 构建 prompt
     hs = (hourly_stats or "(无小时分布数据)")
     full_chat = chat_for_prompt + f"\n\n小时消息分布：\n{hs}"
-    user_prompt = DAILY_ONLINE_USER.format(chat=full_chat)
+    user_prompt = DAILY_ONLINE_USER.format(chat=full_chat, MOOD_OPTIONS=MOOD_OPTIONS, ACTIVE_HOUR_OPTIONS=ACTIVE_HOUR_OPTIONS)
 
     # v1.18.3: 注入梗百科（放在末尾，降低权重）
     if group_id:

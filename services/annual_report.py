@@ -29,6 +29,7 @@ from services.stats_engine import (
 )
 from services.weekly_report import _ai_generate
 from services.desensitize import filter_pii, build_stable_id_map, resolve_sender_ids_deep
+from services.parser import build_member_name_set
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +416,8 @@ def _extract_annual_raw_data(chat, dates: list[str], group_id: int) -> dict | No
     # 6. v1.19.0: 均匀采样（删除"优先长消息"逻辑）
     from services.sampler import sample_uniform, format_sampled_messages
     sampled_raw = sample_uniform(by_date_msgs, per_day=3, total_limit=2000)
-    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120)
+    mention_names = build_member_name_set(sampled_raw, chat.senders)
+    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120, member_names=mention_names)
 
     stats = {
         "total_messages": total_text,

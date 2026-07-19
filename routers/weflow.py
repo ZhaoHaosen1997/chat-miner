@@ -229,17 +229,12 @@ async def unlink_group(group_id: int):
     """取消群与 WeFlow 会话的关联"""
     from models.database import get_conn
     group = _require_wechat_group(group_id)
-    conn = None
-    try:
-        conn = get_conn()
+    with get_conn() as conn:
         conn.execute(
             "UPDATE chat_groups SET weflow_auto_sync=0 WHERE id=?",
             (group_id,)
         )
         conn.commit()
-    finally:
-        if conn:
-            conn.close()
     return {
         "code": 200,
         "message": "已取消关联",
@@ -256,17 +251,12 @@ async def toggle_auto_sync(group_id: int, body: AutoSyncToggle):
     """按群开关 WeFlow 自动同步"""
     from models.database import get_conn
     group = _require_wechat_group(group_id)
-    conn = None
-    try:
-        conn = get_conn()
+    with get_conn() as conn:
         conn.execute(
             "UPDATE chat_groups SET weflow_auto_sync=? WHERE id=?",
             (1 if body.enabled else 0, group_id)
         )
         conn.commit()
-    finally:
-        if conn:
-            conn.close()
     return {
         "code": 200,
         "message": f"自动同步已{'开启' if body.enabled else '关闭'}",

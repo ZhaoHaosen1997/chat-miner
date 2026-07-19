@@ -35,8 +35,9 @@ def db():
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.warning("数据库操作异常，已回滚: %s", e)
         raise
     finally:
         conn.close()
@@ -100,8 +101,9 @@ def _backup_db_if_exists():
             if old_version != config.VERSION:
                 logger.info(f"版本变化 {old_version} → {config.VERSION}，创建新备份")
                 need_backup = True
-        except Exception:
+        except Exception as e:
             need_backup = True
+            logger.error("读取备份版本信息失败，将重新备份: %s", e)
 
     if need_backup:
         try:
@@ -773,8 +775,9 @@ def _migrate_v1_16_3(conn):
         for row in rows:
             try:
                 mx = _cmh(row[3] or 10, row[4] or 1, row[5] or "鱼苗")
-            except Exception:
+            except Exception as e:
                 mx = 20
+                logger.error("DB migrate v1.16.3: 计算 max_hp 失败 (fish id=%s)，使用默认值 20: %s", row[0], e)
             if mx < 1:
                 mx = 1
             # 如果当前 hp 超过新计算的 max_hp，修正 hp 到 max_hp
@@ -1137,7 +1140,8 @@ def add_group_meme(group_id: int, term: str, description: str,
                 (group_id, term.strip(), description.strip(), source, status)
             )
             return cur.lastrowid
-    except Exception:
+    except Exception as e:
+        logger.warning("添加梗失败 (group_id=%s, term=%s): %s", group_id, term, e)
         return None
 
 
@@ -1394,8 +1398,8 @@ def _migrate_db(conn):
             # 存量数据回填
             conn.execute("UPDATE ai_call_logs SET status = 'success' WHERE success = 1")
             conn.execute("UPDATE ai_call_logs SET status = 'error' WHERE success = 0")
-    except Exception:
-        pass  # ai_call_logs 表不存在（极旧的数据库）
+    except Exception as e:
+        logger.error("DB migrate: ai_call_logs 列迁移失败: %s", e)
 
     # v1.19.x: 去掉 task_id 的 FK 约束（task_id 存 UUID 字符串，不匹配 task_records.id 整数）
     try:
@@ -1440,8 +1444,8 @@ def _migrate_db(conn):
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_call_logs_group ON ai_call_logs(group_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_call_logs_created ON ai_call_logs(created_at)")
             logger.info("DB migrate: ai_call_logs FK 约束已移除")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("DB migrate: ai_call_logs FK 约束移除失败: %s", e)
 
     # group_members v0.5 迁移：唯一键从 sender_id 改为 wxid
     cur = conn.execute("PRAGMA index_list(group_members)")

@@ -179,5 +179,6 @@ def build_meme_prefix(group_id: int) -> str:
             if t and d:
                 lines.append(f'- "{t}"：{d}')
         return "\n".join(lines) if len(lines) > 1 else ""
-    except Exception:
+    except Exception as e:
+        logger.warning("加载梗百科注入失败: group=%d, %s", group_id, e)
         return ""

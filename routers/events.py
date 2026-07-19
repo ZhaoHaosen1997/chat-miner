@@ -218,7 +218,8 @@ def _get_member_names(group_id: int, member_ids: list) -> dict:
             if mid in member_ids:
                 name_map[mid] = m.get("display_name") or m.get("nickname") or str(mid)
         return name_map
-    except Exception:
+    except Exception as e:
+        logger.warning("获取群 %d 成员名称失败: %s", group_id, e)
         return {}
 
 

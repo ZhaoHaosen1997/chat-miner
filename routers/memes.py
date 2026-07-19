@@ -121,9 +121,12 @@ async def api_scan_memes(group_id: int):
                 group_id, len(approved_terms), len(pending_terms))
 
     from services.message_formatter import format_messages_for_ai
+    from services.parser import build_member_name_set
+    member_names = build_member_name_set(sampled, chat.senders)
     header = f'以下是群聊"{gname}"的近期消息。请仔细观察，发现其中可能的自有梗：'
     chat_text = format_messages_for_ai(sampled, include_time=False, use_stable_id=False,
-                                        filter_content=False, filter_pii_content=True)
+                                        filter_content=False, filter_pii_content=True,
+                                        member_names=member_names)
     char_count = len(chat_text)
     lines = [header, chat_text] if chat_text else [header]
     if not chat_text:

@@ -30,6 +30,7 @@ from services.stats_engine import (
     compute_message_style, compute_topic_role, _build_dynamic_stop_words,
     WECHAT_EMOJI_PATTERN, strip_mentions,
 )
+from services.parser import build_member_name_set
 
 logger = logging.getLogger(__name__)
 
@@ -283,8 +284,9 @@ def _extract_period_raw_data(
         # 周报：全量采样
         sampled_raw = sample_full(by_date_msgs, total_limit=total_limit)
 
-    # 格式化：PII 过滤 + stable_id + 截断
-    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120)
+    # 格式化：PII 过滤 + @mention 剥离 + stable_id + 截断
+    member_names = build_member_name_set(all_msgs, chat.senders)
+    sampled = format_sampled_messages(sampled_raw, wxid_to_stable, content_limit=120, member_names=member_names)
 
     # 6. v1.19.0: 摘要轨道（日报 one_lines）
     from services.sampler import get_daily_summary_track

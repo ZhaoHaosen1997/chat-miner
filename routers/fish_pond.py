@@ -219,7 +219,8 @@ def resettle_pond(group_id: int, date: str = ""):
     try:
         from routers.groups import get_chat_cache
         chat = get_chat_cache(group_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("加载群 %d 聊天缓存失败: %s", group_id, e)
         raise HTTPException(400, "无法加载聊天数据，请先导入群")
 
     # 只取指定日期的消息
@@ -240,12 +241,11 @@ def delete_fish(group_id: int, wxid: str):
     fish = db.get_fish(group_id, wxid)
     if not fish:
         raise HTTPException(404, "鱼不存在")
-    conn = db.get_conn()
-    conn.execute("DELETE FROM fish_events WHERE group_id=? AND wxid=?", (group_id, wxid))
-    conn.execute("DELETE FROM fish_inventory WHERE group_id=? AND wxid=?", (group_id, wxid))
-    conn.execute("DELETE FROM fish_pond WHERE group_id=? AND wxid=?", (group_id, wxid))
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        conn.execute("DELETE FROM fish_events WHERE group_id=? AND wxid=?", (group_id, wxid))
+        conn.execute("DELETE FROM fish_inventory WHERE group_id=? AND wxid=?", (group_id, wxid))
+        conn.execute("DELETE FROM fish_pond WHERE group_id=? AND wxid=?", (group_id, wxid))
+        conn.commit()
     return {"code": 200, "message": f"已删除 {fish.get('fish_name', wxid)}", "data": None}
 
 
@@ -533,7 +533,8 @@ def parse_commands(group_id: int):
     try:
         from routers.groups import get_chat_cache
         chat = get_chat_cache(group_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("加载群 %d 聊天缓存失败: %s", group_id, e)
         raise HTTPException(400, "无法加载聊天数据，请先导入群")
 
     # 只取今日消息
@@ -558,14 +559,13 @@ def parse_commands(group_id: int):
     cmd_event_types = ("feed", "touch", "explore", "showoff", "battle", "train",
                        "born", "rename", "buy", "gift", "sim_command", "evolve",
                        "level_up", "market_buy")
-    conn = db.get_conn()
-    placeholders = ",".join("?" * len(cmd_event_types))
-    event_rows = conn.execute(
-        f"""SELECT * FROM fish_events WHERE group_id=? AND event_type IN ({placeholders})
-           AND date(created_at)=? ORDER BY created_at""",
-        (group_id, *cmd_event_types, today)
-    ).fetchall()
-    conn.close()
+    with db() as conn:
+        placeholders = ",".join("?" * len(cmd_event_types))
+        event_rows = conn.execute(
+            f"""SELECT * FROM fish_events WHERE group_id=? AND event_type IN ({placeholders})
+               AND date(created_at)=? ORDER BY created_at""",
+            (group_id, *cmd_event_types, today)
+        ).fetchall()
 
     today_events = []
     for evt in event_rows:
@@ -734,11 +734,10 @@ async def get_legendary_quest_status(group_id: int, wxid: str):
         # 检查今日是否已挑战
         date_str = datetime.now().strftime("%Y-%m-%d")
         quest_date_key = f"legendary_quest_date_{group_id}_{wxid}"
-        conn = db.get_conn()
-        row = conn.execute(
-            "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
-        ).fetchone()
-        conn.close()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
+            ).fetchone()
         today_attempted = (row and row["value"] == date_str)
         return {"code": 200, "message": "ok", "data": {
             "step": step,
@@ -779,14 +778,12 @@ async def do_legendary_quest(group_id: int, wxid: str):
         # 检查今日是否已尝试
         date_str = dt.now().strftime("%Y-%m-%d")
         quest_date_key = f"legendary_quest_date_{group_id}_{wxid}"
-        conn = db.get_conn()
-        row = conn.execute(
-            "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
-        ).fetchone()
-        if row and row["value"] == date_str:
-            conn.close()
-            raise HTTPException(400, "今日已挑战过，明天再来")
-        conn.close()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key=?", (quest_date_key,)
+            ).fetchone()
+            if row and row["value"] == date_str:
+                raise HTTPException(400, "今日已挑战过，明天再来")
 
         # 消耗精力
         db.update_fish_energy(group_id, wxid, 50)
@@ -807,16 +804,13 @@ async def do_legendary_quest(group_id: int, wxid: str):
                               is_proficient=is_prof, level=fish.get("level", 1))
 
         # 记录今日挑战
-        conn = db.get_conn()
-        try:
+        with db() as conn:
             conn.execute(
                 "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (quest_date_key, date_str)
             )
             conn.commit()
-        finally:
-            conn.close()
 
         if check.success:
             new_step = step + 1
@@ -893,15 +887,13 @@ async def set_bulletin(group_id: int, body: BulletinBody):
         content = (body.content or "").strip()
         if len(content) > 200:
             raise HTTPException(400, "公告牌内容最多200字符")
-        conn = db.get_conn()
-        conn.execute(
-            "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_bulletin_board', ?, 'string') "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (content,)
-        )
-        conn.commit()
-        conn.close()
-        # 刷新 config
+        with db() as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_bulletin_board', ?, 'string') "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (content,)
+            )
+            conn.commit()
         from config import config as _cfg
         _cfg.POND_BULLETIN_BOARD = content
         return {"code": 200, "message": "公告牌已更新", "data": {"content": content}}
@@ -1005,14 +997,13 @@ async def debug_set_weather(group_id: int, body: DebugWeatherBody):
         valid = {"sunny","rain","storm","rainbow","double_rainbow","sandstorm","meteor"}
         if body.weather_type not in valid:
             raise HTTPException(400, f"无效天气类型，可选: {', '.join(sorted(valid))}")
-        conn = db.get_conn()
-        conn.execute(
-            "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_cheat_weather_override', ?, 'string') "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (body.weather_type,)
-        )
-        conn.commit()
-        conn.close()
+        with db() as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, value_type) VALUES ('pond_cheat_weather_override', ?, 'string') "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (body.weather_type,)
+            )
+            conn.commit()
         from config import config as _cfg
         _cfg.POND_CHEAT_WEATHER_OVERRIDE = body.weather_type
         db.add_fish_event(group_id, "", "flavor", {
@@ -1063,14 +1054,13 @@ async def debug_revive_fish(group_id: int, body: DebugReviveBody):
         if fish.get("is_alive"):
             raise HTTPException(400, "鱼还活着，无需复活")
         # 复活
-        conn = db.get_conn()
-        conn.execute("UPDATE fish_pond SET is_alive=1, hp=1 WHERE group_id=? AND wxid=?",
-                     (group_id, body.wxid))
-        max_energy = fish.get("max_energy", 100)
-        conn.execute("UPDATE fish_pond SET energy=? WHERE group_id=? AND wxid=?",
-                     (max_energy, group_id, body.wxid))
-        conn.commit()
-        conn.close()
+        with db() as conn:
+            conn.execute("UPDATE fish_pond SET is_alive=1, hp=1 WHERE group_id=? AND wxid=?",
+                         (group_id, body.wxid))
+            max_energy = fish.get("max_energy", 100)
+            conn.execute("UPDATE fish_pond SET energy=? WHERE group_id=? AND wxid=?",
+                         (max_energy, group_id, body.wxid))
+            conn.commit()
         db.add_fish_event(group_id, body.wxid, "flavor", {
             "text": "被不明力量复活了"
         })

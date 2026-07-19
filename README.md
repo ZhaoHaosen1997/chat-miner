@@ -2,7 +2,7 @@
 
 基于在线大模型（主力）/ 本地 Ollama（兜底）的群聊分析工具。导入微信/QQ 聊天记录，自动生成日报、周报、月报、年报、群友画像和趣味内容。
 
-> **当前版本**: v1.18.8
+> **当前版本**: v1.19.2
 > **技术栈**: FastAPI + SQLite + Vue3 + TailwindCSS + DeepSeek / OpenAI 兼容 API + Ollama
 
 ---
@@ -42,8 +42,10 @@
 ### 👤 群友画像
 - 基础画像：性格标签、说话风格、群内角色、兴趣、活跃时段、口头禅、人设描述
 - 深度画像（在线模型）：情绪特征、语言风格洞察、变化趋势
-- Python 统计补强：24h 热力图、消息长度分布、常用表情、高频词
+- Python 统计补强：24h 热力图、消息长度分布、常用表情、高频词（jieba 分词）
 - 社交关系网络：互动排行 + AI 关系类型判断
+- 考古挖掘：首条消息、最长发言、历史之最
+- 跨群身份：同一人在多个群的画像合并，生成综合人格分析
 
 ### 🔄 WeFlow 同步
 - 微信聊天记录持续同步，增量合并
@@ -53,11 +55,20 @@
 ### 🐟 群鱼塘
 - 养鱼游戏化：22 种水生生物 + 六维属性 + 掷骰检定
 - 斜杠指令、每日结算、天气系统、进化、黑市
+- 鳞币经济：商店、黑市、赠礼、消费
+- 塘主经营：升级设施、颁布法令、公告栏
+- 传奇任务、关系网、季节变化
+
+### 🔍 AI 调用日志
+- 所有 AI 调用自动记录：管线类型、Prompt、响应、Token 用量、耗时、状态
+- 前端 AI 日志面板，按任务 / 管线 / 状态筛选
+- 三种状态：成功 / 失败 / 格式异常
+- 旧日志自动清理
 
 ### ⚙️ 灵活配置
 - 多模型管理：在线 API + 本地 Ollama，可独立指定日报 / 画像默认模型
-- 可配置 Prompt：日报 / 画像 / 事件探测系统提示词可自定义
-- 过滤词管理：高频词统计 + AI 分析双层面过滤
+- 7 种可配置 Prompt：日报 / 画像 / 周报 / 月报 / 年报 / 综合画像 / 事件探测
+- 过滤词管理：词频统计 + AI 分析双层面过滤
 - 在线模型失败自动降级到本地
 
 ---
@@ -75,17 +86,21 @@
        ├──→ annual_report.py   ←── 年报管线（月报摘要聚合 + AI 生成）
        ├──→ event_detector.py  ←── 事件探测（Python 尖峰检测 + AI 叙述）
        ├──→ portrait.py        ←── 画像生成（在线单次 / 本地分步）
-       ├──→ memes.py           ←── 梗百科（AI 扫描 + 人工审核 + 上下文注入）
+       │
+       ├──→ message_formatter.py  ←── 消息格式化共享层（PII 过滤 + stable_id + 截断）
+       ├──→ pipeline_context.py   ←── 管线上下文（统一 AI 调用入口 + task_id 传递）
+       ├──→ ai_logger.py          ←── AI 调用日志（自动记录 Prompt/响应/Token/耗时）
        │
        ├──→ desensitize.py     ←── 脱敏层：PII 过滤 + senderID 匿名化 + 昵称恢复
-       ├──→ stats_engine.py    ←── Python 纯计算（活跃/语言/关系/情绪）
+       ├──→ stats_engine.py    ←── Python 纯计算（活跃/语言/关系/情绪）+ jieba 分词
+       ├──→ sampler.py         ←── 采样策略（金字塔压缩：日报→周报→月报→年报）
        ├──→ online_model.py    ←── OpenAI 兼容 API 调用层
        ├──→ analyzer.py        ←── Ollama 本地模型调用层
        │
        └──→ FastAPI ──→ Vue3 SPA       ←── 前后端同端口 8856
 ```
 
-**设计原则**：Python 做统计，AI 做总结。发送人全链路匿名化（stable_id），AI 返回后恢复昵称。在线模型主力，本地模型兜底。
+**设计原则**：Python 做统计，AI 做总结。发送人全链路匿名化（stable_id），AI 返回后恢复昵称。在线模型主力，本地模型兜底。采样策略采用金字塔压缩——日报用原始消息，周报用日报摘要，月报用周报摘要，年报用月报摘要。
 
 ---
 
@@ -143,13 +158,17 @@ chat-miner/
 │   └── database.py             # SQLite CRUD + 表定义 + 迁移
 ├── services/
 │   ├── parser.py               # JSON 解析 + pickle 缓存
+│   ├── message_formatter.py    # 消息格式化共享层（PII + stable_id + 截断）
+│   ├── pipeline_context.py     # 管线上下文（统一 AI 调用 + task_id）
+│   ├── ai_logger.py            # AI 调用日志记录
 │   ├── pipelines.py            # 日报管线（在线 + 本地）
 │   ├── weekly_report.py        # 周报/月报管线
 │   ├── annual_report.py        # 年报管线
 │   ├── event_detector.py       # 事件探测管线
 │   ├── portrait.py             # 画像生成
 │   ├── desensitize.py          # 脱敏层（PII + senderID + 梗百科前缀）
-│   ├── stats_engine.py         # Python 统计（活跃/语言/关系/情绪）
+│   ├── stats_engine.py         # Python 统计（活跃/语言/关系/情绪）+ jieba 分词
+│   ├── sampler.py              # 采样策略（金字塔压缩）
 │   ├── online_model.py         # OpenAI 兼容 API 调用
 │   ├── analyzer.py             # Ollama 本地模型调用
 │   ├── model_config.py         # 模型配置解析
@@ -162,6 +181,8 @@ chat-miner/
 │   ├── events.py               # 事件
 │   ├── event_windows.py        # 事件窗口
 │   ├── memes.py                # 梗百科
+│   ├── persona.py              # 跨群身份
+│   ├── ai_logs.py              # AI 调用日志
 │   ├── stats.py                # 统计 + 健康检查
 │   ├── settings.py             # 设置页
 │   ├── tasks.py                # 任务进度
@@ -179,9 +200,12 @@ chat-miner/
 │       │   ├── MemeEncyclopedia.vue  # 梗百科
 │       │   ├── Portraits.vue         # 画像卡片列表
 │       │   ├── PortraitDetail.vue    # 画像详情
-│       │   ├── ComprehensivePortrait.vue
-│       │   ├── Settings.vue          # 设置页
+│       │   ├── ComprehensivePortrait.vue  # 跨群综合画像
 │       │   ├── FishPond.vue          # 群鱼塘
+│       │   ├── FishDailyReport.vue   # 鱼塘日报
+│       │   ├── PondManagement.vue    # 塘主经营
+│       │   ├── AiCallLogs.vue        # AI 调用日志
+│       │   ├── Settings.vue          # 设置页
 │       │   └── TaskHistory.vue       # 任务记录
 │       ├── components/
 │       │   ├── Layout.vue            # 主布局
@@ -189,8 +213,17 @@ chat-miner/
 │       │   ├── GroupSelector.vue     # 群选择器
 │       │   ├── UploadModal.vue       # 导入弹窗
 │       │   ├── WeFlowImportModal.vue # WeFlow 同步弹窗
+│       │   ├── ProgressPanel.vue     # 任务进度面板（SSE）
+│       │   ├── ErrorModal.vue        # 全局错误弹窗
+│       │   ├── ChatSimulator.vue     # 聊天消息模拟器
 │       │   ├── WordCloud.vue         # Canvas 词云
-│       │   └── RelatedEvents.vue     # 关联事件
+│       │   ├── RelatedEvents.vue     # 关联事件
+│       │   ├── FishTank.vue          # 鱼缸可视化
+│       │   ├── FishCard.vue          # 鱼详情卡片
+│       │   ├── FishLeaderboard.vue   # 鱼塘排行榜
+│       │   ├── FishStatusBubble.vue  # 鱼状态气泡
+│       │   ├── EnergyBar.vue         # 精力条
+│       │   └── PondEventTimeline.vue # 鱼塘事件时间轴
 │       └── api/
 │           └── index.js              # 前端 API 封装
 └── data/                       # 数据目录（不纳入版本控制）
@@ -202,6 +235,9 @@ chat-miner/
 
 | 版本 | 亮点 |
 |------|------|
+| v1.19.2 | 提示词格式化 + 高亮规则增强 |
+| v1.19.1 | 提示词优化 — DB 覆盖修复 + 数据一致性 + 提示词质量提升 |
+| v1.19.0 | 底座重构 — jieba 分词 + 消息格式化共享层 + 采样策略重做 + AI 调用日志 + PipelineContext |
 | v1.18.8 | 群梗百科审核机制 + 独立页面 + 仪表盘互斥锁统一 + 报告生成跳转 + ESC 快捷键 |
 | v1.18.7 | WeFlow 同步优化 — 数据覆盖修复 + 定时同步完善 + 平台校验 |
 | v1.18.5 | QQ 群解析兼容 + 事件门槛优化 + senderID 稳定化 + NSIS 升级检测 |

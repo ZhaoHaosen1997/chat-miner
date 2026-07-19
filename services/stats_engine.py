@@ -31,8 +31,8 @@ def _load_jieba_userdict(group_id: int = 0):
                 jieba.add_word(term, freq=100)
         _jieba_dict_group_ids.add(group_id)
         logger.info("jieba 自定义词典已加载: group=%d words=%d", group_id, len(memes))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("加载 jieba 自定义词典失败: group=%d, %s", group_id, e)
 
 
 def _tokenize_chinese(text: str, group_id: int = 0) -> list[str]:
@@ -922,12 +922,11 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
 
     quotes = []
     try:
-        conn = get_conn()
-        rows = conn.execute(
-            "SELECT date, report_json FROM daily_reports WHERE group_id=? ORDER BY date DESC",
-            (group_id,)
-        ).fetchall()
-        conn.close()
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT date, report_json FROM daily_reports WHERE group_id=? ORDER BY date DESC",
+                (group_id,)
+            ).fetchall()
 
         for row in rows:
             date = row["date"]

@@ -24,7 +24,8 @@ def _load_custom_texts(key: str) -> list:
             parsed = _json.loads(raw) if raw.strip() else []
             return parsed if isinstance(parsed, list) else []
         return []
-    except Exception:
+    except Exception as e:
+        logger.warning("加载自定义文本失败: key=%s, %s", key, e)
         return []
 
 
@@ -463,13 +464,12 @@ def _execute_rare_event(group_id: int, evt_type: str, name: str,
 
     elif effect.get("revive"):
         cutoff = (datetime.now() - timedelta(days=7)).isoformat()
-        conn = db.get_conn()
-        dead = conn.execute(
-            """SELECT * FROM fish_pond WHERE group_id=? AND is_alive=0
-               AND updated_at >= ? ORDER BY updated_at DESC LIMIT 1""",
-            (group_id, cutoff)
-        ).fetchone()
-        conn.close()
+        with db() as conn:
+            dead = conn.execute(
+                """SELECT * FROM fish_pond WHERE group_id=? AND is_alive=0
+                   AND updated_at >= ? ORDER BY updated_at DESC LIMIT 1""",
+                (group_id, cutoff)
+            ).fetchone()
         if dead:
             dead = dict(dead)
             db.update_fish_multi(group_id, dead["wxid"], {"is_alive": 1, "hp": 1})
@@ -509,25 +509,23 @@ def _execute_rare_event(group_id: int, evt_type: str, name: str,
 
 def _record_last_event(group_id: int):
     """记录最后事件时间"""
-    conn = db.get_conn()
-    conn.execute(
-        "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (f"pond_last_event_at_{group_id}", datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (f"pond_last_event_at_{group_id}", datetime.now().isoformat())
+        )
+        conn.commit()
 
 
 def _treasury_tick(group_id: int):
     """金库进账"""
     try:
-        conn = db.get_conn()
-        row = conn.execute(
-            "SELECT SUM(balance) as total FROM scale_coin_wallet WHERE group_id = ?",
-            (group_id,)
-        ).fetchone()
-        conn.close()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT SUM(balance) as total FROM scale_coin_wallet WHERE group_id = ?",
+                (group_id,)
+            ).fetchone()
         total_coins = row["total"] if row and row["total"] else 0
         earn = max(3, int(total_coins * 0.05))
         db.add_treasury(group_id, earn, reason="event_tax",
@@ -641,11 +639,10 @@ def trigger_passive_events(group_id: int) -> list[dict]:
 
     # 检查冷却（同群 15 分钟内不重复触发）
     last_key = f"pond_last_event_at_{group_id}"
-    conn = db.get_conn()
-    row = conn.execute(
-        "SELECT value FROM app_settings WHERE key = ?", (last_key,)
-    ).fetchone()
-    conn.close()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (last_key,)
+        ).fetchone()
     if row and row["value"]:
         try:
             last_at = datetime.fromisoformat(row["value"])
@@ -659,28 +656,27 @@ def trigger_passive_events(group_id: int) -> list[dict]:
     # 0. 每日结算（当天首次触发）
     date_str = datetime.now().strftime("%Y-%m-%d")
     settle_key = f"pond_last_settle_date_{group_id}"
-    settle_conn = db.get_conn()
-    row = settle_conn.execute(
-        "SELECT value FROM app_settings WHERE key = ?", (settle_key,)
-    ).fetchone()
-    need_settle = not (row and row["value"] == date_str)
-    if need_settle:
-        try:
-            from services.fish_pond import settle_all_fish
-            settle_result = settle_all_fish(group_id, date_str)
-            if settle_result.get("settled"):
-                settle_conn.execute(
-                    "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (settle_key, date_str)
-                )
-                settle_conn.commit()
-                events_log.append({"type": "daily_settle",
-                                   "weather": settle_result.get("weather")})
-                logger.info(f"鱼塘每日结算完成 group={group_id} date={date_str}")
-        except Exception as e:
-            logger.warning(f"鱼塘每日结算失败 group={group_id}: {e}")
-    settle_conn.close()
+    with db() as settle_conn:
+        row = settle_conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (settle_key,)
+        ).fetchone()
+        need_settle = not (row and row["value"] == date_str)
+        if need_settle:
+            try:
+                from services.fish_pond import settle_all_fish
+                settle_result = settle_all_fish(group_id, date_str)
+                if settle_result.get("settled"):
+                    settle_conn.execute(
+                        "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (settle_key, date_str)
+                    )
+                    settle_conn.commit()
+                    events_log.append({"type": "daily_settle",
+                                       "weather": settle_result.get("weather")})
+                    logger.info(f"鱼塘每日结算完成 group={group_id} date={date_str}")
+            except Exception as e:
+                logger.warning(f"鱼塘每日结算失败 group={group_id}: {e}")
 
     # 1. 精力恢复
     from config import config as cfg

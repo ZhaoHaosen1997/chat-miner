@@ -848,15 +848,14 @@ def _count_today_events(group_id: int, wxid: str, event_type: str,
     """统计某条鱼今天已执行某类指令的次数（仅摸鱼保留每日限制）"""
     from datetime import datetime as dt
     today = date_str or dt.now().strftime("%Y-%m-%d")
-    conn = db.get_conn()
-    row = conn.execute(
-        """SELECT COUNT(*) as cnt FROM fish_events
-           WHERE group_id=? AND wxid=? AND event_type=?
-           AND date(created_at)=?""",
-        (group_id, wxid, event_type, today)
-    ).fetchone()
-    conn.close()
-    return row["cnt"] if row else 0
+    with db() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM fish_events
+               WHERE group_id=? AND wxid=? AND event_type=?
+               AND date(created_at)=?""",
+            (group_id, wxid, event_type, today)
+        ).fetchone()
+        return row["cnt"] if row else 0
 
 
 def _get_energy(group_id: int, wxid: str) -> tuple:
@@ -1285,12 +1284,11 @@ def cmd_rename(group_id: int, wxid: str, new_name: str,
     old_name = fish["fish_name"]
 
     # 检查是否首次改名（通过 events 判断）
-    conn = db.get_conn()
-    row = conn.execute(
-        "SELECT COUNT(*) as cnt FROM fish_events WHERE group_id=? AND wxid=? AND event_type='rename'",
-        (group_id, wxid)
-    ).fetchone()
-    conn.close()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM fish_events WHERE group_id=? AND wxid=? AND event_type='rename'",
+            (group_id, wxid)
+        ).fetchone()
 
     is_first = (row["cnt"] == 0)
 
@@ -1326,19 +1324,18 @@ def cmd_adopt(group_id: int, wxid: str, display_name: str,
     portrait_traits = None
     try:
         import json as _json
-        conn = db.get_conn()
-        member = conn.execute(
-            "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, wxid)
-        ).fetchone()
-        conn.close()
+        with db() as conn:
+            member = conn.execute(
+                "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, wxid)
+            ).fetchone()
         if member:
             portrait = db.get_portrait(group_id, member["id"])
             if portrait and portrait.get("portrait_json"):
                 portrait_data = _json.loads(portrait["portrait_json"])
                 if isinstance(portrait_data, dict):
                     portrait_traits = portrait_data.get("traits", [])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("加载画像性格失败: group=%d wxid=%s, %s", group_id, wxid, e)
     return create_fish(group_id, wxid, display_name,
                        message_count=message_count, portrait_traits=portrait_traits)
 
@@ -1494,11 +1491,10 @@ def execute_decree(group_id: int, decree_key: str,
 
 def batch_adopt(group_id: int) -> list[dict]:
     """一键领养：为所有没有存活鱼的群成员创建鱼"""
-    conn = db.get_conn()
-    members = conn.execute(
-        "SELECT wxid, display_name FROM group_members WHERE group_id = ?", (group_id,)
-    ).fetchall()
-    conn.close()
+    with db() as conn:
+        members = conn.execute(
+            "SELECT wxid, display_name FROM group_members WHERE group_id = ?", (group_id,)
+        ).fetchall()
 
     results = []
     for m in members:
@@ -1508,19 +1504,18 @@ def batch_adopt(group_id: int) -> list[dict]:
         import json as _json
         portrait_traits = None
         try:
-            conn2 = db.get_conn()
-            mb = conn2.execute(
-                "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, m["wxid"])
-            ).fetchone()
-            conn2.close()
+            with db() as conn2:
+                mb = conn2.execute(
+                    "SELECT id FROM group_members WHERE group_id=? AND wxid=?", (group_id, m["wxid"])
+                ).fetchone()
             if mb:
                 portrait = db.get_portrait(group_id, mb["id"])
                 if portrait and portrait.get("portrait_json"):
                     pd = _json.loads(portrait["portrait_json"])
                     if isinstance(pd, dict):
                         portrait_traits = pd.get("traits", [])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("加载画像性格失败: group=%d wxid=%s, %s", group_id, m["wxid"], e)
         result = create_fish(group_id, m["wxid"], m["display_name"] or m["wxid"],
                            portrait_traits=portrait_traits)
         results.append({"wxid": m["wxid"], "display_name": m["display_name"],
@@ -1534,33 +1529,27 @@ def get_hot_search(group_id: int, days: int = 7) -> dict:
     """鱼塘热搜榜：从 fish_events 聚合"""
     from datetime import datetime as dt, timedelta
     since = (dt.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    conn = db.get_conn()
+    with db() as conn:
+        trains = conn.execute(
+            """SELECT wxid, COUNT(*) as cnt FROM fish_events
+               WHERE group_id=? AND event_type='train' AND created_at >= ?
+               GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+            (group_id, since)
+        ).fetchone()
 
-    # 最卷鱼王
-    trains = conn.execute(
-        """SELECT wxid, COUNT(*) as cnt FROM fish_events
-           WHERE group_id=? AND event_type='train' AND created_at >= ?
-           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
-        (group_id, since)
-    ).fetchone()
+        treasures = conn.execute(
+            """SELECT wxid, COUNT(*) as cnt FROM fish_events
+               WHERE group_id=? AND event_type='treasure' AND created_at >= ?
+               GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+            (group_id, since)
+        ).fetchone()
 
-    # 最欧锦鲤
-    treasures = conn.execute(
-        """SELECT wxid, COUNT(*) as cnt FROM fish_events
-           WHERE group_id=? AND event_type='treasure' AND created_at >= ?
-           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
-        (group_id, since)
-    ).fetchone()
-
-    # 斗鱼狂魔
-    battles = conn.execute(
-        """SELECT wxid, COUNT(*) as cnt FROM fish_events
-           WHERE group_id=? AND event_type='battle' AND created_at >= ?
-           GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
-        (group_id, since)
-    ).fetchone()
-
-    conn.close()
+        battles = conn.execute(
+            """SELECT wxid, COUNT(*) as cnt FROM fish_events
+               WHERE group_id=? AND event_type='battle' AND created_at >= ?
+               GROUP BY wxid ORDER BY cnt DESC LIMIT 1""",
+            (group_id, since)
+        ).fetchone()
 
     def fish_name(wxid):
         if not wxid: return "—"
@@ -1585,11 +1574,10 @@ def _check_keeper_titles(group_id: int, context: str = ""):
     if getattr(_cfg, "POND_CHEAT_MODE", False):
         return  # v1.16.5: 作弊模式下跳过称号检查
     import json as _json
-    conn = db.get_conn()
-    row = conn.execute(
-        "SELECT value FROM app_settings WHERE key = 'pond_keeper_titles'"
-    ).fetchone()
-    conn.close()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'pond_keeper_titles'"
+        ).fetchone()
     unlocked = _json.loads(row["value"]) if row and row["value"] else []
 
     treasury = db.get_treasury(group_id)
@@ -1607,15 +1595,14 @@ def _check_keeper_titles(group_id: int, context: str = ""):
         if key not in unlocked and key in POND_KEEPER_TITLES and check():
             unlocked.append(key)
 
-    conn = db.get_conn()
-    conn.execute(
-        """INSERT INTO app_settings (key, value, value_type, description)
-           VALUES ('pond_keeper_titles', ?, 'string', '塘主已解锁称号')
-           ON CONFLICT(key) DO UPDATE SET value = ?""",
-        (_json.dumps(unlocked, ensure_ascii=False), _json.dumps(unlocked, ensure_ascii=False))
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO app_settings (key, value, value_type, description)
+               VALUES ('pond_keeper_titles', ?, 'string', '塘主已解锁称号')
+               ON CONFLICT(key) DO UPDATE SET value = ?""",
+            (_json.dumps(unlocked, ensure_ascii=False), _json.dumps(unlocked, ensure_ascii=False))
+        )
+        conn.commit()
 
 
 # ==================== 结算 ====================
@@ -1631,11 +1618,10 @@ def _build_relationships(group_id: int, date_str: str) -> int:
         return 0
 
     # 首批构建：检查是否首次运行（fish_relationships 为空）
-    conn = db.get_conn()
-    existing_count = conn.execute(
-        "SELECT COUNT(*) FROM fish_relationships WHERE group_id=?", (group_id,)
-    ).fetchone()[0]
-    conn.close()
+    with db() as conn:
+        existing_count = conn.execute(
+            "SELECT COUNT(*) FROM fish_relationships WHERE group_id=?", (group_id,)
+        ).fetchone()[0]
 
     if existing_count == 0:
         # 首次运行：扫描最近30天的 group 事件
@@ -1913,8 +1899,8 @@ def settle_fish(group_id: int, wxid: str, reference_date: str = None,
                 "fish_name": fish["fish_name"], "status": status,
             })
             events.append({"type": "daily_status", "text": status})
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("生成今日状态语失败: group=%d wxid=%s, %s", group_id, wxid, e)
 
     return {"settled": True, "events": events}
 
@@ -1959,28 +1945,27 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
             db.update_fish_field(group_id, wxid, "happiness", h)
 
     # 换季检测
-    settle_conn = db.get_conn()
-    last_season_row = settle_conn.execute(
-        "SELECT value FROM app_settings WHERE key = ?",
-        (f"pond_last_season_{group_id}",)
-    ).fetchone()
-    last_season = last_season_row["value"] if last_season_row else ""
-    if last_season and last_season != season["type"]:
-        db.add_fish_event(group_id, "", "flavor", {
-            "type": "season_change",
-            "old_season": last_season,
-            "new_season": season["type"],
-            "name": season["name"],
-            "emoji": season["emoji"],
-            "desc": f"季节变换：{season['emoji']} {season['name']}到了！{season['effect']}",
-        })
-    settle_conn.execute(
-        "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (f"pond_last_season_{group_id}", season["type"])
-    )
-    settle_conn.commit()
-    settle_conn.close()
+    with db() as settle_conn:
+        last_season_row = settle_conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (f"pond_last_season_{group_id}",)
+        ).fetchone()
+        last_season = last_season_row["value"] if last_season_row else ""
+        if last_season and last_season != season["type"]:
+            db.add_fish_event(group_id, "", "flavor", {
+                "type": "season_change",
+                "old_season": last_season,
+                "new_season": season["type"],
+                "name": season["name"],
+                "emoji": season["emoji"],
+                "desc": f"季节变换：{season['emoji']} {season['name']}到了！{season['effect']}",
+            })
+        settle_conn.execute(
+            "INSERT INTO app_settings (key, value, value_type) VALUES (?, ?, 'string') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (f"pond_last_season_{group_id}", season["type"])
+        )
+        settle_conn.commit()
 
     # 鲨鱼来袭 (1% 概率, DC12 STR 检定, v1.16.3 改为不直接杀)
     rng = random.Random(f"shark_{group_id}_{date_str}")
@@ -2050,12 +2035,11 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
     # v1.16.5: 清除调试天气覆盖
     from config import config as _cfg2
     if getattr(_cfg2, "POND_CHEAT_WEATHER_OVERRIDE", ""):
-        clr_conn = db.get_conn()
-        clr_conn.execute(
-            "UPDATE app_settings SET value='' WHERE key='pond_cheat_weather_override'"
-        )
-        clr_conn.commit()
-        clr_conn.close()
+        with db() as clr_conn:
+            clr_conn.execute(
+                "UPDATE app_settings SET value='' WHERE key='pond_cheat_weather_override'"
+            )
+            clr_conn.commit()
         _cfg2.POND_CHEAT_WEATHER_OVERRIDE = ""
 
     return {
@@ -2112,7 +2096,8 @@ def get_pond_state(group_id: int, reference_date: str = None) -> dict:
     from config import config as _cfg
     try:
         treasury = db.get_treasury(group_id)
-    except Exception:
+    except Exception as e:
+        logger.debug("加载金库数据失败: group=%d, %s", group_id, e)
         treasury = {"balance": 0, "total_earned": 0, "total_spent": 0}
 
     return {
@@ -2405,12 +2390,11 @@ def _execute_command(cmd: dict, group_id: int, wxid: str,
 
 def _find_wxid_by_name(group_id: int, name: str) -> str | None:
     """通过显示名查找 wxid"""
-    conn = db.get_conn()
-    row = conn.execute(
-        """SELECT wxid FROM group_members WHERE group_id=?
-           AND (display_name=? OR nickname=? OR group_nickname=?)
-           LIMIT 1""",
-        (group_id, name, name, name)
-    ).fetchone()
-    conn.close()
-    return row["wxid"] if row else None
+    with db() as conn:
+        row = conn.execute(
+            """SELECT wxid FROM group_members WHERE group_id=?
+               AND (display_name=? OR nickname=? OR group_nickname=?)
+               LIMIT 1""",
+            (group_id, name, name, name)
+        ).fetchone()
+        return row["wxid"] if row else None

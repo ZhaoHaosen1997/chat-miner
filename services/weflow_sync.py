@@ -431,9 +431,7 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
     new_date_end = max(dates) if dates else ""
 
     if new_date_end:
-        conn = None
-        try:
-            conn = get_conn()
+        with get_conn() as conn:
             conn.execute(
                 "UPDATE chat_groups SET message_count=?, date_range_end=MAX(COALESCE(date_range_end,''),?), "
                 "date_range_start=CASE WHEN date_range_start IS NULL OR date_range_start='' THEN ? "
@@ -441,9 +439,6 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
                 (len(merged), new_date_end, min(dates), min(dates), group_id)
             )
             conn.commit()
-        finally:
-            if conn:
-                conn.close()
 
     # 更新成员表
     if weflow_members:
@@ -499,17 +494,12 @@ def link_group_to_weflow(group_id: int, chatroom_id: str,
     from models.database import get_conn, upsert_members
 
     # 更新群 wxid
-    conn = None
-    try:
-        conn = get_conn()
+    with get_conn() as conn:
         conn.execute(
             "UPDATE chat_groups SET wxid=? WHERE id=?",
             (chatroom_id, group_id)
         )
         conn.commit()
-    finally:
-        if conn:
-            conn.close()
 
     # 拉取并更新成员
     try:

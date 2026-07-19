@@ -17,6 +17,7 @@ from models.database import (
 )
 from services.analyzer import analyze_daily_chat
 from services.message_formatter import format_messages_for_ai
+from services.parser import build_member_name_set
 from services.task_manager import task_manager
 from routers.groups import get_chat_cache
 
@@ -100,7 +101,8 @@ async def _do_run_analyze_and_save(group_id: int, group_name: str, date: str, ta
 
     # 根据模型类型决定格式化方式
     model_name = model_config.get("model_name", config.OLLAMA_MODEL)
-    chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders)
+    member_names = build_member_name_set(text_msgs, chat.senders)
+    chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders, member_names=member_names)
     if len(chat_text) > 100000:
         logger.warning(f"{date} 聊天文本过长 {len(chat_text)} 字符")
 
@@ -333,7 +335,8 @@ async def _do_run_analyze_all(group_id: int, group_name: str, task, model_id: in
 
         mark_date_analyzing(group_id, date)
         try:
-            chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders)
+            member_names = build_member_name_set(text_msgs, chat.senders)
+            chat_text = format_messages_for_ai(text_msgs, model=model_name, senders=chat.senders, member_names=member_names)
             # 传递 batch task，让 pipeline 的子步骤进度也推送到 SSE
             task.update("inference", f"({i+1}/{total}) 分析 {date}...",
                        progress={"current": i, "total": total})
@@ -502,7 +505,8 @@ async def api_trending_topics(group_id: int, days: int = 7):
         try:
             dt = datetime.strptime(last_date, "%Y-%m-%d")
             days_ago = max(0, (now - dt).days)
-        except Exception:
+        except Exception as e:
+            logger.warning("日期解析失败 '%s': %s", last_date, e)
             days_ago = days
         recency_bonus = max(0, days - days_ago) / max(days, 1)
         return round(count * (1 + recency_bonus), 1)
@@ -644,7 +648,8 @@ async def api_get_weekly(group_id: int, period_key: str):
         year, week = int(parts[0]), int(parts[1])
         try:
             start, end = iso_week_dates(year, week)
-        except Exception:
+        except Exception as e:
+            logger.warning("周标识解析失败 '%s': %s", period_key, e)
             raise HTTPException(400, detail=f"无效的周标识: {period_key}")
         raise HTTPException(404, detail=f"周报 {period_key} 尚未生成，请先生成")
 
@@ -826,7 +831,8 @@ async def api_get_monthly(group_id: int, period_key: str):
         year, month = int(parts[0]), int(parts[1])
         try:
             start, end = month_dates(year, month)
-        except Exception:
+        except Exception as e:
+            logger.warning("月标识解析失败 '%s': %s", period_key, e)
             raise HTTPException(400, detail=f"无效的月标识: {period_key}")
         raise HTTPException(404, detail=f"月报 {period_key} 尚未生成，请先生成")
 

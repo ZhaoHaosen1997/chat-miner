@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from services.desensitize import filter_pii
+from services.parser import strip_mention_from_content
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +121,15 @@ def format_sampled_messages(
     sampled: list[dict],
     wxid_to_stable: dict[str, int],
     content_limit: int = 120,
+    member_names: set[str] = None,
 ) -> list[dict]:
-    """格式化采样消息：PII 过滤 + stable_id + 截断
+    """格式化采样消息：PII 过滤 + @mention 剥离 + stable_id + 截断
 
     Args:
         sampled: 采样后的消息列表
         wxid_to_stable: {wxid: stable_id} 映射
         content_limit: 内容截断长度
+        member_names: 群成员名字集合（用于剥离 @mention）
 
     Returns:
         [{"date", "sender_id", "content", "time"}, ...]
@@ -139,6 +142,10 @@ def format_sampled_messages(
 
         # PII 过滤
         content = filter_pii(content)
+
+        # @mention 剥离
+        if member_names:
+            content = strip_mention_from_content(content, member_names)
 
         # 截断
         if len(content) > content_limit:

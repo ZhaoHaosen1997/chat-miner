@@ -122,8 +122,8 @@ class LogWindow:
 
         try:
             root.iconbitmap("assets/icon.ico")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("加载窗口图标失败: %s", e)
 
         # ---- 系统托盘 ----
         icon_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
@@ -265,7 +265,8 @@ class LogWindow:
                 from models.database import get_app_setting
                 s = get_app_setting("poll_interval_stats_s")
                 interval_s = int(s["value"]) if s and s.get("value") else 30
-            except Exception:
+            except Exception as e:
+                logger.debug("读取统计轮询间隔失败: %s", e)
                 interval_s = 30
             self._root.after(interval_s * 1000, _poll)
 
@@ -316,7 +317,8 @@ class LogWindow:
         try:
             from config import config
             current = config.VERSION
-        except Exception:
+        except Exception as e:
+            logger.debug("读取当前版本号失败: %s", e)
             current = "0.0.0"
 
         def _run():
@@ -355,8 +357,8 @@ class LogWindow:
             if self._tray:
                 self._tray.remove()
             self._root.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("窗口关闭清理失败: %s", e)
         os._exit(0)
 
 
