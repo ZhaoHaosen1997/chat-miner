@@ -120,10 +120,11 @@ async def api_upload_group(file: UploadFile = File(...)):
 
     # 保存文件
     config.ensure_dirs()
-    safe_name = Path(file.filename).stem
+    safe_filename = Path(file.filename).name
+    safe_name = Path(safe_filename).stem
     group_dir = config.DATA_DIR / f"import_{safe_name}"
     group_dir.mkdir(parents=True, exist_ok=True)
-    file_path = group_dir / file.filename
+    file_path = group_dir / safe_filename
 
     try:
         content = await file.read()
@@ -286,7 +287,8 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
     group_dir.mkdir(parents=True, exist_ok=True)
 
     # 保存上传文件
-    upload_path = group_dir / file.filename
+    safe_filename = Path(file.filename).name
+    upload_path = group_dir / safe_filename
     try:
         content = await file.read()
         with open(upload_path, "wb") as f:

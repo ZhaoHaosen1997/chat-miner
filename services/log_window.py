@@ -356,10 +356,11 @@ class LogWindow:
         try:
             if self._tray:
                 self._tray.remove()
+            self._root.quit()
             self._root.destroy()
         except Exception as e:
             logger.debug("窗口关闭清理失败: %s", e)
-        os._exit(0)
+        sys.exit(0)
 
 
 _log_window = None

@@ -138,12 +138,19 @@ _circuit_state = {
 }
 # v0.13.1: 熔断器异步锁，防止并发竞态
 import asyncio
-_circuit_lock = asyncio.Lock()
+_circuit_lock: asyncio.Lock | None = None
+
+
+def _get_circuit_lock() -> asyncio.Lock:
+    global _circuit_lock
+    if _circuit_lock is None:
+        _circuit_lock = asyncio.Lock()
+    return _circuit_lock
 
 
 async def _check_circuit() -> bool:
     """检查熔断器状态，返回 True 表示可以继续"""
-    async with _circuit_lock:
+    async with _get_circuit_lock():
         if not _circuit_state["tripped"]:
             return True
         # 检查冷却时间是否到了

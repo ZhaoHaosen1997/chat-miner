@@ -22,7 +22,6 @@ from models.database import (
     save_annual_awards, get_annual_awards, get_member_awards,
     get_members,
 )
-from services.online_model import call_deepseek_chat
 from services.stats_engine import (
     compute_activity_stats, compute_language_stats,
     compute_message_style, compute_topic_role,

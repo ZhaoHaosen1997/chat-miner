@@ -226,47 +226,6 @@ async def call_online_chat(
     return ret
 
 
-async def call_deepseek_chat(
-    system_prompt: str,
-    user_prompt: str,
-    model: str = "",
-    temperature: float = 0.8,
-    timeout: int = 0,
-    json_mode: bool = False,
-    thinking: bool = False,
-    max_tokens: int = 0,
-) -> dict:
-    """调用 DeepSeek API（向后兼容包装）
-
-    v0.12.0: 内部转为 call_online_chat，使用 .env 中的 DeepSeek 配置。
-    请优先使用 call_online_chat(model_config=...) 以支持动态模型配置。
-    """
-    model = model or config.DEEPSEEK_MODEL
-    max_tokens = max_tokens or 4096
-
-    if not config.DEEPSEEK_API_KEY:
-        return {
-            "success": False,
-            "data": None,
-            "error": "DeepSeek API Key 未配置，请在 .env 中设置 DEEPSEEK_API_KEY",
-            "model": model,
-            "duration_ms": 0,
-        }
-
-    model_config = {
-        "name": "DeepSeek (.env)",
-        "endpoint": config.DEEPSEEK_API_URL,
-        "api_key": config.DEEPSEEK_API_KEY,
-        "model_name": model,
-        "extra_params": {"temperature": temperature, "max_tokens": max_tokens},
-    }
-    return await call_online_chat(
-        system_prompt, user_prompt, model_config,
-        temperature=temperature, json_mode=json_mode,
-        thinking=thinking, max_tokens=max_tokens,
-        timeout=timeout,
-    )
-
 
 async def check_deepseek_health() -> dict:
     """检查 DeepSeek API 连通性和余额（轻量调用）"""
@@ -277,9 +236,16 @@ async def check_deepseek_health() -> dict:
             "error": "未配置 DEEPSEEK_API_KEY",
         }
     try:
-        result = await call_deepseek_chat(
+        model_config = {
+            "name": "DeepSeek (.env)",
+            "endpoint": config.DEEPSEEK_API_URL,
+            "api_key": config.DEEPSEEK_API_KEY,
+            "model_name": config.DEEPSEEK_MODEL,
+        }
+        result = await call_online_chat(
             system_prompt="回复一个单词 OK",
             user_prompt="OK",
+            model_config=model_config,
             temperature=0.0,
             timeout=15,
         )

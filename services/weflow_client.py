@@ -3,7 +3,7 @@ WeFlow HTTP API 客户端
 封装 ChatLab Pull 格式的核心接口
 """
 import logging
-import requests
+import httpx
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,13 @@ class WeFlowClient:
         self.base_url = base_url.rstrip("/")
         self.access_token = access_token
         self.timeout = timeout
-        self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self.access_token}",
-            "User-Agent": "chat-miner/1.0",
-        })
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(timeout),
+            headers={
+                "Authorization": f"Bearer {self.access_token}",
+                "User-Agent": "chat-miner/1.0",
+            } if access_token else {"User-Agent": "chat-miner/1.0"},
+        )
 
     def _get(self, path: str, params: dict = None) -> dict:
         """GET 请求，自动处理错误"""
@@ -49,14 +51,14 @@ class WeFlowClient:
         if params is None:
             params = {}
         try:
-            resp = self._session.get(url, params=params, timeout=self.timeout)
+            resp = self._client.get(url, params=params)
             resp.raise_for_status()
             return resp.json()
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             raise WeFlowError(f"无法连接 WeFlow ({self.base_url})，请确认 WeFlow 正在运行")
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             raise WeFlowError(f"WeFlow 请求超时 ({url})")
-        except requests.exceptions.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             raise WeFlowError(f"WeFlow HTTP {e.response.status_code}: {url}")
         except Exception as e:
             raise WeFlowError(f"WeFlow 请求失败: {e}")
@@ -147,7 +149,7 @@ class WeFlowClient:
 
     def close(self):
         """关闭会话"""
-        self._session.close()
+        self._client.close()
 
 
 class WeFlowError(Exception):

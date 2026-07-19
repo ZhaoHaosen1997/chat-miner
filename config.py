@@ -25,7 +25,7 @@ class Config:
     BASE_DIR = _get_base_dir()
 
     # ==================== 版本号（唯一版本源，发版时只需改此处） ====================
-    VERSION = "1.19.3"
+    VERSION = "1.19.4"
 
     # ==================== Ollama（本地模型 fallback） ====================
     OLLAMA_HOST = "http://localhost:11434"
@@ -70,9 +70,6 @@ class Config:
     ANNUAL_MIN_MSGS = 300
 
     # ==================== 事件探测 (v1.18.0) ====================
-    # v1.18.1: EVENT_WINDOW_SIZE/OVERLAP 已废弃，替换为自适应切分配置
-    EVENT_WINDOW_SIZE = 200          # deprecated — 不再使用
-    EVENT_WINDOW_OVERLAP = 20        # deprecated — 不再使用
     EVENT_AI_CONCURRENCY = 3
     EVENT_ACTIVE_GROUP_THRESHOLD = 30
     EVENT_ACTIVE_PEAK_ABSOLUTE = 80
@@ -87,7 +84,7 @@ class Config:
 
     # ==================== 本地大模型全局开关（v1.17.0） ====================
     LOCAL_LLM_ENABLED = False
-    LOCAL_LLM_HOST = "http://localhost:11434"
+    LOCAL_LLM_HOST = OLLAMA_HOST
     LOCAL_LLM_FALLBACK_MODEL = "qwen3.5:9b"
 
     # ==================== 管道执行参数（v1.17.0） ====================

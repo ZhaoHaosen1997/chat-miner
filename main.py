@@ -131,14 +131,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS（允许前端开发服务器）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS：开发模式允许前端 dev server，生产模式前后端同端口不需要 CORS
+if config.RELOAD:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # v1.5.5: Cache-Control 中间件：防止浏览器将 API 响应写入磁盘缓存

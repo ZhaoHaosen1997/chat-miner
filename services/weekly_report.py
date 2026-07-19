@@ -24,7 +24,7 @@ from models.database import (
     get_daily_reports_batch, get_analyzed_dates, save_periodic_report,
     get_periodic_report, list_periodic_reports,
 )
-from services.online_model import call_deepseek_chat
+from services.online_model import call_online_chat
 from services.stats_engine import (
     compute_activity_stats, compute_language_stats, compute_social_relations,
     compute_message_style, compute_topic_role, _build_dynamic_stop_words,
@@ -921,18 +921,21 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
             pass
         return result
 
-    # 旧版降级：DeepSeek → Ollama
-    from services.online_model import call_deepseek_chat
-    result = await call_deepseek_chat(
-        system_prompt, user_prompt,
-        model=model or config.DEEPSEEK_MODEL,
-        temperature=temperature,
-        json_mode=json_mode,
-        max_tokens=max_tokens,
-        thinking=thinking,
-    )
-    if result["success"] and result["data"]:
-        return result
+    # 旧版降级：在线模型 → Ollama
+    from services.online_model import call_online_chat
+    from services.model_config import get_effective_model
+    online_cfg = get_effective_model("online")
+    if online_cfg.get("api_key"):
+        result = await call_online_chat(
+            system_prompt, user_prompt,
+            model_config=online_cfg,
+            temperature=temperature,
+            json_mode=json_mode,
+            max_tokens=max_tokens,
+            thinking=thinking,
+        )
+        if result["success"] and result["data"]:
+            return result
 
     # 降级：本地 Ollama
     if not config.LOCAL_LLM_ENABLED:

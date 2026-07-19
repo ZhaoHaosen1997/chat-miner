@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import config
-
-logger = logging.getLogger(__name__)
 from models.database import save_task_record
 
 logger = logging.getLogger(__name__)
@@ -129,11 +127,11 @@ async def run_scheduled_sync():
 
         logger.info(f"[WeFlow Scheduler] 开始自动同步 {g['name']} (id={g['id']})")
         try:
-            start = asyncio.get_event_loop().time()
+            start = asyncio.get_running_loop().time()
             result = await asyncio.to_thread(
                 sync_messages_incremental, client, g["id"]
             )
-            duration = int((asyncio.get_event_loop().time() - start) * 1000)
+            duration = int((asyncio.get_running_loop().time() - start) * 1000)
             added = result.get("added", 0)
             if added > 0:
                 synced += 1
@@ -189,11 +187,11 @@ async def run_scheduled_sync():
                 if not g.get("wxid") or not g.get("weflow_auto_sync", 0):
                     continue
                 try:
-                    t0 = asyncio.get_event_loop().time()
+                    t0 = asyncio.get_running_loop().time()
                     result = await asyncio.to_thread(
                         sync_messages_incremental, client2, g["id"]
                     )
-                    duration = int((asyncio.get_event_loop().time() - t0) * 1000)
+                    duration = int((asyncio.get_running_loop().time() - t0) * 1000)
                     added = result.get("added", 0)
                     if added > 0:
                         retry_synced += 1

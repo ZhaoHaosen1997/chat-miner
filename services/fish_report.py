@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 
 from config import config
-from services.online_model import call_deepseek_chat
+from services.online_model import call_online_chat
+from services.model_config import get_effective_model
 from services import fish_pond as fp
 from models import database as db
 
@@ -149,10 +150,12 @@ async def generate_fish_daily_report(
 
     user_prompt = "\n".join(user_parts)
 
-    # 调用 DeepSeek
-    result = await call_deepseek_chat(
+    # 调用在线模型
+    model_config = get_effective_model("online")
+    result = await call_online_chat(
         system_prompt=FISH_DAILY_PROMPT,
         user_prompt=user_prompt,
+        model_config=model_config,
         temperature=0.9,
         max_tokens=2000,
     )
