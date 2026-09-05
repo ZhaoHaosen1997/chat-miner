@@ -455,20 +455,19 @@ def _do_sync_messages_incremental(client: WeFlowClient, group_id: int,
             raise
 
     # 7. 更新 DB 元数据
-    from models.database import get_conn
+    from models.database import db
     dates = [m.get("formattedTime", "")[:10] for m in merged
              if m.get("formattedTime")]
     new_date_end = max(dates) if dates else ""
 
     if new_date_end:
-        with get_conn() as conn:
+        with db() as conn:
             conn.execute(
                 "UPDATE chat_groups SET message_count=?, date_range_end=MAX(COALESCE(date_range_end,''),?), "
                 "date_range_start=CASE WHEN date_range_start IS NULL OR date_range_start='' THEN ? "
                 "ELSE MIN(date_range_start, ?) END WHERE id=?",
                 (len(merged), new_date_end, min(dates), min(dates), group_id)
             )
-            conn.commit()
 
     # 更新成员表
     if weflow_members:
@@ -521,15 +520,14 @@ def link_group_to_weflow(group_id: int, chatroom_id: str,
     1. 更新 chat_groups.wxid（确保与 WeFlow session_id 一致）
     2. 从 WeFlow 拉取群成员，更新 DB
     """
-    from models.database import get_conn, upsert_members
+    from models.database import db, upsert_members
 
     # 更新群 wxid
-    with get_conn() as conn:
+    with db() as conn:
         conn.execute(
             "UPDATE chat_groups SET wxid=? WHERE id=?",
             (chatroom_id, group_id)
         )
-        conn.commit()
 
     # 拉取并更新成员
     try:

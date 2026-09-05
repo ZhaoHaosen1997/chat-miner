@@ -8,6 +8,7 @@ Usage:
         text = result["data"]
 """
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -42,9 +43,17 @@ logger = logging.getLogger(__name__)
 _online_clients: dict[str, httpx.AsyncClient] = {}
 
 
+def _key_fingerprint(api_key: str) -> str:
+    """v1.19.7: 完整 key 的哈希前缀——旧实现取 key 前 8 字符，
+    同端点下两个 key 前缀相同（如都是 sk- 开头风格）会复用错 client 导致神秘 401"""
+    if not api_key:
+        return "nokey"
+    return hashlib.sha256(api_key.encode()).hexdigest()[:16]
+
+
 def _get_online_client(endpoint: str, api_key: str, timeout: int = 90) -> httpx.AsyncClient:
     """获取或创建缓存的 httpx 客户端（按端点+Key 缓存）"""
-    cache_key = f"{endpoint}|{api_key[:8] if api_key else 'nokey'}"
+    cache_key = f"{endpoint}|{_key_fingerprint(api_key)}"
     client = _online_clients.get(cache_key)
     if client is None or client.is_closed:
         _online_clients[cache_key] = httpx.AsyncClient(
@@ -156,56 +165,85 @@ async def call_online_chat(
 
     start_time = time.time()
     ret = None  # v1.19.0: 统一返回点，便于记录日志
-    try:
-        client = _get_online_client(endpoint, api_key, timeout)
-        resp = await client.post(api_url, json=payload)
-        duration_ms = int((time.time() - start_time) * 1000)
 
-        if resp.status_code == 401:
-            ret = {"success": False, "data": None, "status": "error", "error": f"API Key 无效 ({model_name})", "model": model_name, "duration_ms": duration_ms}
-        elif resp.status_code == 402:
-            ret = {"success": False, "data": None, "status": "error", "error": f"API 余额不足 ({model_name})", "model": model_name, "duration_ms": duration_ms}
-        elif resp.status_code == 429:
-            ret = {"success": False, "data": None, "status": "error", "error": f"API 请求太频繁，请稍后重试 ({model_name})", "model": model_name, "duration_ms": duration_ms}
-        else:
+    # v1.19.7: 429/5xx/网络错误在本层指数退避重试——此前"请稍后重试"只是文案，
+    # 代码从不重试，批量分析时一次瞬时抖动即导致该日期整体失败
+    max_attempts = max(1, int(getattr(config, "ONLINE_RETRY_COUNT", 2)) + 1)
+    retryable_status = {429, 500, 502, 503, 504}
+
+    def _error_ret(error_msg: str, status: str = "error") -> dict:
+        return {"success": False, "data": None, "status": status, "error": error_msg,
+                "model": model_name, "duration_ms": int((time.time() - start_time) * 1000)}
+
+    try:
+        for attempt in range(max_attempts):
+            client = _get_online_client(endpoint, api_key, timeout)
+            resp = await client.post(api_url, json=payload)
+
+            if resp.status_code == 401:
+                ret = _error_ret(f"API Key 无效 ({model_name})")
+                break
+            if resp.status_code == 402:
+                ret = _error_ret(f"API 余额不足 ({model_name})")
+                break
+
+            if resp.status_code in retryable_status and attempt < max_attempts - 1:
+                # Retry-After 优先（上限 30s），否则指数退避 1s/2s/4s...
+                try:
+                    delay = min(30.0, float(resp.headers.get("Retry-After") or 0))
+                except (TypeError, ValueError):
+                    delay = 0.0
+                if delay <= 0:
+                    delay = float(2 ** attempt)
+                logger.warning(f"在线模型可重试错误 {resp.status_code} "
+                               f"(尝试 {attempt + 1}/{max_attempts}): {delay}s 后重试")
+                await asyncio.sleep(delay)
+                continue
+
             resp.raise_for_status()
             resp_json = resp.json()
-            msg = resp_json.get("choices", [{}])[0].get("message", {})
+            # v1.19.7: 空 choices 数组防 IndexError
+            choices = resp_json.get("choices") or [{}]
+            msg = choices[0].get("message", {})
             content = msg.get("content", "")
             if not content or not content.strip():
                 rc = msg.get("reasoning_content", "")
                 if rc and rc.strip():
                     content = rc
             if not content or not content.strip():
-                content = resp_json.get("choices", [{}])[0].get("text", "")
+                content = choices[0].get("text", "")
             if not content or not content.strip():
-                logger.warning(f"在线模型返回空/空白内容, 原始响应: {json.dumps(resp_json, ensure_ascii=False)[:800]}")
-            logger.debug(f"在线模型响应 ({model_name}): {duration_ms}ms, {len(content)} 字符")
-            if content.strip():
-                status = "success"
-                error_msg = None
-                if json_mode:
-                    ok, err = _parse_json_safe(content)
-                    if not ok:
-                        status = "parse_error"
-                        error_msg = err
-                        logger.warning(f"在线模型 JSON 解析失败 ({model_name}): {err}")
-                ret = {"success": status == "success", "data": content.strip(),
-                       "status": status, "error": error_msg,
-                       "model": model_name, "duration_ms": duration_ms}
-            else:
-                ret = {"success": False, "data": None, "status": "error",
-                       "error": f"{model_name} 返回空内容", "model": model_name, "duration_ms": duration_ms}
-    except httpx.TimeoutException:
-        duration_ms = int((time.time() - start_time) * 1000)
-        ret = {"success": False, "data": None, "status": "error", "error": f"在线模型请求超时 ({timeout}s)", "model": model_name, "duration_ms": duration_ms}
+                # v1.19.7: 原始响应可能回显聊天内容，debug 级 + 截断防敏感信息进日志
+                logger.debug(f"在线模型返回空/空白内容, 原始响应: {json.dumps(resp_json, ensure_ascii=False)[:200]}")
+
+            logger.debug(f"在线模型响应 ({model_name}): {int((time.time() - start_time) * 1000)}ms, {len(content)} 字符")
+
+            if not content.strip():
+                ret = _error_ret(f"{model_name} 返回空内容")
+                break
+
+            status = "success"
+            error_msg = None
+            if json_mode:
+                ok, err = _parse_json_safe(content)
+                if not ok:
+                    status = "parse_error"
+                    error_msg = err
+                    logger.warning(f"在线模型 JSON 解析失败 ({model_name}): {err}")
+            ret = {"success": status == "success", "data": content.strip(),
+                   "status": status, "error": error_msg,
+                   "model": model_name, "duration_ms": int((time.time() - start_time) * 1000)}
+            break
+
     except httpx.ConnectError:
-        duration_ms = int((time.time() - start_time) * 1000)
-        ret = {"success": False, "data": None, "status": "error", "error": f"无法连接到 API 端点 ({endpoint})", "model": model_name, "duration_ms": duration_ms}
+        logger.error("在线模型连接失败: %s", endpoint, exc_info=True)
+        ret = _error_ret(f"无法连接到 API 端点 ({endpoint})")
+    except httpx.TimeoutException:
+        # 超时不重试：长 prompt 重试大概率再次超时且成倍计费
+        ret = _error_ret(f"在线模型请求超时 ({timeout}s)")
     except Exception as e:
-        duration_ms = int((time.time() - start_time) * 1000)
         logger.error("在线模型调用异常: %s", e, exc_info=True)
-        ret = {"success": False, "data": None, "status": "error", "error": str(e), "model": model_name, "duration_ms": duration_ms}
+        ret = _error_ret(str(e))
 
     # v1.19.0: 记录 AI 调用日志
     if ret and (pipeline or task_id):
@@ -291,6 +329,7 @@ async def check_online_model_health(model_config: dict) -> dict:
             model_config=model_config,
             temperature=0.0,
             max_tokens=10,
+            timeout=15,  # v1.19.7: 健康检查用短超时，此前走 120s 默认值最坏挂 2 分钟
         )
         return {
             "configured": True,

@@ -802,27 +802,12 @@ async def run_daily_pipeline_online(
 
 
 def _extract_json_from_text(text: str) -> dict | None:
-    """从 AI 返回的文本中提取 JSON 对象"""
-    # 先尝试直接解析
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        pass
-    # 尝试提取 ```json ... ``` 代码块
-    m = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', text)
-    if m:
-        try:
-            return json.loads(m.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    # 尝试找第一个 { ... } 块
-    m = re.search(r'\{[\s\S]*\}', text)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            pass
-    return None
+    """从 AI 返回的文本中提取 JSON 对象
+
+    v1.19.7: 委托至 services/llm_json.parse_llm_json 统一实现
+    （原中等健壮度版本，现获得修复/截取等完整能力）"""
+    from services.llm_json import parse_llm_json
+    return parse_llm_json(text)
 
 
 def _normalize_online_report(data: dict) -> dict:

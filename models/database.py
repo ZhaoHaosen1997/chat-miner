@@ -20,10 +20,13 @@ def get_db_path() -> Path:
 
 
 def get_conn() -> sqlite3.Connection:
-    """获取数据库连接（启用 WAL 模式 + 外键）"""
-    conn = sqlite3.connect(str(get_db_path()))
+    """获取数据库连接（启用外键 + 写等待）。
+
+    v1.19.7: timeout=30 即 busy_timeout 30s——并发写从"5 秒后直接抛
+    database is locked"变为排队等待；WAL 是库级持久属性，改由 init_db
+    设置一次，不再每连接重复执行。"""
+    conn = sqlite3.connect(str(get_db_path()), timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -118,6 +121,10 @@ def init_db():
     """初始化所有表 + 兼容旧版本数据库迁移"""
     # v1.0: 启动前创建备份，防止迁移损坏旧数据
     _backup_db_if_exists()
+
+    # v1.19.7: WAL 是库级持久属性，启动时设置一次即可（journal_mode 在库关闭前保持）
+    with db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
 
     with db() as conn:
         conn.executescript("""
@@ -492,6 +499,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_analysis_log_created_at ON analysis_log(created_at);
             CREATE INDEX IF NOT EXISTS idx_analysis_log_group ON analysis_log(group_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_task_records_group ON task_records(group_id, created_at);
+            -- v1.19.7: 高频查询补索引（fish_events 增长最快且此前无任何索引）
+            CREATE INDEX IF NOT EXISTS idx_task_records_task_id ON task_records(task_id);
+            CREATE INDEX IF NOT EXISTS idx_fish_events_fish ON fish_events(group_id, wxid, created_at);
+            CREATE INDEX IF NOT EXISTS idx_fish_events_type ON fish_events(group_id, event_type, created_at);
+            CREATE INDEX IF NOT EXISTS idx_scale_coin_tx ON scale_coin_transactions(group_id, wxid, created_at);
             CREATE INDEX IF NOT EXISTS idx_portrait_versions_member ON portrait_versions(group_id, member_id);
         """)
         # v0.13.1: portrait_versions 唯一约束（防版本号重复）
@@ -730,7 +742,7 @@ def _migrate_v1_16_1(conn):
             total_spent INTEGER DEFAULT 0,
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS pond_treasury_log (
+            CREATE TABLE IF NOT EXISTS pond_treasury_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             amount INTEGER NOT NULL,
@@ -739,6 +751,8 @@ def _migrate_v1_16_1(conn):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS idx_pond_treasury_log_group
+            ON pond_treasury_log(group_id, created_at);
     """)
     logger.info("DB migrate v1.16.1: pond_treasury tables ready")
 
@@ -2333,15 +2347,19 @@ def set_upgrade(group_id: int, upgrade_key: str, level: int):
 
 def count_today_decrees(group_id: int, decree_key: str,
                         date_str: str = None) -> int:
-    """统计某决议今日已使用次数"""
-    from datetime import datetime as dt
+    """统计某决议今日已使用次数。
+
+    v1.19.7: date(created_at)=? 函数包裹导致全表扫描，改为范围查询走索引
+    idx_fish_events_type(group_id, event_type, created_at)。"""
+    from datetime import datetime as dt, timedelta
     today = date_str or dt.now().strftime("%Y-%m-%d")
+    next_day = (dt.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     with db() as conn:
         row = conn.execute(
             """SELECT COUNT(*) as cnt FROM fish_events
                WHERE group_id=? AND event_type=?
-               AND date(created_at)=?""",
-            (group_id, f"decree_{decree_key}", today)
+               AND created_at >= ? AND created_at < ?""",
+            (group_id, f"decree_{decree_key}", today, next_day)
         ).fetchone()
     return row["cnt"] if row else 0
 

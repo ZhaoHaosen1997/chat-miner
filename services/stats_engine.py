@@ -918,11 +918,11 @@ def compute_highlight_quotes(group_id: int, wxid: str, member_name: str,
         [{date, content, context}] 最多 3 条
     """
     import json
-    from models.database import get_conn
+    from models.database import db
 
     quotes = []
     try:
-        with get_conn() as conn:
+        with db() as conn:
             rows = conn.execute(
                 "SELECT date, report_json FROM daily_reports WHERE group_id=? ORDER BY date DESC",
                 (group_id,)

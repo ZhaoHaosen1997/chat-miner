@@ -962,21 +962,14 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
 
 
 def _parse_ai_json(raw_data) -> dict:
-    """解析 AI 返回的 JSON（可能是 dict 或 str）"""
-    if isinstance(raw_data, dict):
-        return raw_data
-    if isinstance(raw_data, str):
-        # 尝试提取 JSON
-        try:
-            return json.loads(raw_data)
-        except json.JSONDecodeError:
-            m = re.search(r'\{[\s\S]*\}', raw_data)
-            if m:
-                try:
-                    return json.loads(m.group())
-                except json.JSONDecodeError:
-                    pass
-    return {}
+    """解析 AI 返回的 JSON（可能是 dict 或 str）
+
+    v1.19.7: 委托至 services/llm_json.parse_llm_json 统一实现——
+    原实现只有 greedy 正则，AI 在 JSON 后多输出文字即解析失败返回 {}，
+    导致周/月/年报入库全空字段的"成功"报告。"""
+    from services.llm_json import parse_llm_json
+    data = parse_llm_json(raw_data)
+    return data if data else {}
 
 
 # ========== 主入口 ==========
@@ -1106,6 +1099,13 @@ async def generate_weekly_report(
             }
 
         ai_data = _parse_ai_json(ai_result["data"])
+        # v1.19.7: 解析失败视为 AI 失败，避免入库全空字段的"成功"报告
+        if not ai_data:
+            if task:
+                task.finish(success=False, error={"type": "parse_failed",
+                                                  "detail": "AI 返回内容无法解析为 JSON"})
+            return {"success": False, "data": None,
+                    "error": "AI 返回内容无法解析为 JSON，未保存空报告"}
         stats = raw_data.get("stats", {})
 
         # 组装新版报告
@@ -1180,6 +1180,13 @@ async def generate_weekly_report(
             }
 
         ai_data = _parse_ai_json(ai_result["data"])
+        # v1.19.7: 解析失败视为 AI 失败，避免入库全空字段的"成功"报告
+        if not ai_data:
+            if task:
+                task.finish(success=False, error={"type": "parse_failed",
+                                                  "detail": "AI 返回内容无法解析为 JSON"})
+            return {"success": False, "data": None,
+                    "error": "AI 返回内容无法解析为 JSON，未保存空报告"}
 
         report = {
             "period_key": period_key,
@@ -1447,6 +1454,13 @@ async def generate_monthly_report(
             }
 
         ai_data = _parse_ai_json(ai_result["data"])
+        # v1.19.7: 解析失败视为 AI 失败，避免入库全空字段的"成功"报告
+        if not ai_data:
+            if task:
+                task.finish(success=False, error={"type": "parse_failed",
+                                                  "detail": "AI 返回内容无法解析为 JSON"})
+            return {"success": False, "data": None,
+                    "error": "AI 返回内容无法解析为 JSON，未保存空报告"}
         stats = raw_data.get("stats", {})
 
         # 组装新版报告
@@ -1537,6 +1551,13 @@ async def generate_monthly_report(
             }
 
         ai_data = _parse_ai_json(ai_result["data"])
+        # v1.19.7: 解析失败视为 AI 失败，避免入库全空字段的"成功"报告
+        if not ai_data:
+            if task:
+                task.finish(success=False, error={"type": "parse_failed",
+                                                  "detail": "AI 返回内容无法解析为 JSON"})
+            return {"success": False, "data": None,
+                    "error": "AI 返回内容无法解析为 JSON，未保存空报告"}
 
         report = {
             "period_key": period_key,

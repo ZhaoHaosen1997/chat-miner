@@ -78,14 +78,13 @@ def reload_scheduler():
 
 def _update_sync_status(group_id: int, result: str):
     """更新群的上次同步时间和结果"""
-    from models.database import get_conn
+    from models.database import db
     try:
-        with get_conn() as conn:
+        with db() as conn:
             conn.execute(
                 "UPDATE chat_groups SET weflow_last_sync_at=?, weflow_last_sync_result=? WHERE id=?",
                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), result, group_id)
             )
-            conn.commit()
     except Exception as e:
         logger.warning("更新同步时间戳失败: %s", e)
 

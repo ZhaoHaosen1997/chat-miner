@@ -68,119 +68,13 @@ def _normalize_report(data: dict) -> dict:
     return data
 
 
-def _repair_json_text(text: str) -> str:
-    """修复 LLM 生成 JSON 时的常见格式错误"""
-    import re
-
-    # 1. 尾随逗号：对象 {a:1,} 或数组 [1,2,]
-    text = re.sub(r',\s*}', '}', text)
-    text = re.sub(r',\s*]', ']', text)
-
-    # 2. 连续逗号：{a:1,,b:2} → {a:1,b:2}
-    text = re.sub(r',\s*,', ',', text)
-
-    # 3. 字符串值内部的未转义双引号（常见于 quote 内容）
-    #    模式："quote": "他说"你好"世界" → 把内层引号替换为中文引号
-    #    这是一个启发式修复，在 key: 后面的字符串值中进行
-    def _fix_inner_quotes(m):
-        key = m.group(1)
-        value = m.group(2)
-        # 把内部的英文双引号替换为中文引号（交替左右引号）
-        result = []
-        in_quote = False
-        for ch in value:
-            if ch == '"':
-                if not in_quote:
-                    result.append('“')  # "
-                    in_quote = True
-                else:
-                    result.append('”')  # "
-                    in_quote = False
-            else:
-                result.append(ch)
-        return f'"{key}": "{"".join(result)}"'
-
-    text = re.sub(r'"(\w+)":\s*"([^"]*?)"', _fix_inner_quotes, text)
-
-    # 4. 单引号 JSON → 双引号（仅处理 key 和明显的 value）
-    #    保守策略：只替换 key 层面的单引号
-    #    （value 中可能包含合法单引号如 "I'm"，不处理）
-
-    return text
-
-
 def _extract_json(text: str) -> Optional[dict]:
     """从 AI 返回的文本中提取 JSON 对象
 
-    处理各种情况：
-    1. 纯 JSON 文本
-    2. Markdown 代码块包裹
-    3. JSON 前后有杂文
-    4. LLM 常见格式错误（尾随逗号、未转义引号等）
-    """
-    if not text:
-        return None
-
-    text = text.strip()
-
-    # 预处理：全角符号 → 半角
-    text = text.replace("｛", "{").replace("｝", "}")
-    text = text.replace("［", "[").replace("］", "]")
-    text = text.replace("：", ":").replace("，", ",")
-
-    # 补缺失的开头 {
-    if text and text[0] not in "{[":
-        text = "{" + text
-    # 补缺失的结尾 }
-    if text and text[-1] not in "}]":
-        text = text + "}"
-
-    # 尝试 1：直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试 2：修复后解析
-    try:
-        repaired = _repair_json_text(text)
-        return json.loads(repaired)
-    except json.JSONDecodeError:
-        pass
-    except Exception as e:
-        logger.debug("JSON 修复解析异常: %s", e)
-
-    # 尝试 3：提取 Markdown 代码块 ```json ... ```
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-    if m:
-        block = m.group(1).strip()
-        try:
-            return json.loads(block)
-        except json.JSONDecodeError:
-            try:
-                return json.loads(_repair_json_text(block))
-            except json.JSONDecodeError:
-                pass
-            except Exception as e:
-                logger.debug("JSON 代码块修复解析异常: %s", e)
-
-    # 尝试 4：找到第一个 {，然后从后往前找 }，逐步缩短直到解析成功
-    start = text.find("{")
-    if start != -1:
-        end = text.rfind("}")
-        while end > start:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                try:
-                    return json.loads(_repair_json_text(text[start:end + 1]))
-                except json.JSONDecodeError:
-                    pass
-                except Exception as e:
-                    logger.debug("JSON 截取修复解析异常: %s", e)
-                end = text.rfind("}", start, end)  # 往前找上一个 }
-
-    return None
+    v1.19.7: 实现已统一迁移至 services/llm_json.parse_llm_json，
+    此处保留函数名作薄委托（原实现是项目内最强版本，已成为唯一标准）。"""
+    from services.llm_json import parse_llm_json
+    return parse_llm_json(text)
 
 
 async def call_ollama_chat(

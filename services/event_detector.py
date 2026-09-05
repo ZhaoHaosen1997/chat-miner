@@ -829,6 +829,11 @@ def _parse_ai_response(result: str) -> tuple[dict | None, str]:
             logger.warning("AI 返回 JSON 解析失败: %s...", text[:200])
             return None, ""
 
+    # v1.19.7: AI 偶尔返回顶层数组，走解析失败路径而不是抛 AttributeError
+    if not isinstance(data, dict):
+        logger.warning("AI 返回 JSON 顶层数组/标量: %s...", str(data)[:120])
+        return None, ""
+
     # 向后兼容：旧格式 {"events": [...]}
     if "events" in data:
         events = data.get("events", [])
@@ -875,29 +880,29 @@ def _extract_json_object(text: str) -> dict | None:
 
     相比正则 \\{[^{}]*\\} 无法处理嵌套对象，此方法逐字符计数，
     找到第一个 '{' 后追踪花括号深度直到归零。
-    """
-    # 找到第一个 '{'
-    start = text.find('{')
-    if start == -1:
-        return None
 
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == '{':
-            depth += 1
-        elif text[i] == '}':
-            depth -= 1
-            if depth == 0:
-                candidate = text[start:i + 1]
-                try:
-                    return json.loads(candidate)
-                except json.JSONDecodeError:
-                    # 这个候选无效，继续找下一个 '{'
-                    start = text.find('{', start + 1)
-                    if start == -1:
-                        return None
-                    depth = 0
-                    i = start - 1  # 循环会 +1
+    v1.19.7: 修复 for-range 循环体内改 i 无效的 bug（Python 迭代器不受
+    循环体内赋值影响，注释"循环会 +1"不成立），候选失败后深度立即错位、
+    后续候选全部解析失败——改用 while 循环真正重定位扫描起点。
+    """
+    start = text.find('{')
+    while start != -1:
+        depth = 0
+        i = start
+        while i < len(text):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    try:
+                        data = json.loads(candidate)
+                        return data if isinstance(data, dict) else None
+                    except json.JSONDecodeError:
+                        break  # 这个候选无效，从下一个 '{' 重新开始
+            i += 1
+        start = text.find('{', start + 1)
     return None
 
 
