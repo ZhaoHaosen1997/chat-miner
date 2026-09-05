@@ -146,7 +146,7 @@ async def api_get_event_detail(group_id: int, event_id: int):
         raise HTTPException(404, detail="群不存在")
 
     event = get_event(event_id)
-    if not event:
+    if not event or event.get("group_id") != group_id:
         raise HTTPException(404, detail="事件不存在")
 
     # JSON 字段反序列化

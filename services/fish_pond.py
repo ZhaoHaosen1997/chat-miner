@@ -11,7 +11,7 @@ from typing import Optional
 
 from services.d20 import (
     ability_check, ability_modifier, proficiency_bonus,
-    opposed_check, saving_throw, roll_dice, D20Result
+    opposed_check, saving_throw, roll_dice, coin_roll, D20Result
 )
 # v1.16.0: 导入性格修正检定
 from services.d20 import check_with_traits
@@ -405,38 +405,46 @@ def get_black_market_items(group_id: int, date_str: str) -> list[dict]:
 
 def cmd_buy(group_id: int, wxid: str, item_key: str,
             date_str: str = None) -> dict:
-    """/购买 <商品名>：从今日黑市购买"""
+    """/购买 <商品名>：从今日黑市购买。
+
+    v1.19.5 修复事务顺序：查找（key 或中文名）→ 扣币 → 原子扣库存（售罄则退款）。
+    旧实现中文名路径不扣库存可无限刷货，且余额不足时库存已白扣。"""
     from datetime import datetime as dt
     today = date_str or dt.now().strftime("%Y-%m-%d")
 
-    # 查黑市
-    market_item = db.buy_from_market(group_id, wxid, today, item_key)
+    # 查黑市（只查找不扣库存）：item_key 精确 → 中文名匹配
+    all_items = get_black_market_items(group_id, today)
+    market_item = next((i for i in all_items if i["item_key"] == item_key), None)
     if not market_item:
-        # 尝试模糊匹配
-        all_items = get_black_market_items(group_id, today)
-        for mi in all_items:
-            if mi["name"] == item_key:
-                market_item = mi
-                break
-        if not market_item:
-            available = ", ".join(f"{i['name']}({i['price']}币)" for i in all_items)
-            return {"error": f"今日黑市没有 '{item_key}'。当前: {available or '无'}"}
+        market_item = next((i for i in all_items if i["name"] == item_key), None)
+    if not market_item:
+        available = ", ".join(f"{i['name']}({i['price']}币)" for i in all_items)
+        return {"error": f"今日黑市没有 '{item_key}'。当前: {available or '无'}"}
 
     fish = db.get_fish(group_id, wxid)
     if not fish or not fish["is_alive"]:
         return {"error": "鱼不存在或已死亡"}
 
+    real_key = market_item["item_key"]
     price = market_item["price"]
+
+    # 先扣币
     wallet = db.spend_coins(group_id, wxid, price, "buy_market",
-                           f"黑市购买 {item_key}")
+                           f"黑市购买 {market_item['name']}")
     if wallet is None:
         return {"error": f"鳞币不足，需要 {price} 鳞币"}
 
-    db.add_item(group_id, wxid, item_key)
-    item_info = ITEMS.get(item_key, {})
+    # 再原子扣库存；售罄则退款回滚
+    if not db.deduct_market_stock(group_id, today, market_item["id"]):
+        db.earn_coins(group_id, wxid, price, "buy_market_refund",
+                      f"黑市售罄退款 {market_item['name']}")
+        return {"error": f"'{market_item['name']}' 已售罄"}
+
+    db.add_item(group_id, wxid, real_key)
+    item_info = ITEMS.get(real_key, {})
     db.add_fish_event(group_id, wxid, "market_buy",
-                      {"item": item_key, "price": price, "date": today})
-    return {"action": "buy", "item": item_info.get("name", item_key),
+                      {"item": real_key, "price": price, "date": today})
+    return {"action": "buy", "item": item_info.get("name", real_key),
             "price": price, "rarity": item_info.get("rarity", "")}
 
 
@@ -1998,7 +2006,7 @@ def settle_all_fish(group_id: int, reference_date: str = None) -> dict:
                                "fish_name": victim["fish_name"]})
             else:
                 # 失败：扣血，可能致死
-                hp_loss = d20lib.coin_roll("2d4")
+                hp_loss = coin_roll("2d4")
                 new_hp = max(0, victim.get("hp", 20) - hp_loss)
                 db.update_fish_field(group_id, victim["wxid"], "hp", new_hp)
                 if new_hp <= 0:

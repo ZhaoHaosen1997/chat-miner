@@ -1145,39 +1145,44 @@ def add_group_meme(group_id: int, term: str, description: str,
         return None
 
 
-def update_group_meme(meme_id: int, description: str) -> bool:
-    """更新梗描述。如果原本是 pending 状态，编辑后自动 approved。"""
+def update_group_meme(group_id: int, meme_id: int, description: str) -> bool:
+    """更新梗描述。如果原本是 pending 状态，编辑后自动 approved。
+    v1.19.5: WHERE 带 group_id，防止跨群越权改写。"""
     with db() as conn:
         cur = conn.execute(
-            "UPDATE group_memes SET description=?, status=CASE WHEN status='pending' THEN 'approved' ELSE status END, updated_at=datetime('now','localtime') WHERE id=?",
-            (description.strip(), meme_id)
+            "UPDATE group_memes SET description=?, status=CASE WHEN status='pending' THEN 'approved' ELSE status END, updated_at=datetime('now','localtime') WHERE id=? AND group_id=?",
+            (description.strip(), meme_id, group_id)
         )
         return cur.rowcount > 0
 
 
-def approve_group_meme(meme_id: int) -> bool:
-    """审核通过一个梗"""
+def approve_group_meme(group_id: int, meme_id: int) -> bool:
+    """审核通过一个梗（v1.19.5: 校验群归属）"""
     with db() as conn:
         cur = conn.execute(
-            "UPDATE group_memes SET status='approved', updated_at=datetime('now','localtime') WHERE id=?",
-            (meme_id,)
+            "UPDATE group_memes SET status='approved', updated_at=datetime('now','localtime') WHERE id=? AND group_id=?",
+            (meme_id, group_id)
         )
         return cur.rowcount > 0
 
 
-def reject_group_meme(meme_id: int) -> bool:
-    """驳回一个梗（软删除，状态变 rejected）"""
+def reject_group_meme(group_id: int, meme_id: int) -> bool:
+    """驳回一个梗（软删除，状态变 rejected）（v1.19.5: 校验群归属）"""
     with db() as conn:
         cur = conn.execute(
-            "UPDATE group_memes SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?",
-            (meme_id,)
+            "UPDATE group_memes SET status='rejected', updated_at=datetime('now','localtime') WHERE id=? AND group_id=?",
+            (meme_id, group_id)
         )
         return cur.rowcount > 0
 
 
-def delete_group_meme(meme_id: int) -> bool:
+def delete_group_meme(group_id: int, meme_id: int) -> bool:
+    """删除一个梗（v1.19.5: 校验群归属）"""
     with db() as conn:
-        cur = conn.execute("DELETE FROM group_memes WHERE id=?", (meme_id,))
+        cur = conn.execute(
+            "DELETE FROM group_memes WHERE id=? AND group_id=?",
+            (meme_id, group_id)
+        )
         return cur.rowcount > 0
 
 
@@ -1206,6 +1211,9 @@ def _seed_default_model_configs(conn):
 # v1.2.8: 所有可热更新设置的注册表（key, default_value, value_type, description）
 # 同时用于 _seed_app_settings（补种缺失键）和 upsert_app_setting（确定 value_type）
 _APP_SETTINGS_REGISTRY = None
+
+# v1.19.5: 敏感设置（GET /app-settings 返回时脱敏；写入时拒绝掩码值回传覆盖）
+_SENSITIVE_SETTING_KEYS = {"weflow_access_token"}
 
 
 def _get_settings_registry():
@@ -1242,6 +1250,10 @@ def _seed_app_settings(conn):
                 (value_type, key)
             )
             logger.warning(f"已修复 app_settings.{key} 的 value_type: {existing_rows[key]} → {value_type}")
+
+    # v1.19.5: 敏感设置强制标记 is_sensitive（幂等；修复历史库未标记导致 token 明文返回前端）
+    for key in _SENSITIVE_SETTING_KEYS:
+        conn.execute("UPDATE app_settings SET is_sensitive = 1 WHERE key = ?", (key,))
 
     conn.commit()
 
@@ -2595,22 +2607,18 @@ def get_black_market(group_id: int, date: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def buy_from_market(group_id: int, wxid: str, date: str,
-                    item_key: str) -> dict | None:
-    """从黑市购买，返回商品信息或 None"""
+def deduct_market_stock(group_id: int, date: str, market_id: int) -> bool:
+    """原子扣减黑市商品库存（v1.19.5: 替代 buy_from_market 的"先扣后验"流程）。
+
+    WHERE 带 stock_remaining > 0 条件，并发购买不会超卖；
+    扣减失败（售罄）返回 False，由调用方负责退款。"""
     with db() as conn:
-        row = conn.execute(
-            """SELECT * FROM fish_black_market
-               WHERE group_id=? AND date=? AND item_key=? AND stock_remaining > 0""",
-            (group_id, date, item_key)
-        ).fetchone()
-        if not row:
-            return None
-        conn.execute(
+        cur = conn.execute(
             """UPDATE fish_black_market SET stock_remaining = stock_remaining - 1
-               WHERE id=?""", (row["id"],)
+               WHERE id=? AND group_id=? AND date=? AND stock_remaining > 0""",
+            (market_id, group_id, date)
         )
-    return dict(row)
+        return cur.rowcount > 0
 
 
 # ==================== 模型配置 CRUD v0.12.0 ====================
@@ -2756,6 +2764,11 @@ def upsert_app_setting(key: str, value: str) -> bool:
     type_info = registry.get(key)
     value_type = type_info[1] if type_info else "string"
 
+    # v1.19.5: 敏感设置回传掩码值时跳过写入，防止真实值被掩码覆盖
+    if key in _SENSITIVE_SETTING_KEYS and "***" in (value or ""):
+        logger.warning(f"app_settings.{key} 回传的是掩码值，已跳过写入")
+        return False
+
     with db() as conn:
         conn.execute(
             """INSERT INTO app_settings (key, value, value_type, updated_at)
@@ -2776,6 +2789,10 @@ def upsert_app_settings_batch(updates: dict[str, str]) -> bool:
     registry = _get_settings_registry()
     with db() as conn:
         for key, value in updates.items():
+            # v1.19.5: 敏感设置回传掩码值时跳过写入，防止真实值被掩码覆盖
+            if key in _SENSITIVE_SETTING_KEYS and "***" in (value or ""):
+                logger.warning(f"app_settings.{key} 回传的是掩码值，已跳过写入")
+                continue
             type_info = registry.get(key)
             value_type = type_info[1] if type_info else "string"
             conn.execute(

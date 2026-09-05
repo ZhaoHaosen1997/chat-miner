@@ -243,7 +243,10 @@ def sync_messages_incremental(client: WeFlowClient, group_id: int,
         raise ValueError(f"群 wxid 为空: group_id={group_id}")
 
     # 1. 计算 since
+    # v1.19.5: 回退 60 秒形成重叠窗口——与本地最后一条消息同秒但排序在后的消息
+    # 也能拉到（API 语义是"严格晚于 since"）；重复消息由 merge 按 platformMessageId 去重
     since = _get_last_message_timestamp(group_id)
+    since = max(0, since - 60) if since else since
     if task:
         task.update("pending", f"增量拉取 since={datetime.fromtimestamp(since).strftime('%Y-%m-%d %H:%M') if since else '全量'}...")
 

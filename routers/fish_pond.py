@@ -160,12 +160,10 @@ async def generate_fish_report(group_id: int, date: str = ""):
     if not date:
         date = dt.now().strftime("%Y-%m-%d")
 
-    try:
-        from routers.groups import get_chat_cache
-        chat = get_chat_cache(group_id)
-    except Exception as e:
-        logger.error("加载聊天缓存失败 (group=%d): %s", group_id, e, exc_info=True)
-        raise HTTPException(400, "无法加载聊天数据")
+    from routers.groups import get_chat_cache
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, "群数据未加载，请先在群列表打开该群")
 
     # 拿当日消息解析
     day_msgs = [m for m in chat.messages
@@ -216,12 +214,10 @@ def resettle_pond(group_id: int, date: str = ""):
     from datetime import datetime as dt
     if not date:
         date = dt.now().strftime("%Y-%m-%d")
-    try:
-        from routers.groups import get_chat_cache
-        chat = get_chat_cache(group_id)
-    except Exception as e:
-        logger.warning("加载群 %d 聊天缓存失败: %s", group_id, e)
-        raise HTTPException(400, "无法加载聊天数据，请先导入群")
+    from routers.groups import get_chat_cache
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, "群数据未加载，请先在群列表打开该群")
 
     # 只取指定日期的消息
     day_msgs = [m for m in chat.messages
@@ -530,12 +526,10 @@ def fish_events(group_id: int, wxid: str = "", limit: int = 20):
 def parse_commands(group_id: int):
     """[已弃用] 扫描今日聊天记录中的 / 指令并执行 — 静默鱼塘开启后由定时事件自动处理，此接口保留兼容旧版和指令模拟器"""
     from datetime import datetime as dt
-    try:
-        from routers.groups import get_chat_cache
-        chat = get_chat_cache(group_id)
-    except Exception as e:
-        logger.warning("加载群 %d 聊天缓存失败: %s", group_id, e)
-        raise HTTPException(400, "无法加载聊天数据，请先导入群")
+    from routers.groups import get_chat_cache
+    chat = get_chat_cache(group_id)
+    if not chat:
+        raise HTTPException(404, "群数据未加载，请先在群列表打开该群")
 
     # 只取今日消息
     today = dt.now().strftime("%Y-%m-%d")

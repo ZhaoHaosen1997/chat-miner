@@ -56,7 +56,7 @@ async def api_update_meme(group_id: int, meme_id: int, body: dict):
     desc = (body.get("description") or "").strip()
     if not desc:
         raise HTTPException(400, detail="description 不能为空")
-    if not update_group_meme(meme_id, desc):
+    if not update_group_meme(group_id, meme_id, desc):
         raise HTTPException(404, detail="梗不存在")
     return {"code": 200, "message": "已更新", "data": None}
 
@@ -64,7 +64,7 @@ async def api_update_meme(group_id: int, meme_id: int, body: dict):
 @router.post("/{meme_id}/approve")
 async def api_approve_meme(group_id: int, meme_id: int):
     """审核通过"""
-    if not approve_group_meme(meme_id):
+    if not approve_group_meme(group_id, meme_id):
         raise HTTPException(404, detail="梗不存在")
     return {"code": 200, "message": "已审核通过", "data": None}
 
@@ -72,14 +72,14 @@ async def api_approve_meme(group_id: int, meme_id: int):
 @router.post("/{meme_id}/reject")
 async def api_reject_meme(group_id: int, meme_id: int):
     """驳回"""
-    if not reject_group_meme(meme_id):
+    if not reject_group_meme(group_id, meme_id):
         raise HTTPException(404, detail="梗不存在")
     return {"code": 200, "message": "已驳回", "data": None}
 
 
 @router.delete("/{meme_id}")
 async def api_delete_meme(group_id: int, meme_id: int):
-    if not delete_group_meme(meme_id):
+    if not delete_group_meme(group_id, meme_id):
         raise HTTPException(404, detail="梗不存在")
     return {"code": 200, "message": "已删除", "data": None}
 

@@ -925,6 +925,8 @@ async def _do_ai_generate(system_prompt: str, user_prompt: str,
     from services.online_model import call_online_chat
     from services.model_config import get_effective_model
     online_cfg = get_effective_model("online")
+    # 上面两个分支都未进入（model_config 为空）时 result 未绑定，先兜底
+    result = {"success": False, "data": None, "error": "在线模型未配置 api_key"}
     if online_cfg.get("api_key"):
         result = await call_online_chat(
             system_prompt, user_prompt,
@@ -1201,9 +1203,11 @@ async def generate_weekly_report(
         }
 
     # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
+    # chat 未加载（走了旧管道降级）时无法构建映射，跳过还原而不是崩溃
     from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
-    _, name_map = build_stable_id_map(chat.senders)
-    report = resolve_sender_ids_deep(report, name_map)
+    if chat is not None:
+        _, name_map = build_stable_id_map(chat.senders)
+        report = resolve_sender_ids_deep(report, name_map)
 
     # 保存到数据库
     model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_MODEL
@@ -1556,9 +1560,11 @@ async def generate_monthly_report(
         }
 
     # v1.18.5: 将 AI 输出中的 [senderID] 还原为昵称
+    # chat 未加载（走了旧管道降级）时无法构建映射，跳过还原而不是崩溃
     from services.desensitize import build_stable_id_map, resolve_sender_ids_deep
-    _, name_map = build_stable_id_map(chat.senders)
-    report = resolve_sender_ids_deep(report, name_map)
+    if chat is not None:
+        _, name_map = build_stable_id_map(chat.senders)
+        report = resolve_sender_ids_deep(report, name_map)
 
     # ---- 保存 + 返回 ----
     model_used = ai_result.get("model") or model_config.get("model_name") or config.DEEPSEEK_REASONER_MODEL

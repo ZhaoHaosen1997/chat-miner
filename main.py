@@ -170,10 +170,19 @@ async def http_exception_handler(request: Request, exc: _HTTPException):
         content={"code": exc.status_code, "message": exc.detail, "data": None},
     )
 
-# 版本/健康检查
-@app.get("/api/health")
-async def api_health():
-    return {"code": 200, "message": "ok", "data": {"version": config.VERSION}}
+# v1.19.5: 全局兜底异常处理——未捕获异常也保持 {code, message, data} 三段式格式，
+# 避免前端拦截器收到 FastAPI 默认的 {"detail": "Internal Server Error"}
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("未处理异常: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"code": 500, "message": "服务器内部错误", "data": None},
+    )
+
+
+# 版本/健康检查：完整版（含 Ollama/DeepSeek/GPU 锁状态）见 routers/stats.py，
+# 此处不再重复注册 /api/health（FastAPI 按注册顺序匹配，先注册者会拦截后注册者）
 
 # 路由注册（API 必须在静态文件之前注册）
 app.include_router(groups.router)
