@@ -235,7 +235,9 @@ async def run_pond_events():
     for g in groups:
         try:
             from services.passive_events import trigger_passive_events
-            results = trigger_passive_events(g["id"])
+            # v1.19.6: 移入工作线程——同步函数内含多轮 SQLite 读写，
+            # 直接 await 会阻塞整个事件循环
+            results = await asyncio.to_thread(trigger_passive_events, g["id"])
             if results:
                 triggered += 1
         except Exception as e:

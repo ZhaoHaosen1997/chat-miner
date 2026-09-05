@@ -63,7 +63,9 @@ async def get_sessions(keyword: str = "", limit: int = 200):
     """获取 WeFlow 会话列表（用于关联已有群）"""
     client = _get_client()
     try:
-        sessions = client.list_sessions(keyword=keyword, limit=limit)
+        # v1.19.6: 同步网络调用移入工作线程，WeFlow 不在线时不再阻塞事件循环至超时
+        sessions = await asyncio.to_thread(
+            client.list_sessions, keyword=keyword, limit=limit)
         # 获取已关联的群 wxid 列表
         groups = list_groups()
         linked_wxids = {g["wxid"] for g in groups if g.get("wxid")}
@@ -112,7 +114,7 @@ async def trigger_sync(group_id: int):
         client.close()
         raise HTTPException(503, f"WeFlow 不可用 ({config.WEFLOW_BASE_URL})，请确认 WeFlow 正在运行")
 
-    task = task_manager.create("weflow_sync", group_id, {"group_name": group["name"]})
+    task = task_manager.create_checked("weflow_sync", group_id, {"group_name": group["name"]})
     task.update("pending", f"开始增量同步 {group['name']}...")
 
     async def _run():
@@ -193,7 +195,8 @@ async def get_status():
         }
 
     client = WeFlowClient(base_url=config.WEFLOW_BASE_URL, access_token=token)
-    connected = client.health_check()
+    # v1.19.6: 同步网络调用移入工作线程，WeFlow 不在线时不再阻塞事件循环至超时
+    connected = await asyncio.to_thread(client.health_check)
     client.close()
 
     groups = list_groups()

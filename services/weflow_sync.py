@@ -5,6 +5,7 @@ ChatLab 格式 → ParsedChat 格式转换 + 增量消息拉取 + 群关联
 import json
 import logging
 import pickle
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -215,6 +216,32 @@ def _get_merged_data_path(group_id: int) -> Optional[Path]:
 
 def sync_messages_incremental(client: WeFlowClient, group_id: int,
                                task=None) -> dict:
+    """增量拉取 WeFlow 新消息并合并到已有数据（v1.19.6: per-group 互斥包装）。
+
+    读-合并-写全程持锁：定时同步与手动同步并发时，后到者直接返回 busy，
+    不再出现两份旧快照互相覆盖导致的消息丢失。
+    """
+    with _sync_locks_guard:
+        lock = _sync_locks.setdefault(group_id, threading.Lock())
+    if not lock.acquire(blocking=False):
+        logger.warning(f"[WeFlow Sync] group={group_id} 已有同步进行中，跳过本次触发")
+        if task:
+            task.finish(success=False, error={"type": "busy",
+                                              "detail": "已有同步任务进行中，请稍后再试"})
+        return {"added": 0, "skipped": 0, "total_pulled": 0, "busy": True}
+    try:
+        return _do_sync_messages_incremental(client, group_id, task=task)
+    finally:
+        lock.release()
+
+
+# v1.19.6: per-group 同步互斥锁（sync_messages_incremental 专用）
+_sync_locks: dict[int, threading.Lock] = {}
+_sync_locks_guard = threading.Lock()
+
+
+def _do_sync_messages_incremental(client: WeFlowClient, group_id: int,
+                                   task=None) -> dict:
     """增量拉取 WeFlow 新消息并合并到已有数据
 
     1. 获取已有数据最后消息时间 → since

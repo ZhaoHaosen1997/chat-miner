@@ -2385,28 +2385,23 @@ def get_fish_events(group_id: int, wxid: str = "", limit: int = 20) -> list[dict
 
 def upsert_fish_relationship(group_id: int, wxid_a: str, wxid_b: str,
                               relation_type: str, strength: int = 1):
-    """创建或更新鱼际关系（强度累加）"""
+    """创建或更新鱼际关系（强度累加）。
+
+    v1.19.6: 改用 ON CONFLICT UPSERT——并发结算下 SELECT+INSERT
+    会触发 UNIQUE 冲突异常导致结算中止。"""
     # 确保 a < b 避免双向重复
     if wxid_a > wxid_b:
         wxid_a, wxid_b = wxid_b, wxid_a
     with db() as conn:
-        existing = conn.execute(
-            """SELECT id, strength FROM fish_relationships
-               WHERE group_id=? AND fish_wxid_a=? AND fish_wxid_b=? AND relation_type=?""",
-            (group_id, wxid_a, wxid_b, relation_type)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE fish_relationships SET strength=?, created_at=CURRENT_TIMESTAMP WHERE id=?",
-                (existing["strength"] + strength, existing["id"])
-            )
-        else:
-            conn.execute(
-                """INSERT INTO fish_relationships
-                   (group_id, fish_wxid_a, fish_wxid_b, relation_type, strength)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (group_id, wxid_a, wxid_b, relation_type, strength)
-            )
+        conn.execute(
+            """INSERT INTO fish_relationships
+               (group_id, fish_wxid_a, fish_wxid_b, relation_type, strength)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(group_id, fish_wxid_a, fish_wxid_b, relation_type) DO UPDATE SET
+               strength = strength + excluded.strength,
+               created_at = CURRENT_TIMESTAMP""",
+            (group_id, wxid_a, wxid_b, relation_type, strength)
+        )
 
 
 def get_fish_relationships(group_id: int, wxid: str) -> list[dict]:
@@ -2491,19 +2486,22 @@ def earn_coins(group_id: int, wxid: str, amount: int,
 
 def spend_coins(group_id: int, wxid: str, amount: int,
                 reason: str, description: str = "") -> dict | None:
-    """消费鳞币，余额不足返回 None（v0.13.1: 加事务保护，v1.2.11: 统一使用 db() contextmanager）"""
-    wallet = ensure_coin_wallet(group_id, wxid)
-    if wallet["balance"] < amount:
-        return None
+    """消费鳞币，余额不足返回 None。
+
+    v1.19.6: 原子扣款——UPDATE 带 balance >= ? 条件，
+    消除"独立连接查余额 + 另一连接扣款"之间的并发透支窗口。"""
+    ensure_coin_wallet(group_id, wxid)
     with db() as conn:
-        conn.execute("BEGIN")  # 显式事务确保 UPDATE+INSERT 原子性
-        conn.execute(
+        cur = conn.execute(
             """UPDATE scale_coin_wallet
                SET balance = balance - ?, total_spent = total_spent + ?,
                    updated_at = datetime('now')
-               WHERE group_id=? AND wxid=?""",
-            (amount, amount, group_id, wxid)
+               WHERE group_id=? AND wxid=? AND balance >= ?""",
+            (amount, amount, group_id, wxid, amount)
         )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return None
         conn.execute(
             """INSERT INTO scale_coin_transactions (group_id, wxid, amount, reason, description)
                VALUES (?, ?, ?, ?, ?)""",
@@ -2560,25 +2558,23 @@ def add_item(group_id: int, wxid: str, item_key: str, qty: int = 1):
 
 
 def remove_item(group_id: int, wxid: str, item_key: str, qty: int = 1) -> bool:
-    """从库存移除道具，返回是否成功"""
+    """从库存移除道具，返回是否成功。
+
+    v1.19.6: 单条原子 UPDATE（quantity >= ? 条件），消除先查后扣的并发超扣窗口；
+    扣到 0 的行清理掉（保持与旧实现一致的表语义）。"""
     with db() as conn:
-        row = conn.execute(
-            "SELECT quantity FROM fish_inventory WHERE group_id=? AND wxid=? AND item_key=?",
-            (group_id, wxid, item_key)
-        ).fetchone()
-        if not row or row["quantity"] < qty:
+        cur = conn.execute(
+            """UPDATE fish_inventory SET quantity = quantity - ?
+               WHERE group_id=? AND wxid=? AND item_key=? AND quantity >= ?""",
+            (qty, group_id, wxid, item_key, qty)
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
             return False
-        new_qty = row["quantity"] - qty
-        if new_qty <= 0:
-            conn.execute(
-                "DELETE FROM fish_inventory WHERE group_id=? AND wxid=? AND item_key=?",
-                (group_id, wxid, item_key)
-            )
-        else:
-            conn.execute(
-                "UPDATE fish_inventory SET quantity=? WHERE group_id=? AND wxid=? AND item_key=?",
-                (new_qty, group_id, wxid, item_key)
-            )
+        conn.execute(
+            "DELETE FROM fish_inventory WHERE group_id=? AND wxid=? AND item_key=? AND quantity <= 0",
+            (group_id, wxid, item_key)
+        )
     return True
 
 

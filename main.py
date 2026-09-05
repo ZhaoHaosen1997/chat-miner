@@ -180,6 +180,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         content={"code": 500, "message": "服务器内部错误", "data": None},
     )
 
+# v1.19.6: 任务防重入闸门——同群同类型任务运行中时返回 409
+from services.task_manager import TaskBusyError as _TaskBusyError
+
+@app.exception_handler(_TaskBusyError)
+async def task_busy_handler(request: Request, exc: _TaskBusyError):
+    return JSONResponse(
+        status_code=409,
+        content={"code": 409, "message": "该群已有同类型任务运行中，请稍候或取消现有任务", "data": None},
+    )
+
 
 # 版本/健康检查：完整版（含 Ollama/DeepSeek/GPU 锁状态）见 routers/stats.py，
 # 此处不再重复注册 /api/health（FastAPI 按注册顺序匹配，先注册者会拦截后注册者）

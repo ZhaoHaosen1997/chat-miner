@@ -337,19 +337,23 @@ async def api_portrait_stats(group_id: int, member_id: int):
         if not e.get("mood_emoji"):
             e["mood_emoji"] = MOOD_MAP.get(e.get("mood", ""), "😐")
 
-    # 仅 realtime 数据需要实时计算（轻量，只查最近30天）
+    # 仅 realtime 数据需要实时计算（只查最近30天）
     chat = get_chat_cache(group_id)
     member = get_member(group_id, member_id)
     wxid = member["wxid"] if member else ""
-    member_names = set()
     if chat and wxid:
-        for s in chat.senders:
-            name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
-            if name and len(name) >= 2:
-                member_names.add(name)
-        sender_msgs = [m for m in chat.messages if m.get("wxid") == wxid]
-        from services.stats_engine import compute_recent_status
-        recent_status = compute_recent_status([], member_names=member_names, sender_msgs=sender_msgs, group_id=group_id)
+        def _compute_recent():
+            """v1.19.6: 全量消息过滤 + 统计移入工作线程"""
+            member_names = set()
+            for s in chat.senders:
+                name = chat.get_name_by_wxid(s.get("wxid", "") or f"unknown_{s.get('senderID', 0)}")
+                if name and len(name) >= 2:
+                    member_names.add(name)
+            sender_msgs = [m for m in chat.messages if m.get("wxid") == wxid]
+            from services.stats_engine import compute_recent_status
+            return compute_recent_status([], member_names=member_names,
+                                         sender_msgs=sender_msgs, group_id=group_id)
+        recent_status = await asyncio.to_thread(_compute_recent)
 
     return {
         "code": 200,
@@ -695,7 +699,7 @@ async def api_analyze_portrait(group_id: int, member_id: int, model_id: int = No
     existing = get_portrait(group_id, member_id)
     label = "刷新" if existing else "生成"
 
-    task = task_manager.create("full_portrait", group_id, {"member_id": member_id})
+    task = task_manager.create_checked("full_portrait", group_id, {"member_id": member_id})
     task.update("pending", f"全量{label} {member['display_name']} 的画像...")
     asyncio.create_task(_run_full_portrait_analysis(group_id, member_id, task, model_id=model_id))
 
@@ -778,63 +782,69 @@ async def api_member_archaeology(group_id: int, member_id: int):
     wxid = member["wxid"]
     name = member["display_name"] or member["nickname"]
 
-    # 筛选该成员的文本消息
-    msgs = [m for m in chat.messages
-            if m.get("wxid") == wxid
-            and m.get("type") == "文本消息"
-            and (m.get("content") or "").strip()]
+    # v1.19.6: 全量消息过滤 + 多轮聚合移入工作线程
+    def _compute_archaeology():
+        # 筛选该成员的文本消息
+        msgs = [m for m in chat.messages
+                if m.get("wxid") == wxid
+                and m.get("type") == "文本消息"
+                and (m.get("content") or "").strip()]
 
-    if not msgs:
+        if not msgs:
+            return None
+
+        msgs.sort(key=lambda m: m.get("createTime", 0))
+
+        first = msgs[0]
+        longest = max(msgs, key=lambda m: len((m.get("content") or "").strip()))
+        last = msgs[-1]
+
+        # 历史上的今天：找去年同月同日的消息
+        today = datetime.now().strftime("%m-%d")
+        on_this_day = []
+        for m in msgs:
+            ft = m.get("formattedTime", "")
+            if len(ft) >= 10 and ft[5:] == today:
+                yr = ft[:4]
+                if yr != datetime.now().strftime("%Y"):
+                    on_this_day.append(m)
+        on_this_day = on_this_day[-3:]  # 最近3条
+
+        # 按年统计发言量
+        year_counts = {}
+        for m in msgs:
+            ft = m.get("formattedTime", "")
+            if len(ft) >= 4:
+                yr = ft[:4]
+                year_counts[yr] = year_counts.get(yr, 0) + 1
+
+        return {
+            "name": name,
+            "total_msgs": len(msgs),
+            "first_msg": {
+                "date": first.get("formattedTime", "")[:10],
+                "content": (first.get("content") or "").strip()[:200],
+            },
+            "longest_msg": {
+                "date": longest.get("formattedTime", "")[:10],
+                "content": (longest.get("content") or "").strip()[:200],
+                "length": len((longest.get("content") or "").strip()),
+            },
+            "latest_msg": {
+                "date": last.get("formattedTime", "")[:10],
+                "content": (last.get("content") or "").strip()[:200],
+            },
+            "on_this_day": [{"date": m.get("formattedTime", "")[:10],
+                              "content": (m.get("content") or "").strip()[:200]}
+                             for m in on_this_day],
+            "yearly_counts": year_counts,
+            "date_range": [msgs[0].get("formattedTime", "")[:10],
+                           msgs[-1].get("formattedTime", "")[:10]],
+        }
+
+    data = await asyncio.to_thread(_compute_archaeology)
+    if data is None:
         return {"code": 200, "message": "暂无数据", "data": None}
-
-    msgs.sort(key=lambda m: m.get("createTime", 0))
-
-    first = msgs[0]
-    longest = max(msgs, key=lambda m: len((m.get("content") or "").strip()))
-    last = msgs[-1]
-
-    # 历史上的今天：找去年同月同日的消息
-    today = datetime.now().strftime("%m-%d")
-    on_this_day = []
-    for m in msgs:
-        ft = m.get("formattedTime", "")
-        if len(ft) >= 10 and ft[5:] == today:
-            yr = ft[:4]
-            if yr != datetime.now().strftime("%Y"):
-                on_this_day.append(m)
-    on_this_day = on_this_day[-3:]  # 最近3条
-
-    # 按年统计发言量
-    year_counts = {}
-    for m in msgs:
-        ft = m.get("formattedTime", "")
-        if len(ft) >= 4:
-            yr = ft[:4]
-            year_counts[yr] = year_counts.get(yr, 0) + 1
-
-    data = {
-        "name": name,
-        "total_msgs": len(msgs),
-        "first_msg": {
-            "date": first.get("formattedTime", "")[:10],
-            "content": (first.get("content") or "").strip()[:200],
-        },
-        "longest_msg": {
-            "date": longest.get("formattedTime", "")[:10],
-            "content": (longest.get("content") or "").strip()[:200],
-            "length": len((longest.get("content") or "").strip()),
-        },
-        "latest_msg": {
-            "date": last.get("formattedTime", "")[:10],
-            "content": (last.get("content") or "").strip()[:200],
-        },
-        "on_this_day": [{"date": m.get("formattedTime", "")[:10],
-                          "content": (m.get("content") or "").strip()[:200]}
-                         for m in on_this_day],
-        "yearly_counts": year_counts,
-        "date_range": [msgs[0].get("formattedTime", "")[:10],
-                       msgs[-1].get("formattedTime", "")[:10]],
-    }
 
     return {"code": 200, "message": "获取成功", "data": data}
 
@@ -855,21 +865,28 @@ async def api_group_relations(group_id: int):
     nodes = []
     all_links = []
 
+    def _compute_all_relations():
+        """v1.19.6: O(成员数×全量消息) 的纯 CPU 遍历移入工作线程，避免冻结事件循环"""
+        _links = []
+        for m in members:
+            _relations = compute_social_relations(
+                chat.messages, m["wxid"], chat.get_sender_name, chat.get_name_by_wxid
+            )
+            for r in _relations:
+                if r.get("total_interactions", 0) > 0:
+                    _links.append({
+                        "source": m["wxid"],
+                        "target": r["wxid"],
+                        "weight": r["total_interactions"],
+                    })
+        return _links
+
     for m in members:
         wxid = m["wxid"]
         name = m["display_name"] or m["nickname"]
         nodes.append({"id": m["id"], "wxid": wxid, "name": name, "msg_count": m["message_count"]})
 
-        relations = compute_social_relations(
-            chat.messages, wxid, chat.get_sender_name, chat.get_name_by_wxid
-        )
-        for r in relations:
-            if r.get("total_interactions", 0) > 0:
-                all_links.append({
-                    "source": wxid,
-                    "target": r["wxid"],
-                    "weight": r["total_interactions"],
-                })
+    all_links = await asyncio.to_thread(_compute_all_relations)
 
     # 去重：只保留 source < target 的链接（无向图）
     seen = set()
@@ -902,7 +919,7 @@ async def api_analyze_all_portraits(group_id: int, model_id: int = None):
         return {"code": 200, "message": "没有成员数据", "data": {"total": 0}}
 
     total = len(members)
-    task = task_manager.create("analyze_all_portraits", group_id, {"total": total})
+    task = task_manager.create_checked("analyze_all_portraits", group_id, {"total": total})
     task.update("pending", f"批量分析 {total} 人...", progress={"current": 0, "total": total})
 
     asyncio.create_task(_run_analyze_all_portraits(group_id, group["name"], task, model_id=model_id))

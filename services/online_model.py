@@ -7,6 +7,7 @@ Usage:
     if result["success"]:
         text = result["data"]
 """
+import asyncio
 import json
 import logging
 import re
@@ -210,7 +211,9 @@ async def call_online_chat(
     if ret and (pipeline or task_id):
         try:
             from services.ai_logger import AILogger
-            AILogger.log(
+            # v1.19.6: 日志含三段大文本的同步 SQLite 写，移入工作线程防阻塞事件循环
+            await asyncio.to_thread(
+                AILogger.log,
                 task_id=task_id or None, pipeline=pipeline, group_id=group_id,
                 model_name=model_name, system_prompt=system_prompt,
                 user_prompt=user_prompt,

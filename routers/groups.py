@@ -1,6 +1,7 @@
 """
 群管理 API：列表、创建、上传（新建群）、导入（追加到已有群）、删除
 """
+import asyncio
 import json
 import os
 import pickle
@@ -134,8 +135,9 @@ async def api_upload_group(file: UploadFile = File(...)):
         raise HTTPException(500, detail=f"文件保存失败: {e}")
 
     # 解析（ParsedChat.load() 自动识别 QQ chunked-jsonl / QQ JSON / 微信 JSON）
+    # v1.19.6: 大文件解析移入工作线程，避免阻塞事件循环数十秒
     try:
-        chat = ParsedChat(file_path).load()
+        chat = await asyncio.to_thread(ParsedChat(file_path).load)
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
     except ValueError as e:
@@ -161,7 +163,7 @@ async def api_upload_group(file: UploadFile = File(...)):
             if group_dir != existing_path.parent:
                 shutil.rmtree(group_dir, ignore_errors=True)
             # 重新解析（因为路径变了）
-            recovered_chat = ParsedChat(new_dest).load()
+            recovered_chat = await asyncio.to_thread(ParsedChat(new_dest).load)
             _chat_cache[existing["id"]] = recovered_chat
             logger.info(f"JSON 已恢复: {new_dest}, 缓存已更新")
 
@@ -297,8 +299,9 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         raise HTTPException(500, detail=f"文件保存失败: {e}")
 
     # 解析（ParsedChat.load() 自动识别 QQ chunked-jsonl / QQ JSON / 微信 JSON）
+    # v1.19.6: 大文件解析移入工作线程，避免阻塞事件循环数十秒
     try:
-        new_chat = ParsedChat(upload_path).load()
+        new_chat = await asyncio.to_thread(ParsedChat(upload_path).load)
     except json.JSONDecodeError as e:
         raise HTTPException(400, detail=f"JSON 解析失败: {e}")
     except ValueError as e:
@@ -313,7 +316,8 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         group = get_group(group_id)  # 刷新
         logger.info(f"群名已更新: {new_chat.group_name}")
 
-    existing_chat = get_chat_cache(group_id)
+    # v1.19.6: 缓存未命中时会同步解析大 JSON，移入工作线程
+    existing_chat = await asyncio.to_thread(get_chat_cache, group_id)
 
     # === wxid → senderID 映射：同一个人多次导出 senderID 可能不同 ===
     if existing_chat and mode == "append":
@@ -350,15 +354,19 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
         added = len(new_chat.messages)
         skipped = 0
     else:
-        # 去重追加
-        merge_result = merge_chat_data(existing_chat.messages, new_chat.messages)
-        if merge_result["added"]:
-            existing_chat.messages.extend(merge_result["added"])
-            existing_chat.messages.sort(key=lambda m: m.get("createTime", 0))
-            existing_chat._by_date = None
-        merged_chat = existing_chat
+        # 去重追加（v1.19.6: O(N) 合并+排序移入工作线程）
+        def _merge_and_sort():
+            result = merge_chat_data(existing_chat.messages, new_chat.messages)
+            if result["added"]:
+                existing_chat.messages.extend(result["added"])
+                existing_chat.messages.sort(key=lambda m: m.get("createTime", 0))
+                existing_chat._by_date = None
+            return result
+
+        merge_result = await asyncio.to_thread(_merge_and_sort)
         added = len(merge_result["added"])
         skipped = merge_result["skipped"]
+        merged_chat = existing_chat
 
         # 将新数据中的头像合并到已有 senders（首次导入可能无头像，重新导入了才有）
         new_sender_by_wxid = {s.get("wxid", ""): s for s in new_chat.senders}
@@ -381,29 +389,30 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
             "messages": merged_chat.messages,
             "platform": getattr(merged_chat, "platform", ""),
         }
-        # 原子写入：先写临时文件，成功后再 rename
-        tmp_path = merged_path.with_suffix(".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(merged_data, f, ensure_ascii=False)
-        tmp_path.replace(merged_path)
+
+        # v1.19.6: 全量 JSON + pickle 写盘是重 IO，移入工作线程
+        def _write_merged_to_disk():
+            # 原子写入：先写临时文件，成功后再 rename
+            tmp_path = merged_path.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(merged_data, f, ensure_ascii=False)
+            tmp_path.replace(merged_path)
+
+            with open(merged_pickle, "wb") as f:
+                pickle.dump({
+                    "session": merged_chat.session,
+                    "senders": merged_chat.senders,
+                    "messages": merged_chat.messages,
+                    "_by_date": merged_chat._by_date,
+                    "platform": getattr(merged_chat, "platform", ""),
+                }, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # 清理旧的 pickle（如果 file_path 变了）
+            if old_pickle and old_pickle.exists() and old_pickle != merged_pickle:
+                old_pickle.unlink(missing_ok=True)
+
+        await asyncio.to_thread(_write_merged_to_disk)
         logger.info(f"完整数据已写入: {merged_path} ({len(merged_chat.messages)} 条消息)")
-
-        # 同步创建 pickle 缓存，避免下次重启重新解析
-        import pickle
-        with open(merged_pickle, "wb") as f:
-            pickle.dump({
-                "session": merged_chat.session,
-                "senders": merged_chat.senders,
-                "messages": merged_chat.messages,
-                "_by_date": merged_chat._by_date,
-                "platform": getattr(merged_chat, "platform", ""),
-            }, f, protocol=pickle.HIGHEST_PROTOCOL)
-        logger.debug(f"pickle 缓存已同步: {merged_pickle}")
-
-        # 清理旧的 pickle（如果 file_path 变了）
-        if old_pickle and old_pickle.exists() and old_pickle != merged_pickle:
-            old_pickle.unlink(missing_ok=True)
-            logger.info(f"已清理旧 pickle: {old_pickle}")
     except Exception as e:
         logger.warning(f"写入合并文件失败: {e}，数据仅存于内存中")
 
@@ -425,7 +434,8 @@ async def api_import_to_group(group_id: int, file: UploadFile = File(...),
 
     # 更新成员
     upsert_members(group_id, merged_chat.senders)
-    counts = merged_chat.sender_text_counts()
+    # v1.19.6: 全量消息词频统计移入工作线程
+    counts = await asyncio.to_thread(merged_chat.sender_text_counts)
     for wxid_val, count in counts.items():
         update_member_message_count(group_id, wxid_val, count)
 

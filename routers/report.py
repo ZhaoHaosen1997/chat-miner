@@ -218,7 +218,7 @@ async def api_analyze_date(group_id: int, date: str, force: bool = False, model_
         }
 
     # 创建异步任务
-    task = task_manager.create("analyze_day", group_id, {"date": date})
+    task = task_manager.create_checked("analyze_day", group_id, {"date": date})
     task.update("pending", "任务已创建，等待 GPU...")
 
     # 后台执行
@@ -419,7 +419,7 @@ async def api_analyze_all(group_id: int, model_id: int = None):
         return {"code": 200, "message": "全部日期已分析", "data": {"total_unanalyzed": 0}}
 
     total = len(unanalyzed)
-    task = task_manager.create("analyze_all", group_id, {"total": total})
+    task = task_manager.create_checked("analyze_all", group_id, {"total": total})
     task.update("pending", f"开始批量分析 {total} 天...", progress={"current": 0, "total": total})
 
     asyncio.create_task(_run_analyze_all(group_id, group["name"], task, model_id=model_id))
@@ -703,7 +703,7 @@ async def api_generate_weekly(group_id: int, period_key: str = "", force: bool =
         period_key = ready[-1]["period_key"]  # 最新的
 
     # 创建异步任务
-    task = task_manager.create("generate_weekly", group_id,
+    task = task_manager.create_checked("generate_weekly", group_id,
                                {"period_key": period_key})
     task.update("pending", f"开始{'重新' if force else ''}生成周报 {period_key}...")
 
@@ -765,7 +765,7 @@ async def api_generate_all_weekly(group_id: int, model_id: int = None):
             "data": None,
         }
 
-    task = task_manager.create("generate_all_weekly", group_id,
+    task = task_manager.create_checked("generate_all_weekly", group_id,
                                {"periods": [p["period_key"] for p in ready]})
     task.update("pending", f"开始批量生成 {len(ready)} 份周报...")
 
@@ -884,7 +884,7 @@ async def api_generate_monthly(group_id: int, period_key: str = "", force: bool 
             }
         period_key = ready[-1]["period_key"]
 
-    task = task_manager.create("generate_monthly", group_id,
+    task = task_manager.create_checked("generate_monthly", group_id,
                                {"period_key": period_key})
     task.update("pending", f"开始{'重新' if force else ''}生成月报 {period_key}...")
 
@@ -946,7 +946,7 @@ async def api_generate_all_monthly(group_id: int, model_id: int = None):
             "data": None,
         }
 
-    task = task_manager.create("generate_all_monthly", group_id,
+    task = task_manager.create_checked("generate_all_monthly", group_id,
                                {"periods": [p["period_key"] for p in ready]})
     task.update("pending", f"开始批量生成 {len(ready)} 份月报...")
 
@@ -1074,7 +1074,7 @@ async def api_generate_annual(group_id: int, year: int = 0, force: bool = False,
             "data": None,
         }
 
-    task = task_manager.create("generate_annual", group_id,
+    task = task_manager.create_checked("generate_annual", group_id,
                                {"period_key": str(year)})
     task.update("pending", f"开始{'重新' if force else ''}生成{year}年度报告...")
 

@@ -107,7 +107,7 @@ async def api_analyze_single_window(group_id: int, window_id: int):
     # v1.19.x: 创建事件分析任务记录
     import time as _time
     _t0 = _time.time()
-    task = task_manager.create("event_window", group_id,
+    task = task_manager.create_checked("event_window", group_id,
                                 {"window_id": window_id})
     task.update("inference", f"分析事件窗口 {window_id}...")
     group_name = group.get("display_name") or group.get("name", "")
